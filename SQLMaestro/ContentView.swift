@@ -13,6 +13,7 @@ struct ContentView: View {
     @State private var fontSize: CGFloat = 13
     
     @State private var searchText: String = ""
+    @FocusState private var isSearchFocused: Bool
 
     // Static fields
     @State private var orgId: String = ""
@@ -23,7 +24,6 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView {
             // Query Templates Pane
-            // Replace the entire VStack inside NavigationSplitView with this:
             VStack(spacing: 8) {
                 HStack(spacing: 8) {
                     Text("Query Templates").font(.headline).foregroundStyle(Theme.purple)
@@ -42,6 +42,7 @@ struct ContentView: View {
                     TextField("Search templates...", text: $searchText)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(size: fontSize))
+                        .focused($isSearchFocused)
                         .onTapGesture {
                             LOG("Template search focused")
                         }
@@ -90,13 +91,33 @@ struct ContentView: View {
                     Button("Populate Query") { populateQuery() }
                         .buttonStyle(.borderedProminent)
                         .tint(Theme.pink)
+                        .keyboardShortcut(.return, modifiers: [.command])
                     Button("Clear All Fields (Session)") {
+                        // Clear session fields (dynamic fields)
                         sessions.clearAllFieldsForCurrentSession()
+                        
+                        // Clear static fields
+                        orgId = ""
+                        acctId = ""
+                        mysqlDb = ""
+                        companyLabel = ""
+                        
+                        LOG("All fields cleared (including static)", ctx: ["session": "\(sessions.current.rawValue)"])
                     }.buttonStyle(.bordered)
+                    .keyboardShortcut("k", modifiers: [.command]).buttonStyle(.bordered)
+                    .keyboardShortcut("k", modifiers: [.command])
                     Spacer()
                     sessionButtons
                 }
                 outputView
+                
+                // Invisible button for focus search keyboard shortcut
+                Button("Focus Search") {
+                    isSearchFocused = true
+                    LOG("Search focused via keyboard shortcut")
+                }
+                .keyboardShortcut("f", modifiers: [.command])
+                .hidden()
             }
             .padding()
             .background(Theme.grayBG)
