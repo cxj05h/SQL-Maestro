@@ -235,52 +235,50 @@ struct ContentView: View {
         LOG("Open in VSCode", ctx: ["file": url.lastPathComponent])
     }
 
-    // Replace the populateQuery() function in ContentView.swift
-
     private func populateQuery() {
-        guard let t = selectedTemplate else { return }
-        var sql = t.rawSQL
+            guard let t = selectedTemplate else { return }
+            var sql = t.rawSQL
 
-        // Static placeholders that should always use static field values
-        let staticPlaceholderMap = [
-            "Org-id": orgId,
-            "Acct-ID": acctId
-        ]
+            // Static placeholders that should always use static field values
+            let staticPlaceholderMap = [
+                "Org-ID": orgId,
+                "Acct-ID": acctId
+            ]
 
-        // Build values map: start with dynamic session values
-        var values: [String:String] = [:]
-        for ph in t.placeholders {
-            if let staticValue = staticPlaceholderMap[ph] {
-                // Always use static field value for static placeholders
-                values[ph] = staticValue
-            } else {
-                // Use session value for dynamic placeholders
-                values[ph] = sessions.value(for: ph)
+            // Build values map: start with dynamic session values
+            var values: [String:String] = [:]
+            for ph in t.placeholders {
+                if let staticValue = staticPlaceholderMap[ph] {
+                    // Always use static field value for static placeholders
+                    values[ph] = staticValue
+                } else {
+                    // Use session value for dynamic placeholders
+                    values[ph] = sessions.value(for: ph)
+                }
+            }
+
+            // Replace {{placeholder}} with values (handle both with and without spaces)
+            for (k, v) in values {
+                let patterns = ["{{\(k)}}", "{{ \(k) }}", "{{\(k) }}", "{{ \(k)}"]
+                for pattern in patterns {
+                    sql = sql.replacingOccurrences(of: pattern, with: v)
+                }
+            }
+
+            populatedSQL = sql
+            Clipboard.copy(sql)
+            withAnimation { toastCopied = true }
+            DispatchQueue.main.asyncAfter(deadline: .now()+1.8) {
+                withAnimation { toastCopied = false }
+            }
+            LOG("Populate Query", ctx: ["template": t.name, "bytes":"\(sql.count)"])
+
+            // Update mapping lookup after populate (if not already done)
+            if let entry = mapping.lookup(orgId: orgId) {
+                mysqlDb = entry.mysqlDb
+                companyLabel = entry.companyName ?? ""
             }
         }
-
-        // Replace {{placeholder}} with values (handle both with and without spaces)
-        for (k, v) in values {
-            let patterns = ["{{\(k)}}", "{{ \(k) }}", "{{\(k) }}", "{{ \(k)}"]
-            for pattern in patterns {
-                sql = sql.replacingOccurrences(of: pattern, with: v)
-            }
-        }
-
-        populatedSQL = sql
-        Clipboard.copy(sql)
-        withAnimation { toastCopied = true }
-        DispatchQueue.main.asyncAfter(deadline: .now()+1.8) {
-            withAnimation { toastCopied = false }
-        }
-        LOG("Populate Query", ctx: ["template": t.name, "bytes":"\(sql.count)"])
-
-        // Update mapping lookup after populate (if not already done)
-        if let entry = mapping.lookup(orgId: orgId) {
-            mysqlDb = entry.mysqlDb
-            companyLabel = entry.companyName ?? ""
-        }
-    }
 
 
     private func promptRename(for s: TicketSession) {
