@@ -1,17 +1,22 @@
-//
-//  SQLMaestroApp.swift
-//  SQLMaestro
-//
-//  Created by Chris Jones on 12/09/2025.
-//
-
 import SwiftUI
-
 @main
 struct SQLMaestroApp: App {
+    @StateObject private var templates = TemplateManager()
+    @StateObject private var sessions = SessionManager()
+
+    init() {
+        AppPaths.ensureAll()
+        _ = AppLogger.shared
+    }
+
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .environmentObject(templates)
+                .environmentObject(sessions)
+        }
+        .commands {
+            AppMenuCommands(tmpl: templates, sessions: sessions)
         }
     }
 }
