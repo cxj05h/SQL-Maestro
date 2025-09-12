@@ -138,15 +138,23 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Field Names").font(.title3).foregroundStyle(Theme.pink)
             if let t = selectedTemplate {
-                // Always include Org-ID & Acct-ID as “hardcoded placeholders” if template references them
-                let phs = t.placeholders
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(phs, id: \.self) { ph in
-                            dynamicFieldRow(ph)
+                // Filter out static placeholders that are already handled in the static section
+                let staticPlaceholders = ["Org-id", "Acct-ID"] // These are handled by static fields
+                let dynamicPlaceholders = t.placeholders.filter { !staticPlaceholders.contains($0) }
+                
+                if dynamicPlaceholders.isEmpty {
+                    Text("This template only uses static fields (Org-ID, Acct-ID).")
+                        .foregroundStyle(.secondary)
+                        .font(.callout)
+                } else {
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 8) {
+                            ForEach(dynamicPlaceholders, id: \.self) { ph in
+                                dynamicFieldRow(ph)
+                            }
                         }
-                    }
-                }.frame(maxHeight: 260)
+                    }.frame(maxHeight: 260)
+                }
             } else {
                 Text("Load a template to see its fields.")
                     .foregroundStyle(.secondary)
