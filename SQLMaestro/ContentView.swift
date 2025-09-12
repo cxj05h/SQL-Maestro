@@ -5,7 +5,7 @@ struct ContentView: View {
     @EnvironmentObject var templates: TemplateManager
     @StateObject private var mapping = MappingStore()
     @EnvironmentObject var sessions: SessionManager
-
+    
     @State private var selectedTemplate: TemplateItem?
     @State private var currentSQL: String = ""
     @State private var populatedSQL: String = ""
@@ -14,13 +14,13 @@ struct ContentView: View {
     
     @State private var searchText: String = ""
     @FocusState private var isSearchFocused: Bool
-
+    
     // Static fields
     @State private var orgId: String = ""
     @State private var acctId: String = ""
     @State private var mysqlDb: String = ""
     @State private var companyLabel: String = ""
-
+    
     var body: some View {
         NavigationSplitView {
             // Query Templates Pane
@@ -104,8 +104,8 @@ struct ContentView: View {
                         
                         LOG("All fields cleared (including static)", ctx: ["session": "\(sessions.current.rawValue)"])
                     }.buttonStyle(.bordered)
-                    .keyboardShortcut("k", modifiers: [.command]).buttonStyle(.bordered)
-                    .keyboardShortcut("k", modifiers: [.command])
+                        .keyboardShortcut("k", modifiers: [.command]).buttonStyle(.bordered)
+                        .keyboardShortcut("k", modifiers: [.command])
                     Spacer()
                     sessionButtons
                 }
@@ -158,7 +158,7 @@ struct ContentView: View {
             }
         }
     }
-
+    
     // MARK: – Static fields (always visible)
     private var staticFields: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -179,15 +179,9 @@ struct ContentView: View {
                     HStack {
                         labeledField("MySQL DB", text: $mysqlDb, placeholder: "e.g., mySQL04")
                         Button("Save") {
-                            do {
-                                guard !orgId.trimmingCharacters(in: .whitespaces).isEmpty else {
-                                    throw NSError(domain: "map", code: 1, userInfo: [NSLocalizedDescriptionKey:"Org-ID required"])
-                                }
-                                try mapping.saveIfNew(orgId: orgId, mysqlDb: mysqlDb, companyName: companyLabel.isEmpty ? nil : companyLabel)
-                            } catch {
-                                NSSound.beep()
-                            }
+                            saveMapping()
                         }.buttonStyle(.bordered)
+                            .tint(Theme.accent)
                     }
                     if !companyLabel.isEmpty {
                         Text("Company: \(companyLabel)")
@@ -197,7 +191,7 @@ struct ContentView: View {
             }
         }
     }
-
+    
     // MARK: – Dynamic fields from template placeholders
     private var dynamicFields: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -226,7 +220,7 @@ struct ContentView: View {
             }
         }
     }
-
+    
     private func dynamicFieldRow(_ placeholder: String) -> some View {
         let valBinding = Binding<String>(
             get: { sessions.value(for: placeholder) },
@@ -252,7 +246,7 @@ struct ContentView: View {
         }
         .onTapGesture { LOG("Field focus", ctx: ["placeholder": placeholder]) }
     }
-
+    
     // MARK: – Output area
     private var outputView: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -263,7 +257,7 @@ struct ContentView: View {
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.aqua.opacity(0.3)))
         }
     }
-
+    
     private var sessionButtons: some View {
         HStack(spacing: 8) {
             ForEach(TicketSession.allCases, id: \.self) { s in
@@ -278,20 +272,20 @@ struct ContentView: View {
             }
         }
     }
-
+    
     // MARK: – Actions
     private func loadTemplate(_ t: TemplateItem) {
         selectedTemplate = t
         currentSQL = t.rawSQL
         LOG("Template loaded", ctx: ["template": t.name, "phCount":"\(t.placeholders.count)"])
     }
-
+    
     private func editTemplateInline(_ t: TemplateItem) {
         // simple in-app edit: open a small editor window
         TemplateEditorWindow.present(for: t, manager: templates)
         LOG("Inline edit open", ctx: ["template": t.name])
     }
-
+    
     private func openInVSCode(_ url: URL) {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
@@ -299,53 +293,53 @@ struct ContentView: View {
         try? task.run()
         LOG("Open in VSCode", ctx: ["file": url.lastPathComponent])
     }
-
+    
     private func populateQuery() {
-            guard let t = selectedTemplate else { return }
-            var sql = t.rawSQL
-
-            // Static placeholders that should always use static field values
-            let staticPlaceholderMap = [
-                "Org-ID": orgId,
-                "Acct-ID": acctId
-            ]
-
-            // Build values map: start with dynamic session values
-            var values: [String:String] = [:]
-            for ph in t.placeholders {
-                if let staticValue = staticPlaceholderMap[ph] {
-                    // Always use static field value for static placeholders
-                    values[ph] = staticValue
-                } else {
-                    // Use session value for dynamic placeholders
-                    values[ph] = sessions.value(for: ph)
-                }
-            }
-
-            // Replace {{placeholder}} with values (handle both with and without spaces)
-            for (k, v) in values {
-                let patterns = ["{{\(k)}}", "{{ \(k) }}", "{{\(k) }}", "{{ \(k)}"]
-                for pattern in patterns {
-                    sql = sql.replacingOccurrences(of: pattern, with: v)
-                }
-            }
-
-            populatedSQL = sql
-            Clipboard.copy(sql)
-            withAnimation { toastCopied = true }
-            DispatchQueue.main.asyncAfter(deadline: .now()+1.8) {
-                withAnimation { toastCopied = false }
-            }
-            LOG("Populate Query", ctx: ["template": t.name, "bytes":"\(sql.count)"])
-
-            // Update mapping lookup after populate (if not already done)
-            if let entry = mapping.lookup(orgId: orgId) {
-                mysqlDb = entry.mysqlDb
-                companyLabel = entry.companyName ?? ""
+        guard let t = selectedTemplate else { return }
+        var sql = t.rawSQL
+        
+        // Static placeholders that should always use static field values
+        let staticPlaceholderMap = [
+            "Org-ID": orgId,
+            "Acct-ID": acctId
+        ]
+        
+        // Build values map: start with dynamic session values
+        var values: [String:String] = [:]
+        for ph in t.placeholders {
+            if let staticValue = staticPlaceholderMap[ph] {
+                // Always use static field value for static placeholders
+                values[ph] = staticValue
+            } else {
+                // Use session value for dynamic placeholders
+                values[ph] = sessions.value(for: ph)
             }
         }
-
-
+        
+        // Replace {{placeholder}} with values (handle both with and without spaces)
+        for (k, v) in values {
+            let patterns = ["{{\(k)}}", "{{ \(k) }}", "{{\(k) }}", "{{ \(k)}"]
+            for pattern in patterns {
+                sql = sql.replacingOccurrences(of: pattern, with: v)
+            }
+        }
+        
+        populatedSQL = sql
+        Clipboard.copy(sql)
+        withAnimation { toastCopied = true }
+        DispatchQueue.main.asyncAfter(deadline: .now()+1.8) {
+            withAnimation { toastCopied = false }
+        }
+        LOG("Populate Query", ctx: ["template": t.name, "bytes":"\(sql.count)"])
+        
+        // Update mapping lookup after populate (if not already done)
+        if let entry = mapping.lookup(orgId: orgId) {
+            mysqlDb = entry.mysqlDb
+            companyLabel = entry.companyName ?? ""
+        }
+    }
+    
+    
     private func promptRename(for s: TicketSession) {
         let alert = NSAlert()
         alert.messageText = "Rename Session #\(s.rawValue)"
@@ -361,7 +355,7 @@ struct ContentView: View {
             sessions.renameCurrent(to: input.stringValue)
         }
     }
-
+    
     private func labeledField(_ label: String, text: Binding<String>, placeholder: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             Text(label).font(.caption).foregroundStyle(.secondary)
@@ -371,7 +365,7 @@ struct ContentView: View {
         }
         .onTapGesture { LOG("Static field focus", ctx: ["label": label]) }
     }
-
+    
     private func promptForString(title: String, message: String, defaultValue: String = "") -> String? {
         let alert = NSAlert()
         alert.messageText = title
@@ -385,11 +379,11 @@ struct ContentView: View {
         let result = alert.runModal()
         return result == .alertFirstButtonReturn ? input.stringValue : nil
     }
-
+    
     private func createNewTemplateFlow() {
         guard let name = promptForString(title: "New Template", message: "Enter a template name")?.trimmingCharacters(in: .whitespacesAndNewlines),
-            !name.isEmpty else { return }
-
+              !name.isEmpty else { return }
+        
         do {
             let item = try templates.createTemplate(named: name)
             // Ask how to edit
@@ -400,10 +394,10 @@ struct ContentView: View {
             edit.addButton(withTitle: "In App")
             edit.addButton(withTitle: "Later")
             let choice = edit.runModal()
-
+            
             // Select it in UI
             loadTemplate(item)
-
+            
             switch choice {
             case .alertFirstButtonReturn:
                 openInVSCode(item.url)
@@ -416,14 +410,14 @@ struct ContentView: View {
             NSSound.beep()
         }
     }
-
+    
     private func renameTemplateFlow(_ item: TemplateItem) {
         guard let newName = promptForString(title: "Rename Template",
                                             message: "Enter a new name for '\(item.name)'",
                                             defaultValue: item.name)?
-                .trimmingCharacters(in: .whitespacesAndNewlines),
-            !newName.isEmpty else { return }
-
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+              !newName.isEmpty else { return }
+        
         do {
             let renamed = try templates.renameTemplate(item, to: newName)
             if selectedTemplate?.id == item.id {
@@ -433,58 +427,159 @@ struct ContentView: View {
             NSSound.beep()
         }
     }
-
-}
-
-// Simple in-app editor window
-final class TemplateEditorWindow: NSWindowController {
-    static func present(for item: TemplateItem, manager: TemplateManager) {
-        let vc = NSHostingController(rootView: TemplateEditorView(item: item, manager: manager))
-        let win = NSWindow(contentViewController: vc)
-        win.title = "Edit: \(item.name)"
-        win.setContentSize(NSSize(width: 780, height: 520))
-        let ctl = TemplateEditorWindow(window: win)
-        ctl.showWindow(nil)
-        NSApp.activate(ignoringOtherApps: true)
+    
+    private func saveMapping() {
+        LOG("Save button clicked", ctx: ["orgId": orgId, "mysqlDb": mysqlDb])
+        
+        guard !orgId.trimmingCharacters(in: .whitespaces).isEmpty else {
+            showAlert(title: "Error", message: "Org-ID is required")
+            LOG("Save mapping failed - empty Org ID")
+            return
+        }
+        
+        guard !mysqlDb.trimmingCharacters(in: .whitespaces).isEmpty else {
+            showAlert(title: "Error", message: "MySQL DB is required")
+            LOG("Save mapping failed - empty MySQL DB")
+            return
+        }
+        
+        // Check if org already exists
+        if mapping.lookup(orgId: orgId) != nil {
+            showAlert(
+                title: "Org Already Exists",
+                message: "Org ID \(orgId) already has a mapping.\n\nTo avoid editing JSON files, please use a different Org-ID or clear the fields and start over."
+            )
+            LOG("Save mapping failed - org already exists", ctx: ["orgId": orgId])
+            return
+        }
+        
+        // Show popup to get company name - REQUIRED
+        let alert = NSAlert()
+        alert.messageText = "Company Name Required"
+        alert.informativeText = "Enter the company name for Org ID: \(orgId)\n(This field is required and cannot be left empty)"
+        alert.alertStyle = .informational
+        
+        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 24))
+        input.placeholderString = "Company name is required..."
+        alert.accessoryView = input
+        
+        alert.addButton(withTitle: "Save Mapping")
+        alert.addButton(withTitle: "Cancel")
+        
+        // Keep asking until they provide a company name or cancel
+        repeat {
+            let response = alert.runModal()
+            if response == .alertFirstButtonReturn {
+                let companyName = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                
+                if companyName.isEmpty {
+                    // Show error and ask again
+                    let errorAlert = NSAlert()
+                    errorAlert.messageText = "Company Name Required"
+                    errorAlert.informativeText = "Company name cannot be empty. Please enter a company name."
+                    errorAlert.alertStyle = .critical
+                    errorAlert.addButton(withTitle: "Try Again")
+                    errorAlert.runModal()
+                    continue // Loop back to ask for company name again
+                }
+                
+                // Company name provided - save it
+                do {
+                    try mapping.saveIfNew(
+                        orgId: orgId,
+                        mysqlDb: mysqlDb,
+                        companyName: companyName // Now guaranteed to be non-empty
+                    )
+                    
+                    // Update the display
+                    companyLabel = companyName
+                    
+                    showAlert(title: "Success", message: "Mapping saved successfully!\n\nOrg: \(orgId)\nMySQL: \(mysqlDb)\nCompany: \(companyName)")
+                    
+                    LOG("Mapping saved with company", ctx: [
+                        "orgId": orgId,
+                        "mysqlDb": mysqlDb,
+                        "company": companyName
+                    ])
+                    return
+                } catch {
+                    showAlert(title: "Error", message: "Failed to save mapping: \(error.localizedDescription)")
+                    LOG("Save mapping failed", ctx: ["error": error.localizedDescription])
+                    return
+                }
+            } else {
+                LOG("Save mapping cancelled")
+                return
+            }
+        } while true
     }
-}
-
-struct TemplateEditorView: View {
-    let item: TemplateItem
-    @ObservedObject var manager: TemplateManager
-    @State private var text: String = ""
-    @Environment(\.dismiss) var dismiss
-
-    var body: some View {
-        VStack(spacing: 8) {
-            Text("Editing \(item.name).sql").font(.headline).foregroundStyle(Theme.aqua)
-            TextEditor(text: $text)
-                .font(.system(.body, design: .monospaced))
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.aqua.opacity(0.3)))
-            HStack {
-                Button("Open in VS Code") { openInVSCode(item.url) }.buttonStyle(.bordered)
-                Spacer()
-                Button("Cancel") { dismiss() }
-                Button("Save") {
-                    do {
-                        try manager.saveTemplate(url: item.url, newContent: text)
-                        dismiss()
-                    } catch {
-                        NSSound.beep()
-                    }
-                }.buttonStyle(.borderedProminent).tint(Theme.pink)
+    
+    
+    // Helper function for showing alerts
+    private func showAlert(title: String, message: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+    }
+    
+    
+    
+    // Simple in-app editor window
+    final class TemplateEditorWindow: NSWindowController {
+        static func present(for item: TemplateItem, manager: TemplateManager) {
+            let vc = NSHostingController(rootView: TemplateEditorView(item: item, manager: manager))
+            let win = NSWindow(contentViewController: vc)
+            win.title = "Edit: \(item.name)"
+            win.setContentSize(NSSize(width: 780, height: 520))
+            let ctl = TemplateEditorWindow(window: win)
+            ctl.showWindow(nil)
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+    
+    struct TemplateEditorView: View {
+        let item: TemplateItem
+        @ObservedObject var manager: TemplateManager
+        @State private var text: String = ""
+        @Environment(\.dismiss) var dismiss
+        
+        var body: some View {
+            VStack(spacing: 8) {
+                Text("Editing \(item.name).sql").font(.headline).foregroundStyle(Theme.aqua)
+                TextEditor(text: $text)
+                    .font(.system(.body, design: .monospaced))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.aqua.opacity(0.3)))
+                HStack {
+                    Button("Open in VS Code") { openInVSCode(item.url) }.buttonStyle(.bordered)
+                    Spacer()
+                    Button("Cancel") { dismiss() }
+                    Button("Save") {
+                        do {
+                            try manager.saveTemplate(url: item.url, newContent: text)
+                            dismiss()
+                        } catch {
+                            NSSound.beep()
+                        }
+                    }.buttonStyle(.borderedProminent).tint(Theme.pink)
+                }
+            }
+            .padding()
+            .onAppear {
+                text = (try? String(contentsOf: item.url, encoding: .utf8)) ?? item.rawSQL
             }
         }
-        .padding()
-        .onAppear {
-            text = (try? String(contentsOf: item.url, encoding: .utf8)) ?? item.rawSQL
+        
+        private func openInVSCode(_ url: URL) {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            p.arguments = ["code", url.path]
+            try? p.run()
         }
-    }
-
-    private func openInVSCode(_ url: URL) {
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        p.arguments = ["code", url.path]
-        try? p.run()
+        
+        
+        
     }
 }
