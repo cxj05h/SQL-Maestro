@@ -11,6 +11,8 @@ struct ContentView: View {
     @State private var populatedSQL: String = ""
     @State private var toastCopied: Bool = false
     @State private var fontSize: CGFloat = 13
+    
+    @State private var searchText: String = ""
 
     // Static fields
     @State private var orgId: String = ""
@@ -21,6 +23,7 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView {
             // Query Templates Pane
+            // Replace the entire VStack inside NavigationSplitView with this:
             VStack(spacing: 8) {
                 HStack(spacing: 8) {
                     Text("Query Templates").font(.headline).foregroundStyle(Theme.purple)
@@ -31,7 +34,31 @@ struct ContentView: View {
                     Button("Reload") { templates.loadTemplates() }
                         .buttonStyle(.bordered)
                 }
-                List(templates.templates, selection: $selectedTemplate) { t in
+                
+                // Search field
+                HStack {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                    TextField("Search templates...", text: $searchText)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: fontSize))
+                        .onTapGesture {
+                            LOG("Template search focused")
+                        }
+                        .onChange(of: searchText) { oldVal, newVal in
+                            LOG("Template search", ctx: ["query": newVal, "results": "\(filteredTemplates.count)"])
+                        }
+                    if !searchText.isEmpty {
+                        Button("Clear") {
+                            searchText = ""
+                            LOG("Template search cleared")
+                        }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(Theme.pink)
+                    }
+                }
+                
+                List(filteredTemplates, selection: $selectedTemplate) { t in
                     Text(t.name)
                         .contextMenu {
                             Button("Open in VS Code") { openInVSCode(t.url) }
@@ -42,6 +69,13 @@ struct ContentView: View {
                         .onTapGesture(count: 2) {
                             loadTemplate(t)
                         }
+                }
+                
+                // Show search results info
+                if !searchText.isEmpty {
+                    Text("\(filteredTemplates.count) of \(templates.templates.count) templates")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
             .padding()
@@ -91,6 +125,16 @@ struct ContentView: View {
         }
         .onAppear {
             LOG("App started")
+        }
+    }
+    private var filteredTemplates: [TemplateItem] {
+        if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return templates.templates
+        } else {
+            let query = searchText.lowercased()
+            return templates.templates.filter { template in
+                template.name.lowercased().contains(query)
+            }
         }
     }
 
