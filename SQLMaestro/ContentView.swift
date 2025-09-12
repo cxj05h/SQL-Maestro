@@ -235,33 +235,36 @@ struct ContentView: View {
         LOG("Open in VSCode", ctx: ["file": url.lastPathComponent])
     }
 
+    // Replace the populateQuery() function in ContentView.swift
+
     private func populateQuery() {
         guard let t = selectedTemplate else { return }
         var sql = t.rawSQL
 
-        // Hardwired: if template references Org-id or Acct-ID, use static values if that session field is empty
-        let orgPlaceholder = "Org-id"
-        let acctPlaceholder = "Acct-ID"
+        // Static placeholders that should always use static field values
+        let staticPlaceholderMap = [
+            "Org-id": orgId,
+            "Acct-ID": acctId
+        ]
 
-        // Fill map with dynamic session values first
+        // Build values map: start with dynamic session values
         var values: [String:String] = [:]
         for ph in t.placeholders {
-            values[ph] = sessions.value(for: ph)
-        }
-        // fallback from static fields
-        if t.placeholders.contains(orgPlaceholder), (values[orgPlaceholder] ?? "").isEmpty {
-            values[orgPlaceholder] = orgId
-        }
-        if t.placeholders.contains(acctPlaceholder), (values[acctPlaceholder] ?? "").isEmpty {
-            values[acctPlaceholder] = acctId
+            if let staticValue = staticPlaceholderMap[ph] {
+                // Always use static field value for static placeholders
+                values[ph] = staticValue
+            } else {
+                // Use session value for dynamic placeholders
+                values[ph] = sessions.value(for: ph)
+            }
         }
 
-        // Replace {{placeholder}} with raw values (no quoting logic — user controls in template)
-        for (k,v) in values {
-            let needle = "{{\(k)}}"
-            sql = sql.replacingOccurrences(of: needle, with: v)
-            // also allow spaces inside braces
-            sql = sql.replacingOccurrences(of: "{{ \(k) }}", with: v)
+        // Replace {{placeholder}} with values (handle both with and without spaces)
+        for (k, v) in values {
+            let patterns = ["{{\(k)}}", "{{ \(k) }}", "{{\(k) }}", "{{ \(k)}"]
+            for pattern in patterns {
+                sql = sql.replacingOccurrences(of: pattern, with: v)
+            }
         }
 
         populatedSQL = sql
@@ -272,12 +275,13 @@ struct ContentView: View {
         }
         LOG("Populate Query", ctx: ["template": t.name, "bytes":"\(sql.count)"])
 
-        // Optional: lookup mapping after populate (or already on typing Org-ID)
+        // Update mapping lookup after populate (if not already done)
         if let entry = mapping.lookup(orgId: orgId) {
             mysqlDb = entry.mysqlDb
             companyLabel = entry.companyName ?? ""
         }
     }
+
 
     private func promptRename(for s: TicketSession) {
         let alert = NSAlert()
