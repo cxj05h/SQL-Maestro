@@ -1,5 +1,10 @@
+
 import SwiftUI
 import AppKit
+
+private extension Notification.Name {
+    static let wheelFieldDidFocus = Notification.Name("WheelFieldDidFocus")
+}
 
 struct ContentView: View {
     @EnvironmentObject var templates: TemplateManager
@@ -32,6 +37,10 @@ struct ContentView: View {
     @State private var draftDynamicValues: [TicketSession:[String:String]] = [:]
     @State private var sessionSelectedTemplate: [TicketSession: UUID] = [:]
     @State private var openRecentsKey: String? = nil
+    @State private var showScrollSettings: Bool = false
+    @AppStorage("dateScrollSensitivity") private var dateScrollSensitivity: Double = 1.0  // 0.5 (slower) … 3.0 (faster)
+    @State private var dateFocusScrollMode: Bool = false
+    @State private var scrollMonitor: Any? = nil
 
     // Date picker working components
     @State private var dpYear: Int = Calendar.current.component(.year, from: Date())
@@ -337,6 +346,10 @@ struct ContentView: View {
                 fontSize = max(10, min(22, fontSize + CGFloat(delta)))
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .wheelFieldDidFocus)) { _ in
+            dateFocusScrollMode = true
+            LOG("Date focus-scroll enabled")
+        }
         .onAppear {
             LOG("App started")
             // Initialize with session 1
@@ -345,6 +358,27 @@ struct ContentView: View {
                let found = templates.templates.first(where: { $0.id == tid }) {
                 selectedTemplate = found
                 currentSQL = found.rawSQL
+            }
+            // Install local scroll monitor to redirect wheel to focused date field while focus-scroll mode is ON
+            if scrollMonitor == nil {
+                scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
+                    if dateFocusScrollMode, let tf = WheelNumberField.WheelTextField.focusedInstance {
+                        tf.onScrollDelta?(event.scrollingDeltaY, event.hasPreciseScrollingDeltas)
+                        LOG("Date wheel redirected", ctx: [
+                            "deltaY": String(format: "%.2f", event.scrollingDeltaY),
+                            "precise": event.hasPreciseScrollingDeltas ? "true" : "false"
+                        ])
+                        return nil // consume so hovered fields don't also react
+                    }
+                    return event
+                }
+            }
+        }
+        .onDisappear {
+            if let m = scrollMonitor {
+                NSEvent.removeMonitor(m)
+                scrollMonitor = nil
+                LOG("Scroll monitor removed")
             }
         }
     }
@@ -717,44 +751,123 @@ struct ContentView: View {
                         .stroke(Color.secondary.opacity(0.4), lineWidth: 1)
                 )
                 .font(.system(size: fontSize, design: .monospaced))
-                .frame(maxWidth: 360)
+                .frame(minWidth: 420, maxWidth: 640)
+                .layoutPriority(2)
                 .onSubmit {
-                    let finalVal = valBinding.wrappedValue
-                    if !finalVal.isEmpty {
-                        sessions.setValue(finalVal, for: placeholder)
-                        LOG("Date field submit", ctx: ["value": finalVal])
-                    }
+                    performDateApply(for: placeholder, binding: valBinding)
                 }
 
                 // Inline numeric "wheels": Year / Month / Day / Hour / Minute / Second
-                HStack(spacing: 6) {
-                    WheelNumberField(value: $dpYear,   range: yearsRange(),    width: 72,  label: "YYYY")
-                    WheelNumberField(value: $dpMonth,  range: 1...12,          width: 54,  label: "MM")
-                    WheelNumberField(value: $dpDay,    range: 1...daysInMonth(year: dpYear, month: dpMonth), width: 54,  label: "DD")
+                HStack(alignment: .center, spacing: 8) {
+                    VStack(spacing: 4) {
+                        Text("Year")
+                            .font(.system(size: fontSize - 2, weight: .medium))
+                            .foregroundStyle(Theme.gold)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .frame(width: 72, alignment: .center)
+                        WheelNumberField(value: $dpYear,   range: yearsRange(),    width: 72,  label: "YYYY", sensitivity: dateScrollSensitivity, onReturn: {
+                            performDateApply(for: placeholder, binding: valBinding)
+                        })
+                    }
+                    VStack(spacing: 4) {
+                        Text("Month")
+                            .font(.system(size: fontSize - 2, weight: .medium))
+                            .foregroundStyle(Theme.gold)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .frame(width: 54, alignment: .center)
+                        WheelNumberField(value: $dpMonth,  range: 1...12,          width: 54,  label: "MM",   sensitivity: dateScrollSensitivity, onReturn: {
+                            performDateApply(for: placeholder, binding: valBinding)
+                        })
+                    }
+                    VStack(spacing: 4) {
+                        Text("Day")
+                            .font(.system(size: fontSize - 2, weight: .medium))
+                            .foregroundStyle(Theme.gold)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .frame(width: 54, alignment: .center)
+                        WheelNumberField(value: $dpDay,    range: 1...daysInMonth(year: dpYear, month: dpMonth), width: 54,  label: "DD", sensitivity: dateScrollSensitivity, onReturn: {
+                            performDateApply(for: placeholder, binding: valBinding)
+                        })
+                    }
                     Text("—")
                         .foregroundStyle(.secondary)
                         .padding(.horizontal, 2)
-                    WheelNumberField(value: $dpHour,   range: 0...23,          width: 54,  label: "hh")
-                    WheelNumberField(value: $dpMinute, range: 0...59,          width: 54,  label: "mm")
-                    WheelNumberField(value: $dpSecond, range: 0...59,          width: 54,  label: "ss")
+                    VStack(spacing: 4) {
+                        Text("Hour")
+                            .font(.system(size: fontSize - 2, weight: .medium))
+                            .foregroundStyle(Theme.gold)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .frame(width: 54, alignment: .center)
+                        WheelNumberField(value: $dpHour,   range: 0...23,          width: 54,  label: "hh", sensitivity: dateScrollSensitivity, onReturn: {
+                            performDateApply(for: placeholder, binding: valBinding)
+                        })
+                    }
+                    VStack(spacing: 4) {
+                        Text("Minute")
+                            .font(.system(size: fontSize - 2, weight: .medium))
+                            .foregroundStyle(Theme.gold)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .frame(width: 54, alignment: .center)
+                        WheelNumberField(value: $dpMinute, range: 0...59,          width: 54,  label: "mm", sensitivity: dateScrollSensitivity, onReturn: {
+                            performDateApply(for: placeholder, binding: valBinding)
+                        })
+                    }
+                    VStack(spacing: 4) {
+                        Text("Second")
+                            .font(.system(size: fontSize - 2, weight: .medium))
+                            .foregroundStyle(Theme.gold)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
+                            .frame(width: 54, alignment: .center)
+                        WheelNumberField(value: $dpSecond, range: 0...59,          width: 54,  label: "ss", sensitivity: dateScrollSensitivity, onReturn: {
+                            performDateApply(for: placeholder, binding: valBinding)
+                        })
+                    }
+                    // Small settings button to tune scroll sensitivity
+                    Button {
+                        showScrollSettings.toggle()
+                    } label: {
+                        Image(systemName: "slider.horizontal.3")
+                            .font(.system(size: fontSize - 1, weight: .semibold))
+                    }
+                    .buttonStyle(.borderless)
+                    .popover(isPresented: $showScrollSettings) {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Scroll sensitivity")
+                                .font(.system(size: fontSize, weight: .semibold))
+                                .foregroundStyle(Theme.purple)
+                            HStack {
+                                Text("Slower")
+                                    .font(.system(size: fontSize - 2)).foregroundStyle(.secondary)
+                                Slider(value: $dateScrollSensitivity, in: 0.5...3.0, step: 0.1)
+                                Text("Faster")
+                                    .font(.system(size: fontSize - 2)).foregroundStyle(.secondary)
+                            }
+                            Text("Controls how much wheel movement is needed for a 1-step change.")
+                                .font(.system(size: fontSize - 3)).foregroundStyle(.secondary)
+                        }
+                        .padding(12)
+                        .frame(width: 320)
+                        .onChange(of: dateScrollSensitivity) { oldVal, newVal in
+                            LOG("Date scroll speed changed", ctx: ["from": String(format: "%.2f", oldVal), "to": String(format: "%.2f", newVal)])
+                        }
+                    }
                 }
-                .padding(.vertical, 2)
+                .padding(.vertical, 6)
+                .padding(.horizontal, 6)
                 .background(
                     RoundedRectangle(cornerRadius: 6)
                         .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
                 )
+                .frame(minHeight: 48)
 
                 Button("Apply") {
-                    let str = formatDateString(
-                        year: dpYear, month: dpMonth, day: dpDay,
-                        hour: dpHour, minute: dpMinute, second: dpSecond
-                    )
-                    // Clamp day in case month/year changed before apply
-                    let maxDay = daysInMonth(year: dpYear, month: dpMonth)
-                    if dpDay > maxDay { dpDay = maxDay }
-                    valBinding.wrappedValue = str
-                    sessions.setValue(str, for: placeholder)
-                    LOG("Date inline apply", ctx: ["value": str])
+                    performDateApply(for: placeholder, binding: valBinding)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.pink)
@@ -766,6 +879,28 @@ struct ContentView: View {
                 .font(.system(size: fontSize - 3))
                 .foregroundStyle(.secondary)
         }
+        .onKeyPress(.escape) {
+            if dateFocusScrollMode {
+                dateFocusScrollMode = false
+                WheelNumberField.WheelTextField.focusedInstance = nil
+                NSApp.keyWindow?.makeFirstResponder(nil)
+                LOG("Date focus-scroll disabled via ESC")
+                return .handled
+            }
+            return .ignored
+        }
+    }
+
+    private func performDateApply(for placeholder: String, binding valBinding: Binding<String>) {
+        let maxDay = daysInMonth(year: dpYear, month: dpMonth)
+        if dpDay > maxDay { dpDay = maxDay }
+        let str = formatDateString(
+            year: dpYear, month: dpMonth, day: dpDay,
+            hour: dpHour, minute: dpMinute, second: dpSecond
+        )
+        valBinding.wrappedValue = str
+        sessions.setValue(str, for: placeholder)
+        LOG("Date inline apply (Enter/Apply)", ctx: ["value": str])
     }
 
 
@@ -1308,6 +1443,8 @@ struct ContentView: View {
         let range: ClosedRange<Int>
         let width: CGFloat
         let label: String  // placeholder label like "YYYY", "MM"
+        let sensitivity: Double
+        let onReturn: (() -> Void)?
 
         func makeNSView(context: Context) -> NSTextField {
             let tf = WheelTextField()
@@ -1333,6 +1470,10 @@ struct ContentView: View {
             tf.onCommitText = {
                 context.coordinator.commitFromText()
             }
+            tf.onReturn = { onReturn?() }
+            tf.onScrollDelta = { delta, precise in
+                context.coordinator.handleScroll(deltaY: delta, precise: precise)
+            }
             context.coordinator.currentTextField = tf
             return tf
         }
@@ -1342,6 +1483,7 @@ struct ContentView: View {
             if nsView.stringValue != formatted {
                 nsView.stringValue = formatted
             }
+            context.coordinator.sensitivity = sensitivity
         }
 
         func makeCoordinator() -> Coordinator {
@@ -1361,6 +1503,8 @@ struct ContentView: View {
 
         final class Coordinator: NSObject {
             var parent: WheelNumberField
+            var sensitivity: Double = 1.0
+            private var accum: CGFloat = 0
 
             init(_ parent: WheelNumberField) {
                 self.parent = parent
@@ -1390,6 +1534,36 @@ struct ContentView: View {
                 }
             }
 
+            func handleScroll(deltaY: CGFloat, precise: Bool) {
+                // Invert so "scroll up" increases value
+                let inverted = -deltaY
+
+                // Base scale: precise devices send larger continuous deltas
+                let base: CGFloat = precise ? 40.0 : 8.0
+
+                // Treat slider as "speed": 0.5 = slower, 3.0 = faster
+                let speed = max(0.5, min(3.0, CGFloat(sensitivity)))
+
+                // Convert delta to fractional steps (higher speed → larger increments)
+                let increment = (inverted * speed) / base
+                accum += increment
+
+                // Step once per whole unit; handle fast flicks (multi-steps)
+                while abs(accum) >= 1.0 {
+                    let step = accum > 0 ? 1 : -1
+                    adjust(by: step)
+                    LOG("Date wheel step", ctx: [
+                        "label": parent.label,
+                        "step": "\(step)",
+                        "accum": String(format: "%.2f", accum),
+                        "precise": precise ? "true" : "false",
+                        "speed": String(format: "%.2f", Double(sensitivity))
+                    ])
+                    accum -= CGFloat(step)
+                }
+            }
+            
+
             private func clamp(_ v: Int, to range: ClosedRange<Int>) -> Int {
                 min(max(v, range.lowerBound), range.upperBound)
             }
@@ -1399,12 +1573,29 @@ struct ContentView: View {
 
         // Custom NSTextField subclass to capture arrows + scroll wheel
         final class WheelTextField: NSTextField {
+            static weak var focusedInstance: WheelTextField?
+
             var onAdjust: ((Int) -> Void)?
             var onCommitText: (() -> Void)?
+            var onReturn: (() -> Void)?
+            var onScrollDelta: ((CGFloat, Bool) -> Void)?
 
             override func becomeFirstResponder() -> Bool {
                 let result = super.becomeFirstResponder()
-                // nothing extra; tab focus works naturally
+                if result {
+                    WheelTextField.focusedInstance = self
+                    NotificationCenter.default.post(name: .wheelFieldDidFocus, object: nil)
+                }
+                return result
+            }
+
+            override func resignFirstResponder() -> Bool {
+                let result = super.resignFirstResponder()
+                if result {
+                    if WheelTextField.focusedInstance === self {
+                        WheelTextField.focusedInstance = nil
+                    }
+                }
                 return result
             }
 
@@ -1416,17 +1607,14 @@ struct ContentView: View {
                     onAdjust?(-1)
                 case 36:  // return
                     onCommitText?()
+                    onReturn?()
                 default:
                     super.keyDown(with: event)
                 }
             }
 
             override func scrollWheel(with event: NSEvent) {
-                // Natural scrolling: positive deltaY is typically down; invert for "up to increase"
-                let delta = event.scrollingDeltaY
-                if abs(delta) >= 0.5 {
-                    onAdjust?(delta > 0 ? -1 : +1)
-                }
+                onScrollDelta?(event.scrollingDeltaY, event.hasPreciseScrollingDeltas)
             }
 
             override func textDidEndEditing(_ notification: Notification) {
