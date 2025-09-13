@@ -17,11 +17,18 @@ struct ContentView: View {
     @FocusState private var isSearchFocused: Bool
     @FocusState private var isListFocused: Bool
     
-    // Static fields
+    // CHANGED: Static fields are now session-aware
     @State private var orgId: String = ""
     @State private var acctId: String = ""
     @State private var mysqlDb: String = ""
     @State private var companyLabel: String = ""
+    
+    // NEW: Track static fields per session
+    @State private var sessionStaticFields: [TicketSession: (orgId: String, acctId: String, mysqlDb: String, company: String)] = [
+        .one: ("", "", "", ""),
+        .two: ("", "", "", ""),
+        .three: ("", "", "", "")
+    ]
     
     var body: some View {
         NavigationSplitView {
@@ -38,7 +45,7 @@ struct ContentView: View {
                         .buttonStyle(.bordered)
                 }
                 
-                // Search field - RIGHT UNDER THE HEADER
+                // Search field
                 HStack {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(.secondary)
@@ -53,7 +60,6 @@ struct ContentView: View {
                             LOG("Template search", ctx: ["query": newVal, "results": "\(filteredTemplates.count)"])
                         }
                         .onKeyPress(.return) {
-                            // Transfer focus to list and auto-select first result
                             if !filteredTemplates.isEmpty {
                                 if selectedTemplate == nil {
                                     selectedTemplate = filteredTemplates.first
@@ -76,22 +82,19 @@ struct ContentView: View {
                     }
                 }
                 
-                // Enhanced List - RIGHT UNDER THE SEARCH
+                // Template List
                 List(filteredTemplates, selection: $selectedTemplate) { template in
                     HStack {
-                        // Icon for visual appeal
                         Image(systemName: "doc.text.fill")
                             .foregroundStyle(selectedTemplate?.id == template.id ? .white : Theme.gold.opacity(0.6))
                             .font(.system(size: 14))
                         
-                        // Template name
                         Text(template.name)
                             .font(.system(size: fontSize, weight: selectedTemplate?.id == template.id ? .medium : .regular))
-                            .foregroundStyle(selectedTemplate?.id == template.id ? .white : .primary)  // CHANGED TO WHITE
+                            .foregroundStyle(selectedTemplate?.id == template.id ? .white : .primary)
                         
                         Spacer()
                         
-                        // Placeholder count badge
                         if !template.placeholders.isEmpty {
                             Text("\(template.placeholders.count)")
                                 .font(.caption2)
@@ -151,7 +154,6 @@ struct ContentView: View {
                 .onChange(of: searchText) { oldVal, newVal in
                     LOG("Template search", ctx: ["query": newVal, "results": "\(filteredTemplates.count)"])
                     
-                    // Auto-select first result when searching
                     if !filteredTemplates.isEmpty && selectedTemplate == nil {
                         withAnimation(.easeInOut(duration: 0.15)) {
                             selectedTemplate = filteredTemplates.first
@@ -161,7 +163,6 @@ struct ContentView: View {
                 }
                 .focused($isListFocused)
                 
-                // Search results info at the bottom
                 if !searchText.isEmpty {
                     Text("\(filteredTemplates.count) of \(templates.templates.count) templates")
                         .font(.caption)
@@ -170,37 +171,41 @@ struct ContentView: View {
             }
             .padding()
             .background(Theme.grayBG)
-        }
-            detail: {
+        } detail: {
             // Right side: Fields + Output
             VStack(spacing: 12) {
                 staticFields
                 Divider()
                 dynamicFields
+                
+                // CHANGED: Session buttons moved next to Clear button
                 HStack {
                     Button("Populate Query") { populateQuery() }
                         .buttonStyle(.borderedProminent)
                         .tint(Theme.pink)
                         .keyboardShortcut(.return, modifiers: [.command])
-                    Button("Clear All Fields (Session)") {
-                        // Clear session fields (dynamic fields)
+                    
+                    // CHANGED: Button now shows which session it's clearing
+                    Button("Clear Session #\(sessions.current.rawValue)") {
                         sessions.clearAllFieldsForCurrentSession()
-                        
-                        // Clear static fields
                         orgId = ""
                         acctId = ""
                         mysqlDb = ""
                         companyLabel = ""
-                        
+                        sessionStaticFields[sessions.current] = ("", "", "", "")
                         LOG("All fields cleared (including static)", ctx: ["session": "\(sessions.current.rawValue)"])
-                    }.buttonStyle(.bordered)
-                        .keyboardShortcut("k", modifiers: [.command])
+                    }
+                    .buttonStyle(.bordered)
+                    .keyboardShortcut("k", modifiers: [.command])
+                    
                     Spacer()
+                    
+                    // MOVED: Session buttons now here
                     sessionButtons
                 }
+                
                 outputView
                 
-                // Invisible button for focus search keyboard shortcut
                 Button("Focus Search") {
                     isSearchFocused = true
                     LOG("Search focused via keyboard shortcut")
@@ -227,16 +232,31 @@ struct ContentView: View {
                 fontSize = max(10, min(22, fontSize + CGFloat(delta)))
             }
         }
+        // CHANGED: Toolbar now shows current session AND template
         .toolbar {
             ToolbarItem(placement: .automatic) {
-                Text(selectedTemplate?.name ?? "No template loaded")
-                    .font(.callout).foregroundStyle(Theme.gold)
+                HStack(spacing: 12) {
+                    Text("Session: \(sessions.sessionNames[sessions.current] ?? "#\(sessions.current.rawValue)")")
+                        .font(.callout)
+                        .fontWeight(.medium)
+                        .foregroundStyle(Theme.purple)
+                    
+                    Divider()
+                        .frame(height: 16)
+                    
+                    Text(selectedTemplate?.name ?? "No template loaded")
+                        .font(.callout)
+                        .foregroundStyle(Theme.gold)
+                }
             }
         }
         .onAppear {
             LOG("App started")
+            // NEW: Initialize with session 1
+            sessions.setCurrent(.one)
         }
     }
+    
     private var filteredTemplates: [TemplateItem] {
         if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return templates.templates
@@ -248,25 +268,40 @@ struct ContentView: View {
         }
     }
     
-    // MARK: – Static fields (always visible)
+    // MARK: — Static fields (always visible)
     private var staticFields: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Static Info").font(.title3).foregroundStyle(Theme.purple)
             HStack {
+                // CHANGED: Now auto-saves to current session
                 labeledField("Org-ID", text: $orgId, placeholder: "e.g., 606079893960")
                     .onChange(of: orgId) { oldVal, newVal in
+                        sessionStaticFields[sessions.current] = (newVal, acctId, mysqlDb, companyLabel)
+                        
                         if let m = mapping.lookup(orgId: newVal) {
                             mysqlDb = m.mysqlDb
                             companyLabel = m.companyName ?? ""
+                            sessionStaticFields[sessions.current] = (newVal, acctId, mysqlDb, companyLabel)
                         } else {
                             companyLabel = ""
+                            sessionStaticFields[sessions.current] = (newVal, acctId, mysqlDb, "")
                         }
                         LOG("OrgID changed", ctx: ["old": oldVal, "new": newVal])
                     }
+                    
                 labeledField("Acct-ID", text: $acctId, placeholder: "e.g., 123456")
+                    .onChange(of: acctId) { oldVal, newVal in
+                        sessionStaticFields[sessions.current] = (orgId, newVal, mysqlDb, companyLabel)
+                        LOG("AcctID changed", ctx: ["old": oldVal, "new": newVal])
+                    }
+                    
                 VStack(alignment: .leading) {
                     HStack {
                         labeledField("MySQL DB", text: $mysqlDb, placeholder: "e.g., mySQL04")
+                            .onChange(of: mysqlDb) { oldVal, newVal in
+                                sessionStaticFields[sessions.current] = (orgId, acctId, newVal, companyLabel)
+                                LOG("MySQL DB changed", ctx: ["old": oldVal, "new": newVal])
+                            }
                         Button("Save") {
                             saveMapping()
                         }.buttonStyle(.bordered)
@@ -281,14 +316,14 @@ struct ContentView: View {
         }
     }
     
-    // MARK: – Dynamic fields from template placeholders
+    // MARK: — Dynamic fields from template placeholders
     private var dynamicFields: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Field Names").font(.title3).foregroundStyle(Theme.pink)
             if let t = selectedTemplate {
-                // Filter out static placeholders that are already handled in the static section
-                let staticPlaceholders = ["Org-ID", "Acct-ID"] // These are handled by static fields
-                let dynamicPlaceholders = t.placeholders.filter { !staticPlaceholders.contains($0) }
+                // CHANGED: Better handling of case variations for static placeholders
+                let staticPlaceholders = Set(["Org-ID", "Org-id", "org-id", "Acct-ID", "Acct-id", "acct-id"].map { $0.lowercased() })
+                let dynamicPlaceholders = t.placeholders.filter { !staticPlaceholders.contains($0.lowercased()) }
                 
                 if dynamicPlaceholders.isEmpty {
                     Text("This template only uses static fields (Org-ID, Acct-ID).")
@@ -310,7 +345,6 @@ struct ContentView: View {
         }
     }
     
-    //   this function inside ContentView (before the final closing brace):
     private func navigateTemplate(direction: Int) {
         guard !filteredTemplates.isEmpty else { return }
         
@@ -323,15 +357,12 @@ struct ContentView: View {
                 LOG("Template navigation", ctx: ["direction": "\(direction)", "template": filteredTemplates[newIndex].name])
             }
         } else {
-            // No selection, select first or last based on direction
             withAnimation(.easeInOut(duration: 0.15)) {
                 selectedTemplate = direction > 0 ? filteredTemplates.first : filteredTemplates.last
             }
             LOG("Template navigation start", ctx: ["template": selectedTemplate?.name ?? "none"])
         }
     }
-    
-    
     
     private func dynamicFieldRow(_ placeholder: String) -> some View {
         let valBinding = Binding<String>(
@@ -359,7 +390,7 @@ struct ContentView: View {
         .onTapGesture { LOG("Field focus", ctx: ["placeholder": placeholder]) }
     }
     
-    // MARK: – Output area
+    // MARK: — Output area
     private var outputView: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Output SQL").font(.title3).foregroundStyle(Theme.aqua)
@@ -379,22 +410,81 @@ struct ContentView: View {
         }
     }
     
+    // COMPLETELY REWRITTEN: Session buttons with proper functionality
     private var sessionButtons: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 12) {
+            Text("Session:").font(.callout).foregroundStyle(.secondary)
             ForEach(TicketSession.allCases, id: \.self) { s in
-                Button(sessions.sessionNames[s] ?? "#\(s.rawValue)") {
-                    sessions.setCurrent(s)
-                }
-                .contextMenu {
-                    Button("Rename…") { promptRename(for: s) }
+                Button(action: {
+                    switchToSession(s)
+                }) {
+                    Text(sessions.sessionNames[s] ?? "#\(s.rawValue)")
+                        .font(.system(size: 14, weight: sessions.current == s ? .semibold : .regular))
+                        .frame(minWidth: 60)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 6)
                 }
                 .buttonStyle(.borderedProminent)
-                .tint(sessions.current == s ? Theme.purple : Theme.purple.opacity(0.4))
+                .tint(sessions.current == s ? Theme.purple : Theme.purple.opacity(0.3))
+                .keyboardShortcut(KeyEquivalent(Character("\(s.rawValue)")), modifiers: [.command])
+                .contextMenu {
+                    Button("Rename…") { promptRename(for: s) }
+                    if sessions.current == s {
+                        Button("Clear This Session") {
+                            sessions.clearAllFieldsForCurrentSession()
+                            orgId = ""
+                            acctId = ""
+                            mysqlDb = ""
+                            companyLabel = ""
+                            sessionStaticFields[sessions.current] = ("", "", "", "")
+                            LOG("Session cleared from context menu", ctx: ["session": "\(s.rawValue)"])
+                        }
+                    } else {
+                        Button("Switch to This Session") {
+                            switchToSession(s)
+                        }
+                    }
+                }
             }
         }
     }
     
-    // MARK: – Actions
+    // MARK: — Actions
+    // NEW: Function to handle session switching
+    private func switchToSession(_ newSession: TicketSession) {
+        guard newSession != sessions.current else { return }
+        
+        let previousSession = sessions.current
+        
+        // Save current session's static fields
+        sessionStaticFields[sessions.current] = (orgId, acctId, mysqlDb, companyLabel)
+        
+        // Save current session's dynamic values before switching
+        if let t = selectedTemplate {
+            for ph in t.placeholders {
+                // Skip static placeholders as they're handled separately
+                if ph == "Org-ID" || ph == "Acct-ID" { continue }
+                
+                let currentValue = sessions.value(for: ph)
+                if !currentValue.isEmpty {
+                    sessions.setValue(currentValue, for: ph)
+                }
+            }
+        }
+        
+        // Switch to new session
+        sessions.setCurrent(newSession)
+        
+        // Load new session's static fields
+        let staticData = sessionStaticFields[newSession] ?? ("", "", "", "")
+        orgId = staticData.orgId
+        acctId = staticData.acctId
+        mysqlDb = staticData.mysqlDb
+        companyLabel = staticData.company
+        
+        LOG("Session switched", ctx: ["from": "\(previousSession.rawValue)", "to": "\(newSession.rawValue)"])
+    }
+    
     private func loadTemplate(_ t: TemplateItem) {
         selectedTemplate = t
         currentSQL = t.rawSQL
@@ -402,7 +492,6 @@ struct ContentView: View {
     }
     
     private func editTemplateInline(_ t: TemplateItem) {
-        // simple in-app edit: open a small editor window
         TemplateEditorWindow.present(for: t, manager: templates)
         LOG("Inline edit open", ctx: ["template": t.name])
     }
@@ -415,6 +504,7 @@ struct ContentView: View {
         LOG("Open in VSCode", ctx: ["file": url.lastPathComponent])
     }
     
+    // CHANGED: Now handles case variations for static placeholders
     private func populateQuery() {
         guard let t = selectedTemplate else { return }
         var sql = t.rawSQL
@@ -422,22 +512,27 @@ struct ContentView: View {
         // Static placeholders that should always use static field values
         let staticPlaceholderMap = [
             "Org-ID": orgId,
-            "Acct-ID": acctId
+            "Org-id": orgId,
+            "org-id": orgId,
+            "Acct-ID": acctId,
+            "Acct-id": acctId,
+            "acct-id": acctId
         ]
         
-        // Build values map: start with dynamic session values
         var values: [String:String] = [:]
         for ph in t.placeholders {
-            if let staticValue = staticPlaceholderMap[ph] {
-                // Always use static field value for static placeholders
+            let staticValue = staticPlaceholderMap.first { key, _ in
+                key.lowercased() == ph.lowercased()
+            }?.value
+            
+            if let staticValue = staticValue {
                 values[ph] = staticValue
             } else {
-                // Use session value for dynamic placeholders
                 values[ph] = sessions.value(for: ph)
             }
         }
         
-        // Replace {{placeholder}} with values (handle both with and without spaces)
+        // Replace {{placeholder}} with values
         for (k, v) in values {
             let patterns = ["{{\(k)}}", "{{ \(k) }}", "{{\(k) }}", "{{ \(k)}"]
             for pattern in patterns {
@@ -453,13 +548,11 @@ struct ContentView: View {
         }
         LOG("Populate Query", ctx: ["template": t.name, "bytes":"\(sql.count)"])
         
-        // Update mapping lookup after populate (if not already done)
         if let entry = mapping.lookup(orgId: orgId) {
             mysqlDb = entry.mysqlDb
             companyLabel = entry.companyName ?? ""
         }
     }
-    
     
     private func promptRename(for s: TicketSession) {
         let alert = NSAlert()
@@ -507,7 +600,6 @@ struct ContentView: View {
         
         do {
             let item = try templates.createTemplate(named: name)
-            // Ask how to edit
             let edit = NSAlert()
             edit.messageText = "Edit Template"
             edit.informativeText = "Open in VS Code or edit inside the app?"
@@ -516,7 +608,6 @@ struct ContentView: View {
             edit.addButton(withTitle: "Later")
             let choice = edit.runModal()
             
-            // Select it in UI
             loadTemplate(item)
             
             switch choice {
@@ -564,7 +655,6 @@ struct ContentView: View {
             return
         }
         
-        // Check if org already exists
         if mapping.lookup(orgId: orgId) != nil {
             showAlert(
                 title: "Org Already Exists",
@@ -574,7 +664,6 @@ struct ContentView: View {
             return
         }
         
-        // Show popup to get company name - REQUIRED
         let alert = NSAlert()
         alert.messageText = "Company Name Required"
         alert.informativeText = "Enter the company name for Org ID: \(orgId)\n(This field is required and cannot be left empty)"
@@ -587,33 +676,32 @@ struct ContentView: View {
         alert.addButton(withTitle: "Save Mapping")
         alert.addButton(withTitle: "Cancel")
         
-        // Keep asking until they provide a company name or cancel
         repeat {
             let response = alert.runModal()
             if response == .alertFirstButtonReturn {
                 let companyName = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
                 
                 if companyName.isEmpty {
-                    // Show error and ask again
                     let errorAlert = NSAlert()
                     errorAlert.messageText = "Company Name Required"
                     errorAlert.informativeText = "Company name cannot be empty. Please enter a company name."
                     errorAlert.alertStyle = .critical
                     errorAlert.addButton(withTitle: "Try Again")
                     errorAlert.runModal()
-                    continue // Loop back to ask for company name again
+                    continue
                 }
                 
-                // Company name provided - save it
                 do {
                     try mapping.saveIfNew(
                         orgId: orgId,
                         mysqlDb: mysqlDb,
-                        companyName: companyName // Now guaranteed to be non-empty
+                        companyName: companyName
                     )
                     
-                    // Update the display
                     companyLabel = companyName
+                    
+                    // NEW: Update session static fields
+                    sessionStaticFields[sessions.current] = (orgId, acctId, mysqlDb, companyName)
                     
                     showAlert(title: "Success", message: "Mapping saved successfully!\n\nOrg: \(orgId)\nMySQL: \(mysqlDb)\nCompany: \(companyName)")
                     
@@ -635,8 +723,6 @@ struct ContentView: View {
         } while true
     }
     
-    
-    // Helper function for showing alerts
     private func showAlert(title: String, message: String) {
         let alert = NSAlert()
         alert.messageText = title
@@ -646,9 +732,7 @@ struct ContentView: View {
         alert.runModal()
     }
     
-    
-    
-    // Simple in-app editor window
+    // Template Editor Window
     final class TemplateEditorWindow: NSWindowController {
         static func present(for item: TemplateItem, manager: TemplateManager) {
             let vc = NSHostingController(rootView: TemplateEditorView(item: item, manager: manager))
@@ -708,8 +792,5 @@ struct ContentView: View {
             p.arguments = ["code", url.path]
             try? p.run()
         }
-        
-        
-        
     }
 }
