@@ -367,6 +367,15 @@ struct ContentView: View {
                 .font(.system(size: fontSize, weight: .regular, design: .monospaced))
                 .frame(minHeight: 160)
                 .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.aqua.opacity(0.3)))
+                .disableAutocorrection(true)
+                .autocorrectionDisabled(true)
+                .onReceive(NotificationCenter.default.publisher(for: NSText.didBeginEditingNotification)) { _ in
+                    if let textView = NSApp.keyWindow?.firstResponder as? NSTextView {
+                        textView.isAutomaticQuoteSubstitutionEnabled = false
+                        textView.isAutomaticDashSubstitutionEnabled = false
+                        textView.isAutomaticTextReplacementEnabled = false
+                    }
+                }
         }
     }
     
@@ -664,6 +673,15 @@ struct ContentView: View {
                 TextEditor(text: $text)
                     .font(.system(.body, design: .monospaced))
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.aqua.opacity(0.3)))
+                    .disableAutocorrection(true)
+                    .autocorrectionDisabled(true)
+                    .onReceive(NotificationCenter.default.publisher(for: NSText.didBeginEditingNotification)) { _ in
+                        if let textView = NSApp.keyWindow?.firstResponder as? NSTextView {
+                            textView.isAutomaticQuoteSubstitutionEnabled = false
+                            textView.isAutomaticDashSubstitutionEnabled = false
+                            textView.isAutomaticTextReplacementEnabled = false
+                        }
+                    }
                 HStack {
                     Button("Open in VS Code") { openInVSCode(item.url) }.buttonStyle(.bordered)
                     Spacer()
