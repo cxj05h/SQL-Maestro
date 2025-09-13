@@ -923,6 +923,7 @@ struct ContentView: View {
         )
     }
 
+    @FocusState private var applyButtonFocused: Bool
     // MARK: NEW — Date field row specialized UI for {{Date}} with inline "wheel" spinners (no popovers)
     private func dateFieldRow(_ placeholder: String) -> some View {
         let currentSession = sessions.current
@@ -1040,9 +1041,17 @@ struct ContentView: View {
                             .lineLimit(1)
                             .fixedSize(horizontal: true, vertical: false)
                             .frame(width: 54, alignment: .center)
-                        WheelNumberField(value: $dpSecond, range: 0...59,          width: 54,  label: "ss", sensitivity: dateScrollSensitivity, onReturn: {
-                            performDateApply(for: placeholder, binding: valBinding)
-                        })
+                        WheelNumberField(
+                            value: $dpSecond,
+                            range: 0...59,
+                            width: 54,
+                            label: "ss",
+                            sensitivity: dateScrollSensitivity,
+                            onReturn: {
+                                performDateApply(for: placeholder, binding: valBinding)
+                            },
+                            onTabToApply: { applyButtonFocused = true }
+                        )
                     }
                     // Small settings button to tune scroll sensitivity
                     Button {
@@ -1088,6 +1097,10 @@ struct ContentView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.pink)
                 .font(.system(size: fontSize))
+                .keyboardShortcut(.defaultAction)               // allow Enter/Return to trigger Apply
+                .keyboardShortcut(.return, modifiers: [.command]) // Cmd+Enter also applies
+                .focusable(true)                                  // ensure it can be focused via Tab
+                .focused($applyButtonFocused)
                 .fixedSize(horizontal: true, vertical: false)   // <- keeps width to fit "Apply"
                 .layoutPriority(3)                               // <- resists compression
             }
@@ -2156,7 +2169,26 @@ struct ContentView: View {
         let label: String  // placeholder label like "YYYY", "MM"
         let sensitivity: Double
         let onReturn: (() -> Void)?
-
+        let onTabToApply: (() -> Void)?
+        
+        init(
+            value: Binding<Int>,
+            range: ClosedRange<Int>,
+            width: CGFloat,
+            label: String,
+            sensitivity: Double,
+            onReturn: (() -> Void)?,
+            onTabToApply: (() -> Void)? = nil
+        ) {
+            self._value = value
+            self.range = range
+            self.width = width
+            self.label = label
+            self.sensitivity = sensitivity
+            self.onReturn = onReturn
+            self.onTabToApply = onTabToApply
+        }
+        
         func makeNSView(context: Context) -> NSTextField {
             let tf = WheelTextField()
             tf.isBordered = false
@@ -2172,7 +2204,10 @@ struct ContentView: View {
             tf.target = context.coordinator
             tf.action = #selector(Coordinator.commit(_:))
             tf.translatesAutoresizingMaskIntoConstraints = false
+
             tf.widthAnchor.constraint(equalToConstant: width).isActive = true
+            WheelTextField.register(tf)
+            tf.delegate = context.coordinator
 
             // Wire handlers
             tf.onAdjust = { delta in
@@ -2282,9 +2317,37 @@ struct ContentView: View {
             weak var currentTextField: WheelTextField?
         }
 
+
         // Custom NSTextField subclass to capture arrows + scroll wheel
         final class WheelTextField: NSTextField {
             static weak var focusedInstance: WheelTextField?
+
+            // Keep a registry of wheel fields to implement deterministic Tab navigation
+            private struct WeakRef<T: AnyObject> { weak var value: T? }
+            private static var registry: [WeakRef<WheelTextField>] = []
+
+            static func register(_ tf: WheelTextField) {
+                cleanup()
+                if !registry.contains(where: { $0.value === tf }) {
+                    registry.append(WeakRef(value: tf))
+                }
+            }
+            private static func cleanup() {
+                registry.removeAll { $0.value == nil }
+            }
+            private static func index(of tf: WheelTextField) -> Int? {
+                cleanup(); return registry.firstIndex { $0.value === tf }
+            }
+            static func next(after tf: WheelTextField) -> WheelTextField? {
+                guard let i = index(of: tf) else { return nil }
+                let n = i + 1
+                return n < registry.count ? registry[n].value : nil
+            }
+            static func previous(before tf: WheelTextField) -> WheelTextField? {
+                guard let i = index(of: tf) else { return nil }
+                let p = i - 1
+                return p >= 0 ? registry[p].value : nil
+            }
 
             var onAdjust: ((Int) -> Void)?
             var onCommitText: (() -> Void)?
@@ -2316,9 +2379,20 @@ struct ContentView: View {
                     onAdjust?(+1)
                 case 125: // down arrow
                     onAdjust?(-1)
+                case 124: // right arrow → step up
+                    onAdjust?(+1)
+                case 123: // left arrow  → step down
+                    onAdjust?(-1)
                 case 36:  // return
                     onCommitText?()
                     onReturn?()
+                case 48:  // tab / shift-tab — move focus explicitly across controls
+                    if event.modifierFlags.contains(.shift) {
+                        self.window?.selectPreviousKeyView(self)
+                    } else {
+                        self.window?.selectNextKeyView(self)
+                    }
+                    return
                 default:
                     super.keyDown(with: event)
                 }
@@ -2334,6 +2408,71 @@ struct ContentView: View {
             }
         }
     }
+// Intercept arrow keys, Return, and Tab from the field editor (NSTextView)
+extension WheelNumberField.Coordinator: NSTextFieldDelegate {
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+        if commandSelector == #selector(NSResponder.moveUp(_:)) {
+            adjust(by: +1)
+            return true
+        }
+        if commandSelector == #selector(NSResponder.moveDown(_:)) {
+            adjust(by: -1)
+            return true
+        }
+        if commandSelector == #selector(NSResponder.moveRight(_:)) {
+            adjust(by: +1)
+            return true
+        }
+        if commandSelector == #selector(NSResponder.moveLeft(_:)) {
+            adjust(by: -1)
+            return true
+        }
+        if commandSelector == #selector(NSResponder.insertNewline(_:)) {
+            commitFromText()
+            parent.onReturn?()
+            return true
+        }
+        if commandSelector == #selector(NSResponder.insertTab(_:)) {
+            if let tf = control as? WheelNumberField.WheelTextField {
+                if let next = WheelNumberField.WheelTextField.next(after: tf) {
+                    control.window?.makeFirstResponder(next)
+                } else {
+                    // Last wheel: ask SwiftUI to focus the Apply button
+                    parent.onTabToApply?()
+                    // Fallbacks for AppKit key loop (in case SwiftUI focus doesn't manifest)
+                    if let btn = control.window?.contentView?.findButton(titled: "Apply") {
+                        control.window?.makeFirstResponder(btn)
+                    } else {
+                        control.window?.selectNextKeyView(control)
+                    }
+                }
+                return true
+            }
+            control.window?.selectNextKeyView(control)
+            return true
+        }
+        if commandSelector == #selector(NSResponder.insertBacktab(_:)) {
+            if let tf = control as? WheelNumberField.WheelTextField {
+                if let prev = WheelNumberField.WheelTextField.previous(before: tf) {
+                    control.window?.makeFirstResponder(prev)
+                } else {
+                    control.window?.selectPreviousKeyView(control)
+                }
+                return true
+            }
+            control.window?.selectPreviousKeyView(control)
+            return true
+        }
+        return false
+    }
+}
+private extension NSView {
+    func findButton(titled title: String) -> NSButton? {
+        if let b = self as? NSButton, b.title == title { return b }
+        for sub in subviews { if let found = sub.findButton(titled: title) { return found } }
+        return nil
+    }
+}
 
 
 // Live list of registered keyboard shortcuts (grouped by scope)
