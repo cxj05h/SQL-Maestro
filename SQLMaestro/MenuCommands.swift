@@ -8,7 +8,7 @@ struct AppMenuCommands: Commands {
     @State private var fontScale: Double = 1.0
 
     var body: some Commands {
-        CommandMenu("File") {
+        CommandMenu("Queries") {
             Button("Backup Queries") {
                 do {
                     let url = try tmpl.zipAllTemplates()
@@ -19,7 +19,7 @@ struct AppMenuCommands: Commands {
             }
         }
 
-        CommandMenu("Edit") {
+        CommandMenu("Debug") {
             Button("View Logs") {
                 NSWorkspace.shared.open(AppLogger.logFileURLForToday())
             }

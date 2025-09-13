@@ -91,6 +91,18 @@ struct ContentView: View {
                         .font(.system(size: fontSize))
                     }
                 }
+                .contextMenu {
+                    if let sel = selectedTemplate {
+                        Button("Open JSON") { openTemplateJSON(sel) }
+                        Button("Show in Finder") { revealTemplateInFinder(sel) }
+                        Divider()
+                        Button(role: .destructive) { deleteTemplateFlow(sel) } label: {
+                            Text("Delete Selected Template…")
+                        }
+                    } else {
+                        Text("No template selected").foregroundStyle(.secondary)
+                    }
+                }
                 
                 // Template List
                 List(filteredTemplates, selection: $selectedTemplate) { template in
@@ -130,8 +142,17 @@ struct ContentView: View {
                     .contextMenu {
                         Button("Open in VS Code") { openInVSCode(template.url) }
                         Button("Edit in App") { editTemplateInline(template) }
+
+                        Button("Open JSON") { openTemplateJSON(template) }
+                        Button("Show in Finder") { revealTemplateInFinder(template) }
+
                         Divider()
                         Button("Rename…") { renameTemplateFlow(template) }
+
+                        Divider()
+                        Button(role: .destructive) { deleteTemplateFlow(template) } label: {
+                            Text("Delete Template…")
+                        }
                     }
                     .onTapGesture {
                         withAnimation(.easeInOut(duration: 0.15)) {
@@ -534,6 +555,54 @@ struct ContentView: View {
         }
     }
     
+    private func openTemplateJSON(_ item: TemplateItem) {
+        // Opens with user’s default app for .json/.sql
+        NSWorkspace.shared.open(item.url)
+        LOG("Open JSON", ctx: ["file": item.url.lastPathComponent])
+    }
+
+    private func revealTemplateInFinder(_ item: TemplateItem) {
+        // Highlights the file in Finder
+        NSWorkspace.shared.activateFileViewerSelecting([item.url])
+        LOG("Reveal in Finder", ctx: ["file": item.url.lastPathComponent])
+    }
+
+    private func deleteTemplateFlow(_ item: TemplateItem) {
+        let alert = NSAlert()
+        alert.messageText = "Delete Template"
+        alert.informativeText = "Are you sure you want to delete \(item.name)? This cannot be undone."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
+
+        if alert.runModal() == .alertFirstButtonReturn {
+            do {
+                // Delete the file from disk
+                try FileManager.default.removeItem(at: item.url)
+                LOG("Template file removed", ctx: ["file": item.url.path])
+
+                // Clear selection if we just deleted the selected item
+                if selectedTemplate?.id == item.id {
+                    selectedTemplate = nil
+                }
+
+                // Remove session memory pointing to this template
+                for s in TicketSession.allCases {
+                    if sessionSelectedTemplate[s] == item.id {
+                        sessionSelectedTemplate[s] = nil
+                    }
+                }
+
+                // Reload templates from disk
+                templates.loadTemplates()
+                LOG("Template deleted", ctx: ["template": item.name])
+            } catch {
+                NSSound.beep()
+                showAlert(title: "Error", message: "Failed to delete template: \(error.localizedDescription)")
+                LOG("Delete template failed", ctx: ["error": error.localizedDescription])
+            }
+        }
+    }
     private func navigateTemplate(direction: Int) {
         guard !filteredTemplates.isEmpty else { return }
         
@@ -696,11 +765,49 @@ struct ContentView: View {
     }
     
     private func openInVSCode(_ url: URL) {
+        let cfg = NSWorkspace.OpenConfiguration()
+        cfg.activates = true
+
+        // Prefer stable VS Code
+        let stable = URL(fileURLWithPath: "/Applications/Visual Studio Code.app")
+        // Fallback to Insiders build if present
+        let insiders = URL(fileURLWithPath: "/Applications/Visual Studio Code - Insiders.app")
+
+        let fm = FileManager.default
+
+        let openWithApp: (URL) -> Void = { appURL in
+            NSWorkspace.shared.open([url], withApplicationAt: appURL, configuration: cfg) { _, err in
+                if let err = err {
+                    // Final fallback: system default app
+                    NSWorkspace.shared.open(url)
+                    LOG("VSCode open fallback via default app", ctx: ["file": url.lastPathComponent, "error": err.localizedDescription])
+                } else {
+                    LOG("Open in VSCode via NSWorkspace", ctx: ["file": url.lastPathComponent])
+                }
+            }
+        }
+
+        if fm.fileExists(atPath: stable.path) {
+            openWithApp(stable)
+            return
+        }
+        if fm.fileExists(atPath: insiders.path) {
+            openWithApp(insiders)
+            return
+        }
+
+        // If neither app bundle exists, try generic `open -a` as a best-effort
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        task.arguments = ["code", url.path]
-        try? task.run()
-        LOG("Open in VSCode", ctx: ["file": url.lastPathComponent])
+        task.arguments = ["open", "-a", "Visual Studio Code", url.path]
+        do {
+            try task.run()
+            LOG("Open in VSCode via shell fallback", ctx: ["file": url.lastPathComponent])
+        } catch {
+            // Final fallback: default app
+            NSWorkspace.shared.open(url)
+            LOG("Open in default app (VSCode not found)", ctx: ["file": url.lastPathComponent, "error": error.localizedDescription])
+        }
     }
     
     // Now handles case variations for static placeholders
@@ -991,10 +1098,22 @@ struct ContentView: View {
         }
         
         private func openInVSCode(_ url: URL) {
-            let p = Process()
-            p.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-            p.arguments = ["code", url.path]
-            try? p.run()
+            let cfg = NSWorkspace.OpenConfiguration()
+            cfg.activates = true
+            let stable = URL(fileURLWithPath: "/Applications/Visual Studio Code.app")
+            let insiders = URL(fileURLWithPath: "/Applications/Visual Studio Code - Insiders.app")
+            let fm = FileManager.default
+
+            if fm.fileExists(atPath: stable.path) {
+                NSWorkspace.shared.open([url], withApplicationAt: stable, configuration: cfg, completionHandler: nil)
+                return
+            }
+            if fm.fileExists(atPath: insiders.path) {
+                NSWorkspace.shared.open([url], withApplicationAt: insiders, configuration: cfg, completionHandler: nil)
+                return
+            }
+            // Generic fallback
+            NSWorkspace.shared.open(url)
         }
     }
 }
