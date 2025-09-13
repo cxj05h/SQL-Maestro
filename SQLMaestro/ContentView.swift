@@ -2,6 +2,74 @@
 import SwiftUI
 import AppKit
 
+// Global, persistent placeholder store (singleton)
+final class PlaceholderStore: ObservableObject {
+    static let shared = PlaceholderStore()
+    @Published private(set) var names: [String] = []
+
+    private let fileURL: URL
+
+    private init() {
+        let fm = FileManager.default
+        let appSup = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
+        // Keep everything under an app-specific folder
+        let dir = appSup.appendingPathComponent("SQLMaestro", isDirectory: true)
+        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
+        self.fileURL = dir.appendingPathComponent("placeholders.json")
+        load()
+    }
+
+    func load() {
+        do {
+            let data = try Data(contentsOf: fileURL)
+            let list = try JSONDecoder().decode([String].self, from: data)
+            // Preserve order but de-dup
+            var seen = Set<String>()
+            self.names = list.filter { seen.insert($0).inserted }
+            LOG("Placeholders loaded", ctx: ["count": "\(self.names.count)", "file": fileURL.lastPathComponent])
+        } catch {
+            // Seed with a few common tokens on first run
+            self.names = ["Org-ID", "Acct-ID", "resourceID", "sig-id", "Date"]
+            save()
+            LOG("Placeholders seeded", ctx: ["count": "\(self.names.count)"])
+        }
+    }
+
+    func save() {
+        do {
+            let data = try JSONEncoder().encode(self.names)
+            try data.write(to: fileURL, options: [.atomic])
+            LOG("Placeholders saved", ctx: ["count": "\(self.names.count)"])
+        } catch {
+            LOG("Placeholders save failed", ctx: ["error": error.localizedDescription])
+        }
+    }
+
+    // Public mutators (auto-save)
+    func set(_ newNames: [String]) {
+        self.names = newNames
+        save()
+    }
+    func add(_ name: String) {
+        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        if !self.names.contains(name) {
+            self.names.append(name)
+            save()
+            LOG("Placeholder added", ctx: ["name": name])
+        }
+    }
+    func remove(_ name: String) {
+        let before = self.names.count
+        self.names.removeAll { $0 == name }
+        if self.names.count != before { save() }
+    }
+    func rename(_ old: String, to new: String) {
+        guard let idx = self.names.firstIndex(of: old) else { return }
+        self.names[idx] = new
+        save()
+    }
+}
+
 private extension Notification.Name {
     static let wheelFieldDidFocus = Notification.Name("WheelFieldDidFocus")
 }
@@ -1370,12 +1438,117 @@ struct ContentView: View {
         @State private var text: String = ""
         @Environment(\.dismiss) var dismiss
         @State private var fontSize: CGFloat = 13
-        
+        @ObservedObject private var placeholderStore = PlaceholderStore.shared
+
+        // Extracts {{placeholder}} names in order of appearance, de-duplicated (case-sensitive)
+        private func detectedPlaceholders(from source: String) -> [String] {
+            do {
+                let regex = try NSRegularExpression(pattern: #"\{\{\s*([^}]+?)\s*\}\}"#, options: [])
+                let range = NSRange(source.startIndex..<source.endIndex, in: source)
+                var seen = Set<String>()
+                var results: [String] = []
+                regex.enumerateMatches(in: source, options: [], range: range) { match, _, _ in
+                    guard let m = match, m.numberOfRanges >= 2,
+                          let r = Range(m.range(at: 1), in: source) else { return }
+                    let name = source[r].trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !name.isEmpty, !seen.contains(name) {
+                        seen.insert(name)
+                        results.append(name)
+                    }
+                }
+                return results
+            } catch {
+                return []
+            }
+        }
+
+        // Inserts {{placeholder}} at the current cursor OR replaces the current selection.
+        // Works even if the button steals focus, by updating SwiftUI state and then pushing to the NSTextView.
+        private func insertPlaceholder(_ name: String) {
+            let token = "{{\(name)}}"
+
+            // Try to find the editor's NSTextView
+            let tv = activeEditorTextView()
+            let current = self.text
+
+            if let tv = tv {
+                // Use the current selection from the text view (replace selection or insert at caret)
+                let sel = tv.selectedRange()
+                let ns = current as NSString
+                let safeLocation = max(0, min(sel.location, ns.length))
+                let safeLength = max(0, min(sel.length, ns.length - safeLocation))
+                let safeRange = NSRange(location: safeLocation, length: safeLength)
+
+                let updated = ns.replacingCharacters(in: safeRange, with: token)
+                self.text = updated
+
+                // Push the updated contents and move caret after the inserted token
+                DispatchQueue.main.async {
+                    tv.string = updated
+                    let newCaret = NSRange(location: safeRange.location + (token as NSString).length, length: 0)
+                    tv.setSelectedRange(newCaret)
+                    tv.scrollRangeToVisible(newCaret)
+                }
+                LOG("Inserted placeholder", ctx: ["ph": name, "mode": safeLength > 0 ? "replace-selection" : "insert-at-caret"])
+            } else {
+                // Fallback: append to the end if we cannot find the text view
+                self.text.append(token)
+                LOG("Inserted placeholder", ctx: ["ph": name, "mode": "append-noTV"])
+            }
+        }
+
+        // Finds the NSTextView used by this editor window.
+        private func activeEditorTextView() -> NSTextView? {
+            if let tv = NSApp.keyWindow?.firstResponder as? NSTextView {
+                return tv
+            }
+            guard let contentView = NSApp.keyWindow?.contentView else { return nil }
+            return findTextView(in: contentView)
+        }
+
+        private func findTextView(in view: NSView) -> NSTextView? {
+            if let tv = view as? NSTextView { return tv }
+            for sub in view.subviews {
+                if let found = findTextView(in: sub) { return found }
+            }
+            return nil
+        }
+
         var body: some View {
             VStack(spacing: 8) {
                 Text("Editing \(item.name).sql")
                     .font(.system(size: fontSize + 4, weight: .semibold))
                     .foregroundStyle(Theme.aqua)
+
+                // Placeholder toolbar (GLOBAL store)
+                let placeholders = placeholderStore.names
+                if !placeholders.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            Text("Placeholders:")
+                                .font(.system(size: fontSize - 2))
+                                .foregroundStyle(.secondary)
+                                .padding(.trailing, 4)
+                            ForEach(placeholders, id: \.self) { ph in
+                                Button(ph) { insertPlaceholder(ph) }
+                                    .buttonStyle(.bordered)
+                                    .tint(Theme.pink)
+                                    .font(.system(size: fontSize - 1, weight: .medium))
+                                    .help("Insert {{\(ph)}} at cursor")
+                            }
+                        }
+                        .padding(6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Theme.grayBG.opacity(0.6))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
+                                )
+                        )
+                    }
+                }
+
                 TextEditor(text: $text)
                     .font(.system(size: fontSize, design: .monospaced))
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.aqua.opacity(0.3)))
@@ -1411,6 +1584,10 @@ struct ContentView: View {
             .padding()
             .onAppear {
                 text = (try? String(contentsOf: item.url, encoding: .utf8)) ?? item.rawSQL
+                // One-time sync: harvest placeholders from this file into the global store
+                let found = detectedPlaceholders(from: text)
+                for ph in found { placeholderStore.add(ph) }
+                LOG("Synced detected placeholders into global store", ctx: ["detected": "\(found.count)", "global": "\(placeholderStore.names.count)"])
             }
             .onReceive(NotificationCenter.default.publisher(for: .fontBump)) { note in
                 if let delta = note.object as? Int {
@@ -1418,7 +1595,7 @@ struct ContentView: View {
                 }
             }
         }
-        
+
         private func openInVSCode(_ url: URL) {
             let cfg = NSWorkspace.OpenConfiguration()
             cfg.activates = true
