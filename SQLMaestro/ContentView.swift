@@ -1443,6 +1443,8 @@ struct ContentView: View {
         @State private var isDeletingPlaceholders: Bool = false
         @State private var editingNames: [String] = []
         @State private var editError: String? = nil
+        // Multi-delete selection state for placeholders
+        @State private var deleteSelection: Set<String> = []
 
         // Extracts {{placeholder}} names in order of appearance, de-duplicated (case-sensitive)
         private func detectedPlaceholders(from source: String) -> [String] {
@@ -1599,6 +1601,45 @@ struct ContentView: View {
             editError = nil
         }
 
+        // DELETE placeholders helpers
+        private func startDeletePlaceholders() {
+            deleteSelection = []
+            isDeletingPlaceholders = true
+            LOG("Delete placeholders started", ctx: ["count": "\(placeholderStore.names.count)"])
+        }
+
+        private func cancelDeletePlaceholders() {
+            isDeletingPlaceholders = false
+            deleteSelection = []
+            LOG("Delete placeholders cancelled")
+        }
+
+        private func applyDeletePlaceholders() {
+            guard !deleteSelection.isEmpty else { return }
+            let names = Array(deleteSelection).sorted()
+
+            // Confirm destructive action
+            let alert = NSAlert()
+            alert.messageText = "Delete \(names.count) placeholder\(names.count == 1 ? "" : "s")?"
+            let previewList = names.prefix(6).joined(separator: ", ")
+            let more = names.count > 6 ? " …and \(names.count - 6) more." : ""
+            alert.informativeText = "This will remove the selected placeholders from the global list:\n\(previewList)\(more)"
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "Delete")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else {
+                LOG("Delete placeholders aborted at confirm")
+                return
+            }
+
+            // Apply deletion atomically
+            let remaining = placeholderStore.names.filter { !deleteSelection.contains($0) }
+            placeholderStore.set(remaining)
+            LOG("Delete placeholders applied", ctx: ["deleted": "\(names.count)", "remaining": "\(remaining.count)"])
+            isDeletingPlaceholders = false
+            deleteSelection = []
+        }
+
         var body: some View {
             VStack(spacing: 8) {
                 Text("Editing \(item.name).sql")
@@ -1629,8 +1670,7 @@ struct ContentView: View {
                                 Button("Add new placeholder…") { addPlaceholderFlow() }
                                 Divider()
                                 Button("Edit placeholders…") { startEditPlaceholders() }
-                                Button("Delete placeholders…") { isDeletingPlaceholders = true }
-                                    .disabled(true) // next step
+                                Button("Delete placeholders…") { startDeletePlaceholders() }
                             } label: {
                                 Image(systemName: "ellipsis.circle")
                                     .font(.system(size: fontSize + 2, weight: .medium))
@@ -1742,6 +1782,64 @@ struct ContentView: View {
                 if let delta = note.object as? Int {
                     fontSize = max(10, min(22, fontSize + CGFloat(delta)))
                 }
+            }
+            .sheet(isPresented: $isDeletingPlaceholders) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Delete Placeholders")
+                        .font(.system(size: fontSize + 2, weight: .semibold))
+                        .foregroundStyle(.red)
+                        .padding(.bottom, 4)
+
+                    // Controls
+                    HStack(spacing: 8) {
+                        Button("Select All") {
+                            deleteSelection = Set(placeholderStore.names)
+                        }
+                        .font(.system(size: fontSize - 1))
+                        Button("Clear Selection") {
+                            deleteSelection.removeAll()
+                        }
+                        .font(.system(size: fontSize - 1))
+                        Spacer()
+                        Text("\(deleteSelection.count) selected")
+                            .font(.system(size: fontSize - 2))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    // List with toggles
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(placeholderStore.names, id: \.self) { name in
+                                Toggle(isOn: Binding<Bool>(
+                                    get: { deleteSelection.contains(name) },
+                                    set: { newVal in
+                                        if newVal { deleteSelection.insert(name) }
+                                        else { deleteSelection.remove(name) }
+                                    }
+                                )) {
+                                    Text(name)
+                                        .font(.system(size: fontSize))
+                                }
+                                .toggleStyle(.checkbox)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .frame(minHeight: 220)
+
+                    HStack {
+                        Button("Cancel") { cancelDeletePlaceholders() }
+                            .font(.system(size: fontSize))
+                        Spacer()
+                        Button("Delete") { applyDeletePlaceholders() }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.red)
+                            .font(.system(size: fontSize))
+                            .disabled(deleteSelection.isEmpty)
+                    }
+                }
+                .padding(14)
+                .frame(minWidth: 520, minHeight: 360)
             }
         }
 
