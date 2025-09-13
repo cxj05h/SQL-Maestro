@@ -155,16 +155,17 @@ struct ContentView: View {
                             Text("Delete Template…")
                         }
                     }
-                    .onTapGesture {
-                        withAnimation(.easeInOut(duration: 0.15)) {
-                            selectTemplate(template)
+                    .highPriorityGesture(
+                        TapGesture(count: 2).onEnded {
+                            editTemplateInline(template)
                         }
+                    )
+                    .onTapGesture {
+                        selectTemplate(template)
                         LOG("Template selected", ctx: ["template": template.name])
                     }
-                    .onTapGesture(count: 2) {
-                        loadTemplate(template)
-                    }
                 }
+                .animation(nil, value: selectedTemplate?.id)
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
                 .onKeyPress(.return) {
@@ -614,15 +615,11 @@ struct ContentView: View {
         if let currentIndex = filteredTemplates.firstIndex(where: { $0.id == selectedTemplate?.id }) {
             let newIndex = currentIndex + direction
             if newIndex >= 0 && newIndex < filteredTemplates.count {
-                withAnimation(.easeInOut(duration: 0.15)) {
-                    selectTemplate(filteredTemplates[newIndex])
-                }
+                selectTemplate(filteredTemplates[newIndex])
                 LOG("Template navigation", ctx: ["direction": "\(direction)", "template": filteredTemplates[newIndex].name])
             }
         } else {
-            withAnimation(.easeInOut(duration: 0.15)) {
-                selectTemplate(direction > 0 ? filteredTemplates.first : filteredTemplates.last)
-            }
+            selectTemplate(direction > 0 ? filteredTemplates.first : filteredTemplates.last)
             LOG("Template navigation start", ctx: ["template": selectedTemplate?.name ?? "none"])
         }
     }
@@ -714,9 +711,8 @@ struct ContentView: View {
         }
     }
     
-    // Helper to set selection and persist for current session
+    // Helper to set selection and persist for current session (no draft commit here for responsiveness)
     private func selectTemplate(_ t: TemplateItem?) {
-        commitDraftsForCurrentSession()
         selectedTemplate = t
         if let t = t {
             sessionSelectedTemplate[sessions.current] = t.id
@@ -765,6 +761,7 @@ struct ContentView: View {
     }
     
     private func editTemplateInline(_ t: TemplateItem) {
+        commitDraftsForCurrentSession() // commit on action
         TemplateEditorWindow.present(for: t, manager: templates)
         LOG("Inline edit open", ctx: ["template": t.name])
     }
