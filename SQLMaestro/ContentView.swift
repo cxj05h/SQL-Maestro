@@ -415,6 +415,8 @@ struct ContentView: View {
                     .font(.system(size: fontSize))
             }
         }
+        .frame(maxWidth: 540, alignment: .leading)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
     
     // NEW: Field with dropdown component for both static and dynamic fields, with onCommit
@@ -569,6 +571,9 @@ struct ContentView: View {
             Text("Session:")
                 .font(.system(size: fontSize))
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
+                .frame(minWidth: 70, alignment: .leading)
             ForEach(TicketSession.allCases, id: \.self) { s in
                 Button(action: {
                     switchToSession(s)
