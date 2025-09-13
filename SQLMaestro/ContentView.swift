@@ -17,19 +17,20 @@ struct ContentView: View {
     @FocusState private var isSearchFocused: Bool
     @FocusState private var isListFocused: Bool
     
-    // Static fields are now session-aware
-    @State private var orgId: String = ""
-    @State private var acctId: String = ""
-    @State private var mysqlDb: String = ""
-    @State private var companyLabel: String = ""
-    
-    // Track static fields per session
+    // Track static fields per session - but now using SessionManager for global cache too
     @State private var sessionStaticFields: [TicketSession: (orgId: String, acctId: String, mysqlDb: String, company: String)] = [
         .one: ("", "", "", ""),
         .two: ("", "", "", ""),
         .three: ("", "", "", "")
     ]
-    
+    // Static fields are now session-aware and track global cache
+    @State private var orgId: String = ""
+    @State private var acctId: String = ""
+    @State private var mysqlDb: String = ""
+    @State private var companyLabel: String = ""
+    @State private var draftDynamicValues: [TicketSession:[String:String]] = [:]
+
+
     var body: some View {
         NavigationSplitView {
             // Query Templates Pane
@@ -157,16 +158,6 @@ struct ContentView: View {
                     navigateTemplate(direction: 1)
                     return .handled
                 }
-                .onChange(of: searchText) { oldVal, newVal in
-                    LOG("Template search", ctx: ["query": newVal, "results": "\(filteredTemplates.count)"])
-                    
-                    if !filteredTemplates.isEmpty && selectedTemplate == nil {
-                        withAnimation(.easeInOut(duration: 0.15)) {
-                            selectedTemplate = filteredTemplates.first
-                        }
-                        LOG("Auto-selected first search result", ctx: ["template": filteredTemplates.first?.name ?? "none"])
-                    }
-                }
                 .focused($isListFocused)
                 
                 if !searchText.isEmpty {
@@ -180,7 +171,7 @@ struct ContentView: View {
         } detail: {
             // Right side: Fields + Output
             VStack(spacing: 12) {
-                // NEW: Session and Template Info Header
+                // Session and Template Info Header
                 VStack(spacing: 8) {
                     HStack {
                         // Session info
@@ -258,6 +249,8 @@ struct ContentView: View {
                         acctId = ""
                         mysqlDb = ""
                         companyLabel = ""
+                        draftDynamicValues[sessions.current] = [:]
+                        // Clear static fields for current session
                         sessionStaticFields[sessions.current] = ("", "", "", "")
                         LOG("All fields cleared (including static)", ctx: ["session": "\(sessions.current.rawValue)"])
                     }
@@ -318,17 +311,22 @@ struct ContentView: View {
         }
     }
     
-    // MARK: — Static fields (always visible)
+    // MARK: – Static fields (now with dropdown history)
     private var staticFields: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Static Info")
                 .font(.system(size: fontSize + 4, weight: .semibold))
                 .foregroundStyle(Theme.purple)
             HStack {
-                labeledField("Org-ID", text: $orgId, placeholder: "e.g., 606079893960")
-                    .onChange(of: orgId) { oldVal, newVal in
+                fieldWithDropdown(
+                    label: "Org-ID",
+                    placeholder: "e.g., 606079893960",
+                    value: $orgId,
+                    historyKey: "Org-ID",
+                    onCommit: { newVal in
+                        // Update session cache
                         sessionStaticFields[sessions.current] = (newVal, acctId, mysqlDb, companyLabel)
-                        
+                        // Lookup mapping only on commit
                         if let m = mapping.lookup(orgId: newVal) {
                             mysqlDb = m.mysqlDb
                             companyLabel = m.companyName ?? ""
@@ -337,22 +335,31 @@ struct ContentView: View {
                             companyLabel = ""
                             sessionStaticFields[sessions.current] = (newVal, acctId, mysqlDb, "")
                         }
-                        LOG("OrgID changed", ctx: ["old": oldVal, "new": newVal])
+                        LOG("OrgID committed", ctx: ["value": newVal])
                     }
-                    
-                labeledField("Acct-ID", text: $acctId, placeholder: "e.g., 123456")
-                    .onChange(of: acctId) { oldVal, newVal in
+                )
+                fieldWithDropdown(
+                    label: "Acct-ID",
+                    placeholder: "e.g., 123456",
+                    value: $acctId,
+                    historyKey: "Acct-ID",
+                    onCommit: { newVal in
                         sessionStaticFields[sessions.current] = (orgId, newVal, mysqlDb, companyLabel)
-                        LOG("AcctID changed", ctx: ["old": oldVal, "new": newVal])
+                        LOG("AcctID committed", ctx: ["value": newVal])
                     }
-                    
+                )
                 VStack(alignment: .leading) {
                     HStack {
-                        labeledField("MySQL DB", text: $mysqlDb, placeholder: "e.g., mySQL04")
-                            .onChange(of: mysqlDb) { oldVal, newVal in
+                        fieldWithDropdown(
+                            label: "MySQL DB",
+                            placeholder: "e.g., mySQL04",
+                            value: $mysqlDb,
+                            historyKey: "MySQL-DB",
+                            onCommit: { newVal in
                                 sessionStaticFields[sessions.current] = (orgId, acctId, newVal, companyLabel)
-                                LOG("MySQL DB changed", ctx: ["old": oldVal, "new": newVal])
+                                LOG("MySQL DB committed", ctx: ["value": newVal])
                             }
+                        )
                         Button("Save") {
                             saveMapping()
                         }
@@ -365,7 +372,7 @@ struct ContentView: View {
         }
     }
     
-    // MARK: — Dynamic fields from template placeholders
+    // MARK: – Dynamic fields from template placeholders
     private var dynamicFields: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Field Names")
@@ -397,6 +404,67 @@ struct ContentView: View {
         }
     }
     
+    // NEW: Field with dropdown component for both static and dynamic fields, with onCommit
+    private func fieldWithDropdown(
+        label: String,
+        placeholder: String,
+        value: Binding<String>,
+        historyKey: String,
+        onCommit: ((String) -> Void)? = nil
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(label)
+                .font(.system(size: fontSize - 1))
+                .foregroundStyle(.secondary)
+            HStack(spacing: 6) {
+                TextField(placeholder, text: value, onEditingChanged: { isEditing in
+                    // Only persist and run commit logic when editing ENDS
+                    if !isEditing {
+                        let finalVal = value.wrappedValue
+                        if !finalVal.isEmpty {
+                            sessions.setValue(finalVal, for: historyKey)
+                            LOG("Global cache updated (commit)", ctx: ["field": label, "value": finalVal])
+                        }
+                        onCommit?(finalVal)
+                    }
+                })
+                .textFieldStyle(PlainTextFieldStyle())
+                .padding(.vertical, 4)
+                .padding(.horizontal, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color.secondary.opacity(0.4), lineWidth: 1)
+                )
+                .font(.system(size: fontSize))
+                .frame(maxWidth: 420)
+
+                Menu {
+                    let recents = sessions.globalRecents[historyKey] ?? []
+                    if recents.isEmpty {
+                        Text("No recent values")
+                    } else {
+                        ForEach(recents, id: \.self) { recentValue in
+                            Button(recentValue) {
+                                value.wrappedValue = recentValue
+                                LOG("Recent value selected", ctx: ["field": label, "value": recentValue])
+                                sessions.setValue(recentValue, for: historyKey)
+                                onCommit?(recentValue)
+                            }
+                        }
+                    }
+                } label: {
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: fontSize - 2))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 4)
+                }
+                .menuStyle(.borderlessButton)
+                .help("Recent values")
+            }
+        }
+    }
+    
     private func navigateTemplate(direction: Int) {
         guard !filteredTemplates.isEmpty else { return }
         
@@ -417,36 +485,31 @@ struct ContentView: View {
     }
     
     private func dynamicFieldRow(_ placeholder: String) -> some View {
+        let currentSession = sessions.current
         let valBinding = Binding<String>(
-            get: { sessions.value(for: placeholder) },
-            set: { newVal in sessions.setValue(newVal, for: placeholder) }
-        )
-        return VStack(alignment: .leading, spacing: 4) {
-            Text(placeholder)
-                .font(.system(size: fontSize - 1))
-                .foregroundStyle(.secondary)
-            HStack {
-                TextField("Value for \(placeholder)", text: valBinding)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: fontSize))
-                Menu("Recent") {
-                    let recents = sessions.globalRecents[placeholder] ?? []
-                    if recents.isEmpty {
-                        Text("No recent values")
-                    } else {
-                        ForEach(recents, id: \.self) { v in
-                            Button(v) { sessions.setValue(v, for: placeholder) }
-                        }
-                    }
-                }
-                .menuStyle(.borderlessButton)
-                .font(.system(size: fontSize))
+            get: {
+                (draftDynamicValues[currentSession]?[placeholder]) ?? sessions.value(for: placeholder)
+            },
+            set: { newVal in
+                var bucket = draftDynamicValues[currentSession] ?? [:]
+                bucket[placeholder] = newVal
+                draftDynamicValues[currentSession] = bucket
             }
-        }
-        .onTapGesture { LOG("Field focus", ctx: ["placeholder": placeholder]) }
+        )
+        return fieldWithDropdown(
+            label: placeholder,
+            placeholder: "Value for \(placeholder)",
+            value: valBinding,
+            historyKey: placeholder,
+            onCommit: { finalVal in
+                // Write-through to global cache ONLY when the user leaves the field
+                sessions.setValue(finalVal, for: placeholder)
+                LOG("Dynamic field committed", ctx: ["ph": placeholder, "value": finalVal])
+            }
+        )
     }
     
-    // MARK: — Output area
+    // MARK: – Output area
     private var outputView: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Output SQL")
@@ -492,10 +555,6 @@ struct ContentView: View {
                     if sessions.current == s {
                         Button("Clear This Session") {
                             sessions.clearAllFieldsForCurrentSession()
-                            orgId = ""
-                            acctId = ""
-                            mysqlDb = ""
-                            companyLabel = ""
                             sessionStaticFields[sessions.current] = ("", "", "", "")
                             LOG("Session cleared from context menu", ctx: ["session": "\(s.rawValue)"])
                         }
@@ -509,7 +568,7 @@ struct ContentView: View {
         }
     }
     
-    // MARK: — Actions
+    // MARK: – Actions
     // Function to handle session switching
     private func switchToSession(_ newSession: TicketSession) {
         guard newSession != sessions.current else { return }
@@ -518,19 +577,6 @@ struct ContentView: View {
         
         // Save current session's static fields
         sessionStaticFields[sessions.current] = (orgId, acctId, mysqlDb, companyLabel)
-        
-        // Save current session's dynamic values before switching
-        if let t = selectedTemplate {
-            for ph in t.placeholders {
-                // Skip static placeholders as they're handled separately
-                if ph == "Org-ID" || ph == "Acct-ID" { continue }
-                
-                let currentValue = sessions.value(for: ph)
-                if !currentValue.isEmpty {
-                    sessions.setValue(currentValue, for: ph)
-                }
-            }
-        }
         
         // Switch to new session
         sessions.setCurrent(newSession)
@@ -628,18 +674,6 @@ struct ContentView: View {
             sessions.setCurrent(s)
             sessions.renameCurrent(to: input.stringValue)
         }
-    }
-    
-    private func labeledField(_ label: String, text: Binding<String>, placeholder: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(label)
-                .font(.system(size: fontSize - 1))
-                .foregroundStyle(.secondary)
-            TextField(placeholder, text: text)
-                .textFieldStyle(.roundedBorder)
-                .font(.system(size: fontSize))
-        }
-        .onTapGesture { LOG("Static field focus", ctx: ["label": label]) }
     }
     
     private func promptForString(title: String, message: String, defaultValue: String = "") -> String? {

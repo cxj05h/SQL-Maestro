@@ -1,5 +1,4 @@
 import SwiftUI
-
 @main
 struct SQLMaestroApp: App {
     @StateObject private var templates = TemplateManager()
