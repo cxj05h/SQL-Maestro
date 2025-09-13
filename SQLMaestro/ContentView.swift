@@ -11,6 +11,7 @@ struct ContentView: View {
     @State private var populatedSQL: String = ""
     @State private var toastCopied: Bool = false
     @State private var fontSize: CGFloat = 13
+    @State private var hoverRecentKey: String? = nil
     
     @State private var searchText: String = ""
     
@@ -252,6 +253,7 @@ struct ContentView: View {
                         .font(.system(size: fontSize))
                     
                     Button("Clear Session #\(sessions.current.rawValue)") {
+                        commitDraftsForCurrentSession()
                         sessions.clearAllFieldsForCurrentSession()
                         orgId = ""
                         acctId = ""
@@ -310,6 +312,17 @@ struct ContentView: View {
                 selectedTemplate = found
                 currentSQL = found.rawSQL
             }
+        }
+    }
+    // Commit any non-empty draft values for the CURRENT session to global history
+    private func commitDraftsForCurrentSession() {
+        let cur = sessions.current
+        let bucket = draftDynamicValues[cur] ?? [:]
+        for (ph, val) in bucket {
+            let trimmed = val.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            sessions.setValue(trimmed, for: ph)
+            LOG("Draft committed", ctx: ["session": "\(cur.rawValue)", "ph": ph, "value": trimmed])
         }
     }
     
@@ -419,7 +432,8 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
     
-    // NEW: Field with dropdown component for both static and dynamic fields, with onCommit
+    
+    // MARK: NEW: Field with dropdown component for both static and dynamic fields, with onCommit
     private func fieldWithDropdown(
         label: String,
         placeholder: String,
@@ -431,9 +445,12 @@ struct ContentView: View {
             Text(label)
                 .font(.system(size: fontSize - 1))
                 .foregroundStyle(.secondary)
+
             HStack(spacing: 6) {
+
+                // Text field
                 TextField(placeholder, text: value, onEditingChanged: { isEditing in
-                    // Only persist and run commit logic when editing ENDS
+                    // Commit when editing ENDS (blur / click-away / tab out)
                     if !isEditing {
                         let finalVal = value.wrappedValue
                         if !finalVal.isEmpty {
@@ -452,7 +469,17 @@ struct ContentView: View {
                 )
                 .font(.system(size: fontSize))
                 .frame(maxWidth: 420)
+                // NEW: Commit when user presses Enter while still in the field
+                .onSubmit {
+                    let finalVal = value.wrappedValue
+                    if !finalVal.isEmpty {
+                        sessions.setValue(finalVal, for: historyKey)
+                        LOG("Global cache updated (submit)", ctx: ["field": label, "value": finalVal])
+                    }
+                    onCommit?(finalVal)
+                }
 
+                // Recents popover trigger
                 Button {
                     openRecentsKey = historyKey
                 } label: {
@@ -490,8 +517,11 @@ struct ContentView: View {
                                     .padding(.horizontal, 10)
                                     .padding(.vertical, 8)
                                     .frame(maxWidth: .infinity, alignment: .leading)
-                                    .contentShape(Rectangle()) // makes full row clickable
-                                    .background(Color.clear)
+                                    .contentShape(Rectangle()) // full-row click
+                                    .background(hoverRecentKey == recentValue ? Color.secondary.opacity(0.12) : Color.clear) // hover highlight
+                                    .onHover { inside in
+                                        hoverRecentKey = inside ? recentValue : nil
+                                    }
                                 }
                                 .buttonStyle(.plain)
                                 Divider()
@@ -612,6 +642,7 @@ struct ContentView: View {
     
     // Helper to set selection and persist for current session
     private func selectTemplate(_ t: TemplateItem?) {
+        commitDraftsForCurrentSession()
         selectedTemplate = t
         if let t = t {
             sessionSelectedTemplate[sessions.current] = t.id
@@ -622,7 +653,7 @@ struct ContentView: View {
     // Function to handle session switching
     private func switchToSession(_ newSession: TicketSession) {
         guard newSession != sessions.current else { return }
-        
+        commitDraftsForCurrentSession()
         let previousSession = sessions.current
         
         // Save current session's static fields
@@ -651,6 +682,7 @@ struct ContentView: View {
     }
     
     private func loadTemplate(_ t: TemplateItem) {
+        commitDraftsForCurrentSession()
         selectedTemplate = t
         currentSQL = t.rawSQL
         // Remember the template per session
@@ -673,6 +705,7 @@ struct ContentView: View {
     
     // Now handles case variations for static placeholders
     private func populateQuery() {
+        commitDraftsForCurrentSession()
         guard let t = selectedTemplate else { return }
         var sql = t.rawSQL
         
