@@ -105,7 +105,7 @@ final class TemplateManager: ObservableObject {
 
         let boilerplate = """
         -- \(finalName).sql
-        -- Add placeholders like {{Org-id}} or {{sig-id}} below:
+        -- Add placeholders like {{Org-ID}} or {{sig-ID}} below:
         SELECT 1;
         """
         try boilerplate.write(to: url, atomically: true, encoding: .utf8)

@@ -13,7 +13,9 @@ struct ContentView: View {
     @State private var fontSize: CGFloat = 13
     
     @State private var searchText: String = ""
+    
     @FocusState private var isSearchFocused: Bool
+    @FocusState private var isListFocused: Bool
     
     // Static fields
     @State private var orgId: String = ""
@@ -25,6 +27,7 @@ struct ContentView: View {
         NavigationSplitView {
             // Query Templates Pane
             VStack(spacing: 8) {
+                // Header with buttons
                 HStack(spacing: 8) {
                     Text("Query Templates").font(.headline).foregroundStyle(Theme.purple)
                     Spacer()
@@ -35,7 +38,7 @@ struct ContentView: View {
                         .buttonStyle(.bordered)
                 }
                 
-                // Search field
+                // Search field - RIGHT UNDER THE HEADER
                 HStack {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(.secondary)
@@ -49,9 +52,23 @@ struct ContentView: View {
                         .onChange(of: searchText) { oldVal, newVal in
                             LOG("Template search", ctx: ["query": newVal, "results": "\(filteredTemplates.count)"])
                         }
+                        .onKeyPress(.return) {
+                            // Transfer focus to list and auto-select first result
+                            if !filteredTemplates.isEmpty {
+                                if selectedTemplate == nil {
+                                    selectedTemplate = filteredTemplates.first
+                                }
+                                isSearchFocused = false
+                                isListFocused = true
+                                LOG("Focus transferred from search to list", ctx: ["selectedTemplate": selectedTemplate?.name ?? "none"])
+                            }
+                            return .handled
+                        }
                     if !searchText.isEmpty {
                         Button("Clear") {
                             searchText = ""
+                            selectedTemplate = nil
+                            isSearchFocused = true
                             LOG("Template search cleared")
                         }
                         .buttonStyle(.borderless)
@@ -59,20 +76,92 @@ struct ContentView: View {
                     }
                 }
                 
-                List(filteredTemplates, selection: $selectedTemplate) { t in
-                    Text(t.name)
-                        .contextMenu {
-                            Button("Open in VS Code") { openInVSCode(t.url) }
-                            Button("Edit in App") { editTemplateInline(t) }
-                            Divider()
-                            Button("Rename…") { renameTemplateFlow(t) }
+                // Enhanced List - RIGHT UNDER THE SEARCH
+                List(filteredTemplates, selection: $selectedTemplate) { template in
+                    HStack {
+                        // Icon for visual appeal
+                        Image(systemName: "doc.text.fill")
+                            .foregroundStyle(selectedTemplate?.id == template.id ? .white : Theme.gold.opacity(0.6))
+                            .font(.system(size: 14))
+                        
+                        // Template name
+                        Text(template.name)
+                            .font(.system(size: fontSize, weight: selectedTemplate?.id == template.id ? .medium : .regular))
+                            .foregroundStyle(selectedTemplate?.id == template.id ? .white : .primary)  // CHANGED TO WHITE
+                        
+                        Spacer()
+                        
+                        // Placeholder count badge
+                        if !template.placeholders.isEmpty {
+                            Text("\(template.placeholders.count)")
+                                .font(.caption2)
+                                .fontWeight(.medium)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(selectedTemplate?.id == template.id ? .white.opacity(0.3) : Theme.gold.opacity(0.15))
+                                .foregroundStyle(selectedTemplate?.id == template.id ? .white : Theme.gold)
+                                .clipShape(Capsule())
                         }
-                        .onTapGesture(count: 2) {
-                            loadTemplate(t)
+                    }
+                    .padding(.vertical, 4)
+                    .padding(.horizontal, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(selectedTemplate?.id == template.id ? Theme.purple.opacity(0.1) : Color.clear)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(selectedTemplate?.id == template.id ? Theme.purple.opacity(0.3) : Color.clear, lineWidth: 1.5)
+                            )
+                    )
+                    .contentShape(Rectangle())
+                    .contextMenu {
+                        Button("Open in VS Code") { openInVSCode(template.url) }
+                        Button("Edit in App") { editTemplateInline(template) }
+                        Divider()
+                        Button("Rename…") { renameTemplateFlow(template) }
+                    }
+                    .onTapGesture {
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            selectedTemplate = template
                         }
+                        LOG("Template selected", ctx: ["template": template.name])
+                    }
+                    .onTapGesture(count: 2) {
+                        loadTemplate(template)
+                    }
                 }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .onKeyPress(.return) {
+                    if let selected = selectedTemplate {
+                        loadTemplate(selected)
+                        LOG("Template loaded via Enter key", ctx: ["template": selected.name])
+                        return .handled
+                    }
+                    return .ignored
+                }
+                .onKeyPress(.upArrow) {
+                    navigateTemplate(direction: -1)
+                    return .handled
+                }
+                .onKeyPress(.downArrow) {
+                    navigateTemplate(direction: 1)
+                    return .handled
+                }
+                .onChange(of: searchText) { oldVal, newVal in
+                    LOG("Template search", ctx: ["query": newVal, "results": "\(filteredTemplates.count)"])
+                    
+                    // Auto-select first result when searching
+                    if !filteredTemplates.isEmpty && selectedTemplate == nil {
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            selectedTemplate = filteredTemplates.first
+                        }
+                        LOG("Auto-selected first search result", ctx: ["template": filteredTemplates.first?.name ?? "none"])
+                    }
+                }
+                .focused($isListFocused)
                 
-                // Show search results info
+                // Search results info at the bottom
                 if !searchText.isEmpty {
                     Text("\(filteredTemplates.count) of \(templates.templates.count) templates")
                         .font(.caption)
@@ -81,7 +170,8 @@ struct ContentView: View {
             }
             .padding()
             .background(Theme.grayBG)
-        } detail: {
+        }
+            detail: {
             // Right side: Fields + Output
             VStack(spacing: 12) {
                 staticFields
@@ -104,7 +194,6 @@ struct ContentView: View {
                         
                         LOG("All fields cleared (including static)", ctx: ["session": "\(sessions.current.rawValue)"])
                     }.buttonStyle(.bordered)
-                        .keyboardShortcut("k", modifiers: [.command]).buttonStyle(.bordered)
                         .keyboardShortcut("k", modifiers: [.command])
                     Spacer()
                     sessionButtons
@@ -198,7 +287,7 @@ struct ContentView: View {
             Text("Field Names").font(.title3).foregroundStyle(Theme.pink)
             if let t = selectedTemplate {
                 // Filter out static placeholders that are already handled in the static section
-                let staticPlaceholders = ["Org-id", "Acct-ID"] // These are handled by static fields
+                let staticPlaceholders = ["Org-ID", "Acct-ID"] // These are handled by static fields
                 let dynamicPlaceholders = t.placeholders.filter { !staticPlaceholders.contains($0) }
                 
                 if dynamicPlaceholders.isEmpty {
@@ -220,6 +309,29 @@ struct ContentView: View {
             }
         }
     }
+    
+    //   this function inside ContentView (before the final closing brace):
+    private func navigateTemplate(direction: Int) {
+        guard !filteredTemplates.isEmpty else { return }
+        
+        if let currentIndex = filteredTemplates.firstIndex(where: { $0.id == selectedTemplate?.id }) {
+            let newIndex = currentIndex + direction
+            if newIndex >= 0 && newIndex < filteredTemplates.count {
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    selectedTemplate = filteredTemplates[newIndex]
+                }
+                LOG("Template navigation", ctx: ["direction": "\(direction)", "template": filteredTemplates[newIndex].name])
+            }
+        } else {
+            // No selection, select first or last based on direction
+            withAnimation(.easeInOut(duration: 0.15)) {
+                selectedTemplate = direction > 0 ? filteredTemplates.first : filteredTemplates.last
+            }
+            LOG("Template navigation start", ctx: ["template": selectedTemplate?.name ?? "none"])
+        }
+    }
+    
+    
     
     private func dynamicFieldRow(_ placeholder: String) -> some View {
         let valBinding = Binding<String>(
