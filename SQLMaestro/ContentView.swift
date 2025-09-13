@@ -266,33 +266,37 @@ struct ContentView: View {
                 Divider()
                 dynamicFields
                 
-                HStack {
-                    Button("Populate Query") { populateQuery() }
-                        .buttonStyle(.borderedProminent)
-                        .tint(Theme.pink)
-                        .keyboardShortcut(.return, modifiers: [.command])
+                ZStack {
+                    // Left-aligned action buttons row
+                    HStack {
+                        Button("Populate Query") { populateQuery() }
+                            .buttonStyle(.borderedProminent)
+                            .tint(Theme.pink)
+                            .keyboardShortcut(.return, modifiers: [.command])
+                            .font(.system(size: fontSize))
+                        
+                        Button("Clear Session #\(sessions.current.rawValue)") {
+                            commitDraftsForCurrentSession()
+                            sessions.clearAllFieldsForCurrentSession()
+                            orgId = ""
+                            acctId = ""
+                            mysqlDb = ""
+                            companyLabel = ""
+                            draftDynamicValues[sessions.current] = [:]
+                            // Clear static fields for current session
+                            sessionStaticFields[sessions.current] = ("", "", "", "")
+                            LOG("All fields cleared (including static)", ctx: ["session": "\(sessions.current.rawValue)"])
+                        }
+                        .buttonStyle(.bordered)
+                        .keyboardShortcut("k", modifiers: [.command])
                         .font(.system(size: fontSize))
-                    
-                    Button("Clear Session #\(sessions.current.rawValue)") {
-                        commitDraftsForCurrentSession()
-                        sessions.clearAllFieldsForCurrentSession()
-                        orgId = ""
-                        acctId = ""
-                        mysqlDb = ""
-                        companyLabel = ""
-                        draftDynamicValues[sessions.current] = [:]
-                        // Clear static fields for current session
-                        sessionStaticFields[sessions.current] = ("", "", "", "")
-                        LOG("All fields cleared (including static)", ctx: ["session": "\(sessions.current.rawValue)"])
+                        
+                        Spacer()
                     }
-                    .buttonStyle(.bordered)
-                    .keyboardShortcut("k", modifiers: [.command])
-                    .font(.system(size: fontSize))
                     
-                    Spacer()
-                    
-                    // Session buttons
+                    // Centered session buttons overlay
                     sessionButtons
+                        .frame(maxWidth: .infinity, alignment: .center)
                 }
                 
                 outputView
