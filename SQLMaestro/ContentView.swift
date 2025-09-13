@@ -1,4 +1,3 @@
-
 import SwiftUI
 import AppKit
 
@@ -74,6 +73,142 @@ private extension Notification.Name {
     static let wheelFieldDidFocus = Notification.Name("WheelFieldDidFocus")
 }
 
+extension Notification.Name {
+    static let showKeyboardShortcuts = Notification.Name("ShowKeyboardShortcuts")
+}
+
+// Central registry for keyboard shortcuts used across the app
+final class ShortcutRegistry: ObservableObject {
+    struct Item: Identifiable {
+        let id = UUID()
+        let name: String
+        let keyLabel: String
+        let modifiers: EventModifiers
+        let scope: String
+        var display: String {
+            ShortcutRegistry.format(keyLabel: keyLabel, modifiers: modifiers)
+        }
+    }
+
+    static let shared = ShortcutRegistry()
+    @Published private(set) var items: [Item] = []
+
+    func register(name: String, keyLabel: String, modifiers: EventModifiers, scope: String) {
+        let candidate = Item(name: name, keyLabel: keyLabel, modifiers: modifiers, scope: scope)
+        // Avoid duplicates by full identity
+        if !items.contains(where: { $0.name == candidate.name && $0.keyLabel == candidate.keyLabel && $0.modifiers == candidate.modifiers && $0.scope == candidate.scope }) {
+            items.append(candidate)
+            items.sort { (a, b) in
+                if a.scope == b.scope {
+                    return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
+                }
+                return a.scope.localizedCaseInsensitiveCompare(b.scope) == .orderedAscending
+            }
+            LOG("Shortcut registered", ctx: ["name": name, "combo": candidate.display, "scope": scope])
+        }
+    }
+
+    static func format(keyLabel: String, modifiers: EventModifiers) -> String {
+        var parts = ""
+        if modifiers.contains(.command) { parts += "⌘" }
+        if modifiers.contains(.option)  { parts += "⌥" }
+        if modifiers.contains(.shift)   { parts += "⇧" }
+        if modifiers.contains(.control) { parts += "⌃" }
+        return parts + keyLabel.uppercased()
+    }
+}
+
+// View helper to auto-register a shortcut in the global registry
+fileprivate extension View {
+    /// Register using a visible key label (e.g. "K", "/", "1")
+    func registerShortcut(name: String, keyLabel: String, modifiers: EventModifiers, scope: String) -> some View {
+        self.onAppear {
+            ShortcutRegistry.shared.register(name: name, keyLabel: keyLabel, modifiers: modifiers, scope: scope)
+        }
+    }
+    /// Convenience overload that extracts a label from a KeyEquivalent when possible.
+    func registerShortcut(name: String, key: KeyEquivalent, modifiers: EventModifiers, scope: String) -> some View {
+        let label: String
+        switch key {
+        case .return: label = "↩"
+        case .escape: label = "⎋"
+        case .tab:    label = "⇥"
+        case .space:  label = "Space"
+        case .delete: label = "⌫"
+        default:
+            let desc = String(describing: key)
+            if desc.count == 1 {
+                label = desc.uppercased()
+            } else {
+                // Fallback — still usable in the list, though not symbolic
+                label = desc.uppercased()
+            }
+        }
+        return registerShortcut(name: name, keyLabel: label, modifiers: modifiers, scope: scope)
+    }
+}
+
+// Runtime Help menu item that opens the Keyboard Shortcuts sheet
+private final class MenuBridge: NSObject {
+    static let shared = MenuBridge()
+    private static var installed = false
+
+    @objc func showShortcuts(_ sender: Any?) {
+        NotificationCenter.default.post(name: .showKeyboardShortcuts, object: nil)
+    }
+
+    static func installHelpMenuItem() {
+        guard !installed else { return }
+        guard let mainMenu = NSApp.mainMenu else {
+            LOG("Help menu install aborted: mainMenu is nil")
+            return
+        }
+
+        // Prefer the app's helpMenu if already set
+        var submenu: NSMenu? = NSApp.helpMenu
+
+        // Try to find an existing top-level "Help" item if helpMenu isn't set yet
+        if submenu == nil {
+            if let helpItem = mainMenu.items.first(where: { $0.title == "Help" }),
+               let found = helpItem.submenu {
+                submenu = found
+                NSApp.helpMenu = found
+            }
+        }
+
+        // Create a Help menu if still missing (some SwiftUI setups don't create one)
+        if submenu == nil {
+            let helpItem = NSMenuItem(title: "Help", action: nil, keyEquivalent: "")
+            let helpSub = NSMenu(title: "Help")
+            helpItem.submenu = helpSub
+            mainMenu.addItem(helpItem)
+            NSApp.helpMenu = helpSub
+            submenu = helpSub
+            LOG("Help menu created")
+        }
+
+        guard let helpMenu = submenu else {
+            LOG("Help menu install failed: no submenu available")
+            return
+        }
+
+        // Avoid duplicates
+        if !helpMenu.items.contains(where: { $0.title == "Keyboard Shortcuts…" }) {
+            helpMenu.addItem(.separator())
+            let item = NSMenuItem(title: "Keyboard Shortcuts…",
+                                  action: #selector(MenuBridge.shared.showShortcuts(_:)),
+                                  keyEquivalent: "")
+            item.target = MenuBridge.shared
+            helpMenu.addItem(item)
+            installed = true
+            LOG("Help menu: Keyboard Shortcuts… added")
+        } else {
+            installed = true
+            LOG("Help menu: Keyboard Shortcuts… already present")
+        }
+    }
+}
+
 struct ContentView: View {
     @EnvironmentObject var templates: TemplateManager
     @StateObject private var mapping = MappingStore()
@@ -87,6 +222,7 @@ struct ContentView: View {
     @State private var hoverRecentKey: String? = nil
     
     @State private var searchText: String = ""
+    @State private var showShortcutsSheet: Bool = false
     
     @FocusState private var isSearchFocused: Bool
     @FocusState private var isListFocused: Bool
@@ -360,6 +496,7 @@ struct ContentView: View {
                             .tint(Theme.pink)
                             .keyboardShortcut(.return, modifiers: [.command])
                             .font(.system(size: fontSize))
+                            .registerShortcut(name: "Populate Query", key: .return, modifiers: [.command], scope: "Global")
                         
                         Button("Clear Session #\(sessions.current.rawValue)") {
                             commitDraftsForCurrentSession()
@@ -377,6 +514,7 @@ struct ContentView: View {
                         .tint(Theme.accent) // <- same green used for Company label
                         .keyboardShortcut("k", modifiers: [.command])
                         .font(.system(size: fontSize))
+                        .registerShortcut(name: "Clear Session", keyLabel: "K", modifiers: [.command], scope: "Global")
                         
                         Spacer()
                     }
@@ -394,6 +532,7 @@ struct ContentView: View {
                 }
                 .keyboardShortcut("f", modifiers: [.command])
                 .hidden()
+                .registerShortcut(name: "Search Queries", keyLabel: "F", modifiers: [.command], scope: "Global")
             }
             .padding()
             .background(Theme.grayBG)
@@ -419,6 +558,12 @@ struct ContentView: View {
             dateFocusScrollMode = true
             LOG("Date focus-scroll enabled")
         }
+        .onReceive(NotificationCenter.default.publisher(for: .showKeyboardShortcuts)) { _ in
+            showShortcutsSheet = true
+        }
+        .sheet(isPresented: $showShortcutsSheet) {
+            KeyboardShortcutsSheet(onClose: { showShortcutsSheet = false })
+        }
         .onAppear {
             LOG("App started")
             // Initialize with session 1
@@ -442,6 +587,8 @@ struct ContentView: View {
                     return event
                 }
             }
+            // Ensure Help ▸ Keyboard Shortcuts… exists
+            MenuBridge.installHelpMenuItem()
         }
         .onDisappear {
             if let m = scrollMonitor {
@@ -2143,3 +2290,71 @@ struct ContentView: View {
             }
         }
     }
+
+
+// Live list of registered keyboard shortcuts (grouped by scope)
+private struct KeyboardShortcutsSheet: View {
+    @ObservedObject private var reg = ShortcutRegistry.shared
+    @Environment(\.dismiss) private var dismiss
+    var onClose: (() -> Void)? = nil
+    @State private var fontSize: CGFloat = 13
+
+    private var grouped: [(scope: String, items: [ShortcutRegistry.Item])] {
+        let groups = Dictionary(grouping: reg.items, by: { $0.scope })
+        return groups
+            .map { (key: $0.key, value: $0.value.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }) }
+            .sorted { $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending }
+            .map { (scope: $0.key, items: $0.value) }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline) {
+                Text("Keyboard Shortcuts")
+                    .font(.system(size: fontSize + 4, weight: .semibold))
+                    .foregroundStyle(Theme.purple)
+                Spacer()
+                Button("Close") {
+                    onClose?()
+                    dismiss()
+                }
+                .keyboardShortcut(.escape, modifiers: [])
+            }
+
+            if reg.items.isEmpty {
+                Text("No shortcuts are registered yet.")
+                    .font(.system(size: fontSize))
+                    .foregroundStyle(.secondary)
+                    .padding(.top, 6)
+            } else {
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 14) {
+                        ForEach(grouped, id: \.scope) { group in
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text(group.scope)
+                                    .font(.system(size: fontSize, weight: .semibold))
+                                    .foregroundStyle(Theme.aqua)
+                                ForEach(group.items) { it in
+                                    HStack(spacing: 10) {
+                                        Text(it.name)
+                                            .font(.system(size: fontSize))
+                                            .frame(maxWidth: .infinity, alignment: .leading)
+                                        Text(it.display)
+                                            .font(.system(size: fontSize, weight: .medium, design: .monospaced))
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .padding(.vertical, 2)
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                    }
+                    .padding(.top, 6)
+                }
+                .frame(minHeight: 260)
+            }
+        }
+        .padding(16)
+        .frame(minWidth: 520, minHeight: 360)
+    }
+}

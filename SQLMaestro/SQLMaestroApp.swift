@@ -17,6 +17,11 @@ struct SQLMaestroApp: App {
         }
         .commands {
             AppMenuCommands(tmpl: templates, sessions: sessions)
+            CommandGroup(after: .help) {
+                Button("Keyboard Shortcuts…") {
+                    NotificationCenter.default.post(name: .showKeyboardShortcuts, object: nil)
+                }
+            }
         }
     }
 }
