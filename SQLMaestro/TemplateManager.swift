@@ -105,8 +105,8 @@ final class TemplateManager: ObservableObject {
 
         let boilerplate = """
         -- \(finalName).sql
-        -- Add placeholders like {{Org-ID}} or {{sig-ID}} below:
-        SELECT 1;
+        -- Write placeholders {{Org-ID}} and {{Acct-ID}} (if needed), exactly as stated. Any other placeholders can use whatever text you want inside double curly brackets:
+        SELECT <you_queries_here...>;
         """
         try boilerplate.write(to: url, atomically: true, encoding: .utf8)
         LOG("Template created", ctx: ["name": finalName])
