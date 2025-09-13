@@ -17,13 +17,13 @@ struct ContentView: View {
     @FocusState private var isSearchFocused: Bool
     @FocusState private var isListFocused: Bool
     
-    // CHANGED: Static fields are now session-aware
+    // Static fields are now session-aware
     @State private var orgId: String = ""
     @State private var acctId: String = ""
     @State private var mysqlDb: String = ""
     @State private var companyLabel: String = ""
     
-    // NEW: Track static fields per session
+    // Track static fields per session
     @State private var sessionStaticFields: [TicketSession: (orgId: String, acctId: String, mysqlDb: String, company: String)] = [
         .one: ("", "", "", ""),
         .two: ("", "", "", ""),
@@ -36,19 +36,24 @@ struct ContentView: View {
             VStack(spacing: 8) {
                 // Header with buttons
                 HStack(spacing: 8) {
-                    Text("Query Templates").font(.headline).foregroundStyle(Theme.purple)
+                    Text("Query Templates")
+                        .font(.system(size: fontSize + 4, weight: .semibold))
+                        .foregroundStyle(Theme.purple)
                     Spacer()
                     Button("New Template") { createNewTemplateFlow() }
                         .buttonStyle(.borderedProminent)
                         .tint(Theme.purple)
+                        .font(.system(size: fontSize))
                     Button("Reload") { templates.loadTemplates() }
                         .buttonStyle(.bordered)
+                        .font(.system(size: fontSize))
                 }
                 
                 // Search field
                 HStack {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(.secondary)
+                        .font(.system(size: fontSize))
                     TextField("Search templates...", text: $searchText)
                         .textFieldStyle(.roundedBorder)
                         .font(.system(size: fontSize))
@@ -79,6 +84,7 @@ struct ContentView: View {
                         }
                         .buttonStyle(.borderless)
                         .foregroundStyle(Theme.pink)
+                        .font(.system(size: fontSize))
                     }
                 }
                 
@@ -87,7 +93,7 @@ struct ContentView: View {
                     HStack {
                         Image(systemName: "doc.text.fill")
                             .foregroundStyle(selectedTemplate?.id == template.id ? .white : Theme.gold.opacity(0.6))
-                            .font(.system(size: 14))
+                            .font(.system(size: fontSize + 1))
                         
                         Text(template.name)
                             .font(.system(size: fontSize, weight: selectedTemplate?.id == template.id ? .medium : .regular))
@@ -97,7 +103,7 @@ struct ContentView: View {
                         
                         if !template.placeholders.isEmpty {
                             Text("\(template.placeholders.count)")
-                                .font(.caption2)
+                                .font(.system(size: fontSize - 3))
                                 .fontWeight(.medium)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
@@ -165,7 +171,7 @@ struct ContentView: View {
                 
                 if !searchText.isEmpty {
                     Text("\(filteredTemplates.count) of \(templates.templates.count) templates")
-                        .font(.caption)
+                        .font(.system(size: fontSize - 2))
                         .foregroundStyle(.secondary)
                 }
             }
@@ -174,18 +180,78 @@ struct ContentView: View {
         } detail: {
             // Right side: Fields + Output
             VStack(spacing: 12) {
+                // NEW: Session and Template Info Header
+                VStack(spacing: 8) {
+                    HStack {
+                        // Session info
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Session")
+                                .font(.system(size: fontSize - 2))
+                                .foregroundStyle(.secondary)
+                            Text(sessions.sessionNames[sessions.current] ?? "#\(sessions.current.rawValue)")
+                                .font(.system(size: fontSize + 3, weight: .semibold))
+                                .foregroundStyle(Theme.purple)
+                        }
+                        
+                        Spacer()
+                        
+                        // Company info (center)
+                        if !companyLabel.isEmpty {
+                            VStack(alignment: .center, spacing: 4) {
+                                Text("Company")
+                                    .font(.system(size: fontSize - 2))
+                                    .foregroundStyle(.secondary)
+                                Text(companyLabel)
+                                    .font(.system(size: fontSize + 3, weight: .medium))
+                                    .foregroundStyle(Theme.accent)
+                            }
+                        } else {
+                            // Empty spacer to maintain balance when no company
+                            VStack(alignment: .center) {
+                                Text(" ")
+                                    .font(.system(size: fontSize - 2))
+                                Text(" ")
+                                    .font(.system(size: fontSize + 3))
+                            }
+                        }
+                        
+                        Spacer()
+                        
+                        // Active Template info (right)
+                        VStack(alignment: .trailing, spacing: 4) {
+                            Text("Active Template")
+                                .font(.system(size: fontSize - 2))
+                                .foregroundStyle(.secondary)
+                            Text(selectedTemplate?.name ?? "No template loaded")
+                                .font(.system(size: fontSize + 3, weight: .medium))
+                                .foregroundStyle(Theme.gold)
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Theme.grayBG.opacity(0.5))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Theme.purple.opacity(0.2), lineWidth: 1)
+                            )
+                    )
+                }
+                
+                Divider()
+                
                 staticFields
                 Divider()
                 dynamicFields
                 
-                // CHANGED: Session buttons moved next to Clear button
                 HStack {
                     Button("Populate Query") { populateQuery() }
                         .buttonStyle(.borderedProminent)
                         .tint(Theme.pink)
                         .keyboardShortcut(.return, modifiers: [.command])
+                        .font(.system(size: fontSize))
                     
-                    // CHANGED: Button now shows which session it's clearing
                     Button("Clear Session #\(sessions.current.rawValue)") {
                         sessions.clearAllFieldsForCurrentSession()
                         orgId = ""
@@ -197,10 +263,11 @@ struct ContentView: View {
                     }
                     .buttonStyle(.bordered)
                     .keyboardShortcut("k", modifiers: [.command])
+                    .font(.system(size: fontSize))
                     
                     Spacer()
                     
-                    // MOVED: Session buttons now here
+                    // Session buttons
                     sessionButtons
                 }
                 
@@ -220,6 +287,7 @@ struct ContentView: View {
         .overlay(alignment: .top) {
             if toastCopied {
                 Text("Copied to clipboard")
+                    .font(.system(size: fontSize))
                     .padding(.horizontal, 12).padding(.vertical, 6)
                     .background(Theme.aqua.opacity(0.9)).foregroundStyle(.black)
                     .clipShape(Capsule())
@@ -232,27 +300,9 @@ struct ContentView: View {
                 fontSize = max(10, min(22, fontSize + CGFloat(delta)))
             }
         }
-        // CHANGED: Toolbar now shows current session AND template
-        .toolbar {
-            ToolbarItem(placement: .automatic) {
-                HStack(spacing: 12) {
-                    Text("Session: \(sessions.sessionNames[sessions.current] ?? "#\(sessions.current.rawValue)")")
-                        .font(.callout)
-                        .fontWeight(.medium)
-                        .foregroundStyle(Theme.purple)
-                    
-                    Divider()
-                        .frame(height: 16)
-                    
-                    Text(selectedTemplate?.name ?? "No template loaded")
-                        .font(.callout)
-                        .foregroundStyle(Theme.gold)
-                }
-            }
-        }
         .onAppear {
             LOG("App started")
-            // NEW: Initialize with session 1
+            // Initialize with session 1
             sessions.setCurrent(.one)
         }
     }
@@ -271,9 +321,10 @@ struct ContentView: View {
     // MARK: — Static fields (always visible)
     private var staticFields: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Static Info").font(.title3).foregroundStyle(Theme.purple)
+            Text("Static Info")
+                .font(.system(size: fontSize + 4, weight: .semibold))
+                .foregroundStyle(Theme.purple)
             HStack {
-                // CHANGED: Now auto-saves to current session
                 labeledField("Org-ID", text: $orgId, placeholder: "e.g., 606079893960")
                     .onChange(of: orgId) { oldVal, newVal in
                         sessionStaticFields[sessions.current] = (newVal, acctId, mysqlDb, companyLabel)
@@ -304,12 +355,10 @@ struct ContentView: View {
                             }
                         Button("Save") {
                             saveMapping()
-                        }.buttonStyle(.bordered)
-                            .tint(Theme.accent)
-                    }
-                    if !companyLabel.isEmpty {
-                        Text("Company: \(companyLabel)")
-                            .font(.caption).foregroundStyle(Theme.accent)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(Theme.accent)
+                        .font(.system(size: fontSize))
                     }
                 }
             }
@@ -319,16 +368,18 @@ struct ContentView: View {
     // MARK: — Dynamic fields from template placeholders
     private var dynamicFields: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Field Names").font(.title3).foregroundStyle(Theme.pink)
+            Text("Field Names")
+                .font(.system(size: fontSize + 4, weight: .semibold))
+                .foregroundStyle(Theme.pink)
             if let t = selectedTemplate {
-                // CHANGED: Better handling of case variations for static placeholders
+                // Better handling of case variations for static placeholders
                 let staticPlaceholders = Set(["Org-ID", "Org-id", "org-id", "Acct-ID", "Acct-id", "acct-id"].map { $0.lowercased() })
                 let dynamicPlaceholders = t.placeholders.filter { !staticPlaceholders.contains($0.lowercased()) }
                 
                 if dynamicPlaceholders.isEmpty {
                     Text("This template only uses static fields (Org-ID, Acct-ID).")
                         .foregroundStyle(.secondary)
-                        .font(.callout)
+                        .font(.system(size: fontSize))
                 } else {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 8) {
@@ -341,6 +392,7 @@ struct ContentView: View {
             } else {
                 Text("Load a template to see its fields.")
                     .foregroundStyle(.secondary)
+                    .font(.system(size: fontSize))
             }
         }
     }
@@ -370,7 +422,9 @@ struct ContentView: View {
             set: { newVal in sessions.setValue(newVal, for: placeholder) }
         )
         return VStack(alignment: .leading, spacing: 4) {
-            Text(placeholder).font(.caption).foregroundStyle(.secondary)
+            Text(placeholder)
+                .font(.system(size: fontSize - 1))
+                .foregroundStyle(.secondary)
             HStack {
                 TextField("Value for \(placeholder)", text: valBinding)
                     .textFieldStyle(.roundedBorder)
@@ -384,7 +438,9 @@ struct ContentView: View {
                             Button(v) { sessions.setValue(v, for: placeholder) }
                         }
                     }
-                }.menuStyle(.borderlessButton)
+                }
+                .menuStyle(.borderlessButton)
+                .font(.system(size: fontSize))
             }
         }
         .onTapGesture { LOG("Field focus", ctx: ["placeholder": placeholder]) }
@@ -393,7 +449,9 @@ struct ContentView: View {
     // MARK: — Output area
     private var outputView: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Output SQL").font(.title3).foregroundStyle(Theme.aqua)
+            Text("Output SQL")
+                .font(.system(size: fontSize + 4, weight: .semibold))
+                .foregroundStyle(Theme.aqua)
             TextEditor(text: $populatedSQL)
                 .font(.system(size: fontSize, weight: .regular, design: .monospaced))
                 .frame(minHeight: 160)
@@ -410,16 +468,18 @@ struct ContentView: View {
         }
     }
     
-    // COMPLETELY REWRITTEN: Session buttons with proper functionality
+    // Session buttons with proper functionality
     private var sessionButtons: some View {
         HStack(spacing: 12) {
-            Text("Session:").font(.callout).foregroundStyle(.secondary)
+            Text("Session:")
+                .font(.system(size: fontSize))
+                .foregroundStyle(.secondary)
             ForEach(TicketSession.allCases, id: \.self) { s in
                 Button(action: {
                     switchToSession(s)
                 }) {
                     Text(sessions.sessionNames[s] ?? "#\(s.rawValue)")
-                        .font(.system(size: 14, weight: sessions.current == s ? .semibold : .regular))
+                        .font(.system(size: fontSize - 1, weight: sessions.current == s ? .semibold : .regular))
                         .frame(minWidth: 60)
                         .padding(.horizontal, 12)
                         .padding(.vertical, 6)
@@ -450,7 +510,7 @@ struct ContentView: View {
     }
     
     // MARK: — Actions
-    // NEW: Function to handle session switching
+    // Function to handle session switching
     private func switchToSession(_ newSession: TicketSession) {
         guard newSession != sessions.current else { return }
         
@@ -504,7 +564,7 @@ struct ContentView: View {
         LOG("Open in VSCode", ctx: ["file": url.lastPathComponent])
     }
     
-    // CHANGED: Now handles case variations for static placeholders
+    // Now handles case variations for static placeholders
     private func populateQuery() {
         guard let t = selectedTemplate else { return }
         var sql = t.rawSQL
@@ -572,7 +632,9 @@ struct ContentView: View {
     
     private func labeledField(_ label: String, text: Binding<String>, placeholder: String) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(label).font(.caption).foregroundStyle(.secondary)
+            Text(label)
+                .font(.system(size: fontSize - 1))
+                .foregroundStyle(.secondary)
             TextField(placeholder, text: text)
                 .textFieldStyle(.roundedBorder)
                 .font(.system(size: fontSize))
@@ -700,7 +762,7 @@ struct ContentView: View {
                     
                     companyLabel = companyName
                     
-                    // NEW: Update session static fields
+                    // Update session static fields
                     sessionStaticFields[sessions.current] = (orgId, acctId, mysqlDb, companyName)
                     
                     showAlert(title: "Success", message: "Mapping saved successfully!\n\nOrg: \(orgId)\nMySQL: \(mysqlDb)\nCompany: \(companyName)")
@@ -750,12 +812,15 @@ struct ContentView: View {
         @ObservedObject var manager: TemplateManager
         @State private var text: String = ""
         @Environment(\.dismiss) var dismiss
+        @State private var fontSize: CGFloat = 13
         
         var body: some View {
             VStack(spacing: 8) {
-                Text("Editing \(item.name).sql").font(.headline).foregroundStyle(Theme.aqua)
+                Text("Editing \(item.name).sql")
+                    .font(.system(size: fontSize + 4, weight: .semibold))
+                    .foregroundStyle(Theme.aqua)
                 TextEditor(text: $text)
-                    .font(.system(.body, design: .monospaced))
+                    .font(.system(size: fontSize, design: .monospaced))
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.aqua.opacity(0.3)))
                     .disableAutocorrection(true)
                     .autocorrectionDisabled(true)
@@ -767,9 +832,12 @@ struct ContentView: View {
                         }
                     }
                 HStack {
-                    Button("Open in VS Code") { openInVSCode(item.url) }.buttonStyle(.bordered)
+                    Button("Open in VS Code") { openInVSCode(item.url) }
+                        .buttonStyle(.bordered)
+                        .font(.system(size: fontSize))
                     Spacer()
                     Button("Cancel") { dismiss() }
+                        .font(.system(size: fontSize))
                     Button("Save") {
                         do {
                             try manager.saveTemplate(url: item.url, newContent: text)
@@ -777,12 +845,20 @@ struct ContentView: View {
                         } catch {
                             NSSound.beep()
                         }
-                    }.buttonStyle(.borderedProminent).tint(Theme.pink)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.pink)
+                    .font(.system(size: fontSize))
                 }
             }
             .padding()
             .onAppear {
                 text = (try? String(contentsOf: item.url, encoding: .utf8)) ?? item.rawSQL
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .fontBump)) { note in
+                if let delta = note.object as? Int {
+                    fontSize = max(10, min(22, fontSize + CGFloat(delta)))
+                }
             }
         }
         
