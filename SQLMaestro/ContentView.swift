@@ -1531,6 +1531,7 @@ struct ContentView: View {
                         mysqlDb: mysqlDb,
                         companyName: companyName
                     )
+                    self.prettyRewriteMappingFile()
                     
                     companyLabel = companyName
                     
@@ -1564,6 +1565,49 @@ struct ContentView: View {
         alert.alertStyle = .informational
         alert.addButton(withTitle: "OK")
         alert.runModal()
+    }
+
+    // Rewrites the org→mysql mapping JSON with pretty formatting so each entry
+    // is on its own line (instead of raw string appends).
+    private func prettyRewriteMappingFile() {
+        let fm = FileManager.default
+        do {
+            // App Support inside the sandbox, e.g. .../Library/Application Support/
+            let appSupport = try fm.url(
+                for: .applicationSupportDirectory,
+                in: .userDomainMask,
+                appropriateFor: nil,
+                create: true
+            )
+            let fileURL = appSupport
+                .appendingPathComponent("SQLMaestro")
+                .appendingPathComponent("mappings")
+                .appendingPathComponent("org_mysql_map.json")
+
+            guard fm.fileExists(atPath: fileURL.path) else {
+                LOG("Pretty rewrite skipped — mapping file missing", ctx: ["path": fileURL.path])
+                return
+            }
+
+            let data = try Data(contentsOf: fileURL)
+            let obj = try JSONSerialization.jsonObject(with: data, options: [])
+
+            // Pretty-print (and keep keys stable if available on this macOS SDK)
+            var options: JSONSerialization.WritingOptions = [.prettyPrinted]
+            #if swift(>=5.0)
+            if #available(macOS 10.13, *) { options.insert(.sortedKeys) }
+            #endif
+
+            var output = try JSONSerialization.data(withJSONObject: obj, options: options)
+
+            // Ensure a trailing newline for nicer diffs / editors
+            if output.last != 0x0A { output.append(0x0A) }
+
+            try output.write(to: fileURL, options: .atomic)
+            LOG("Mapping file pretty-printed", ctx: ["path": fileURL.path])
+        } catch {
+            LOG("Pretty rewrite failed", ctx: ["error": error.localizedDescription])
+        }
     }
     
     // Template Editor Window
