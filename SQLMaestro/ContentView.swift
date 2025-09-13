@@ -1439,6 +1439,10 @@ struct ContentView: View {
         @Environment(\.dismiss) var dismiss
         @State private var fontSize: CGFloat = 13
         @ObservedObject private var placeholderStore = PlaceholderStore.shared
+        @State private var isEditingPlaceholders: Bool = false
+        @State private var isDeletingPlaceholders: Bool = false
+        @State private var editingNames: [String] = []
+        @State private var editError: String? = nil
 
         // Extracts {{placeholder}} names in order of appearance, de-duplicated (case-sensitive)
         private func detectedPlaceholders(from source: String) -> [String] {
@@ -1514,6 +1518,87 @@ struct ContentView: View {
             return nil
         }
 
+        // Local prompt for this editor
+        private func promptForString(title: String, message: String, defaultValue: String = "") -> String? {
+            let alert = NSAlert()
+            alert.messageText = title
+            alert.informativeText = message
+            alert.alertStyle = .informational
+            let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+            input.stringValue = defaultValue
+            input.placeholderString = "e.g., Org-ID"
+            alert.accessoryView = input
+            alert.addButton(withTitle: "OK")
+            alert.addButton(withTitle: "Cancel")
+            return alert.runModal() == .alertFirstButtonReturn
+                ? input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                : nil
+        }
+
+        // Add new placeholder flow
+        private func addPlaceholderFlow() {
+            guard let raw = promptForString(title: "Add Placeholder",
+                                            message: "Enter a placeholder name (do not include braces).") else { return }
+            let cleaned = raw
+                .replacingOccurrences(of: "{", with: "")
+                .replacingOccurrences(of: "}", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !cleaned.isEmpty else { return }
+            if placeholderStore.names.contains(cleaned) {
+                let dup = NSAlert()
+                dup.messageText = "Already Exists"
+                dup.informativeText = "A placeholder named \"\(cleaned)\" already exists."
+                dup.alertStyle = .warning
+                dup.addButton(withTitle: "OK")
+                dup.runModal()
+                return
+            }
+            placeholderStore.add(cleaned)
+            LOG("Placeholder added via menu", ctx: ["name": cleaned])
+        }
+
+        // Edit placeholders helpers
+        private func sanitizeName(_ raw: String) -> String {
+            raw.replacingOccurrences(of: "{", with: "")
+               .replacingOccurrences(of: "}", with: "")
+               .trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        private func startEditPlaceholders() {
+            editingNames = placeholderStore.names
+            editError = nil
+            isEditingPlaceholders = true
+            LOG("Edit placeholders started", ctx: ["count": "\(editingNames.count)"])
+        }
+
+        private func cancelEditPlaceholders() {
+            isEditingPlaceholders = false
+            editError = nil
+            LOG("Edit placeholders cancelled")
+        }
+
+        private func applyEditPlaceholders() {
+            // Validate: non-empty, unique after sanitization
+            var seen = Set<String>()
+            var cleaned: [String] = []
+            for raw in editingNames {
+                let name = sanitizeName(raw)
+                if name.isEmpty {
+                    editError = "Placeholder names cannot be empty."
+                    return
+                }
+                if !seen.insert(name).inserted {
+                    editError = "Duplicate name: \"\(name)\""
+                    return
+                }
+                cleaned.append(name)
+            }
+            placeholderStore.set(cleaned)
+            LOG("Edit placeholders applied", ctx: ["count": "\(cleaned.count)"])
+            isEditingPlaceholders = false
+            editError = nil
+        }
+
         var body: some View {
             VStack(spacing: 8) {
                 Text("Editing \(item.name).sql")
@@ -1536,6 +1621,23 @@ struct ContentView: View {
                                     .font(.system(size: fontSize - 1, weight: .medium))
                                     .help("Insert {{\(ph)}} at cursor")
                             }
+                            Divider()
+                                .frame(height: 18)
+                                .overlay(Color.secondary.opacity(0.2))
+                                .padding(.horizontal, 4)
+                            Menu {
+                                Button("Add new placeholder…") { addPlaceholderFlow() }
+                                Divider()
+                                Button("Edit placeholders…") { startEditPlaceholders() }
+                                Button("Delete placeholders…") { isDeletingPlaceholders = true }
+                                    .disabled(true) // next step
+                            } label: {
+                                Image(systemName: "ellipsis.circle")
+                                    .font(.system(size: fontSize + 2, weight: .medium))
+                                    .foregroundStyle(Theme.purple)
+                                    .help("Placeholder options")
+                            }
+                            .menuStyle(.borderlessButton)
                         }
                         .padding(6)
                         .background(
@@ -1582,6 +1684,53 @@ struct ContentView: View {
                 }
             }
             .padding()
+            .sheet(isPresented: $isEditingPlaceholders) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Edit Placeholders")
+                        .font(.system(size: fontSize + 2, weight: .semibold))
+                        .foregroundStyle(Theme.purple)
+                        .padding(.bottom, 4)
+
+                    if let err = editError {
+                        Text(err)
+                            .font(.system(size: fontSize - 2))
+                            .foregroundStyle(.red)
+                    }
+
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(Array(editingNames.enumerated()), id: \.offset) { idx, _ in
+                                HStack(spacing: 8) {
+                                    Text("\(idx + 1).")
+                                        .frame(width: 24, alignment: .trailing)
+                                        .foregroundStyle(.secondary)
+                                        .font(.system(size: fontSize - 2))
+                                    TextField("Placeholder name", text: Binding(
+                                        get: { editingNames[idx] },
+                                        set: { editingNames[idx] = $0 }
+                                    ))
+                                    .textFieldStyle(.roundedBorder)
+                                    .font(.system(size: fontSize))
+                                }
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .frame(minHeight: 220)
+
+                    HStack {
+                        Button("Cancel") { cancelEditPlaceholders() }
+                            .font(.system(size: fontSize))
+                        Spacer()
+                        Button("Apply") { applyEditPlaceholders() }
+                            .buttonStyle(.borderedProminent)
+                            .tint(Theme.pink)
+                            .font(.system(size: fontSize))
+                    }
+                }
+                .padding(14)
+                .frame(minWidth: 520, minHeight: 360)
+            }
             .onAppear {
                 text = (try? String(contentsOf: item.url, encoding: .utf8)) ?? item.rawSQL
                 // One-time sync: harvest placeholders from this file into the global store
