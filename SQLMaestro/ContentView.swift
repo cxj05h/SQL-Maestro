@@ -33,6 +33,13 @@ struct ContentView: View {
     @State private var sessionSelectedTemplate: [TicketSession: UUID] = [:]
     @State private var openRecentsKey: String? = nil
 
+    // Date picker working components
+    @State private var dpYear: Int = Calendar.current.component(.year, from: Date())
+    @State private var dpMonth: Int = Calendar.current.component(.month, from: Date())
+    @State private var dpDay: Int = Calendar.current.component(.day, from: Date())
+    @State private var dpHour: Int = Calendar.current.component(.hour, from: Date())
+    @State private var dpMinute: Int = Calendar.current.component(.minute, from: Date())
+    @State private var dpSecond: Int = Calendar.current.component(.second, from: Date())
 
     var body: some View {
         NavigationSplitView {
@@ -341,6 +348,7 @@ struct ContentView: View {
             }
         }
     }
+
     // Commit any non-empty draft values for the CURRENT session to global history
     private func commitDraftsForCurrentSession() {
         let cur = sessions.current
@@ -457,7 +465,11 @@ struct ContentView: View {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 8) {
                             ForEach(dynamicPlaceholders, id: \.self) { ph in
-                                dynamicFieldRow(ph)
+                                if ph.lowercased() == "date" {
+                                    dateFieldRow("Date")
+                                } else {
+                                    dynamicFieldRow(ph)
+                                }
                             }
                         }
                     }.frame(maxHeight: 260)
@@ -471,7 +483,6 @@ struct ContentView: View {
         .frame(maxWidth: 540, alignment: .leading)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
-    
     
     // MARK: NEW: Field with dropdown component for both static and dynamic fields, with onCommit
     private func fieldWithDropdown(
@@ -660,6 +671,151 @@ struct ContentView: View {
                 LOG("Dynamic field committed", ctx: ["ph": placeholder, "value": finalVal])
             }
         )
+    }
+
+    // MARK: NEW — Date field row specialized UI for {{Date}} with inline "wheel" spinners (no popovers)
+    private func dateFieldRow(_ placeholder: String) -> some View {
+        let currentSession = sessions.current
+        let valBinding = Binding<String>(
+            get: {
+                (draftDynamicValues[currentSession]?[placeholder]) ?? sessions.value(for: placeholder)
+            },
+            set: { newVal in
+                var bucket = draftDynamicValues[currentSession] ?? [:]
+                bucket[placeholder] = newVal
+                draftDynamicValues[currentSession] = bucket
+            }
+        )
+
+        // Prefill components from current value (or "now") when this row appears
+        let _ = {
+            prefillDateComponents(from: valBinding.wrappedValue)
+        }()
+
+        return VStack(alignment: .leading, spacing: 4) {
+            Text(placeholder)
+                .font(.system(size: fontSize - 1))
+                .foregroundStyle(.secondary)
+
+            // Row: value field + inline "wheel" controls + Apply
+            HStack(spacing: 8) {
+                // The visible text field showing the formatted date string
+                TextField("YYYY-MM-DD HH:MM:SS", text: valBinding, onEditingChanged: { isEditing in
+                    if !isEditing {
+                        let finalVal = valBinding.wrappedValue
+                        if !finalVal.isEmpty {
+                            sessions.setValue(finalVal, for: placeholder)
+                            LOG("Date field commit", ctx: ["value": finalVal])
+                        }
+                    }
+                })
+                .textFieldStyle(PlainTextFieldStyle())
+                .padding(.vertical, 4)
+                .padding(.horizontal, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color.secondary.opacity(0.4), lineWidth: 1)
+                )
+                .font(.system(size: fontSize, design: .monospaced))
+                .frame(maxWidth: 360)
+                .onSubmit {
+                    let finalVal = valBinding.wrappedValue
+                    if !finalVal.isEmpty {
+                        sessions.setValue(finalVal, for: placeholder)
+                        LOG("Date field submit", ctx: ["value": finalVal])
+                    }
+                }
+
+                // Inline numeric "wheels": Year / Month / Day / Hour / Minute / Second
+                HStack(spacing: 6) {
+                    WheelNumberField(value: $dpYear,   range: yearsRange(),    width: 72,  label: "YYYY")
+                    WheelNumberField(value: $dpMonth,  range: 1...12,          width: 54,  label: "MM")
+                    WheelNumberField(value: $dpDay,    range: 1...daysInMonth(year: dpYear, month: dpMonth), width: 54,  label: "DD")
+                    Text("—")
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 2)
+                    WheelNumberField(value: $dpHour,   range: 0...23,          width: 54,  label: "hh")
+                    WheelNumberField(value: $dpMinute, range: 0...59,          width: 54,  label: "mm")
+                    WheelNumberField(value: $dpSecond, range: 0...59,          width: 54,  label: "ss")
+                }
+                .padding(.vertical, 2)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
+                )
+
+                Button("Apply") {
+                    let str = formatDateString(
+                        year: dpYear, month: dpMonth, day: dpDay,
+                        hour: dpHour, minute: dpMinute, second: dpSecond
+                    )
+                    // Clamp day in case month/year changed before apply
+                    let maxDay = daysInMonth(year: dpYear, month: dpMonth)
+                    if dpDay > maxDay { dpDay = maxDay }
+                    valBinding.wrappedValue = str
+                    sessions.setValue(str, for: placeholder)
+                    LOG("Date inline apply", ctx: ["value": str])
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.pink)
+                .font(.system(size: fontSize))
+            }
+
+            // Helper hint
+            Text("Tip: Use ↑/↓ or the mouse wheel to change values. Press Tab to move across fields.")
+                .font(.system(size: fontSize - 3))
+                .foregroundStyle(.secondary)
+        }
+    }
+
+
+
+    // Helpers for date math/format/parse
+    private func yearsRange() -> ClosedRange<Int> {
+        let current = Calendar.current.component(.year, from: Date())
+        // Generous range around current year; adjust if desired
+        return (current - 30)...(current + 30)
+    }
+
+    private func daysInMonth(year: Int, month: Int) -> Int {
+        var comps = DateComponents()
+        comps.year = year
+        comps.month = month
+        let calendar = Calendar.current
+        let date = calendar.date(from: comps)!
+        return calendar.range(of: .day, in: .month, for: date)?.count ?? 31
+    }
+
+    private func formatDateString(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int) -> String {
+        // Always "YYYY-MM-DD HH:MM:SS"
+        String(format: "%04d-%02d-%02d %02d:%02d:%02d", year, month, day, hour, minute, second)
+    }
+
+    private func prefillDateComponents(from str: String) {
+        // Try parse "YYYY-MM-DD HH:MM:SS"
+        let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+
+        if let d = formatter.date(from: trimmed) {
+            let cal = Calendar.current
+            dpYear = cal.component(.year, from: d)
+            dpMonth = cal.component(.month, from: d)
+            dpDay = cal.component(.day, from: d)
+            dpHour = cal.component(.hour, from: d)
+            dpMinute = cal.component(.minute, from: d)
+            dpSecond = cal.component(.second, from: d)
+        } else {
+            let now = Date()
+            let cal = Calendar.current
+            dpYear = cal.component(.year, from: now)
+            dpMonth = cal.component(.month, from: now)
+            dpDay = cal.component(.day, from: now)
+            dpHour = cal.component(.hour, from: now)
+            dpMinute = cal.component(.minute, from: now)
+            dpSecond = cal.component(.second, from: now)
+        }
     }
     
     // MARK: – Output area
@@ -1146,3 +1302,136 @@ struct ContentView: View {
     }
 }
 
+    // MARK: Inline numeric "wheel" field — arrow keys + mouse wheel to adjust value
+    private struct WheelNumberField: NSViewRepresentable {
+        @Binding var value: Int
+        let range: ClosedRange<Int>
+        let width: CGFloat
+        let label: String  // placeholder label like "YYYY", "MM"
+
+        func makeNSView(context: Context) -> NSTextField {
+            let tf = WheelTextField()
+            tf.isBordered = false
+            tf.drawsBackground = true
+            tf.backgroundColor = .clear
+            tf.focusRingType = .default
+            tf.font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize(for: .small), weight: .regular)
+            tf.alignment = .center
+            tf.cell?.usesSingleLineMode = true
+            tf.maximumNumberOfLines = 1
+            tf.lineBreakMode = .byTruncatingTail
+            tf.placeholderString = label
+            tf.target = context.coordinator
+            tf.action = #selector(Coordinator.commit(_:))
+            tf.translatesAutoresizingMaskIntoConstraints = false
+            tf.widthAnchor.constraint(equalToConstant: width).isActive = true
+
+            // Wire handlers
+            tf.onAdjust = { delta in
+                context.coordinator.adjust(by: delta)
+            }
+            tf.onCommitText = {
+                context.coordinator.commitFromText()
+            }
+            context.coordinator.currentTextField = tf
+            return tf
+        }
+
+        func updateNSView(_ nsView: NSTextField, context: Context) {
+            let formatted = format(value)
+            if nsView.stringValue != formatted {
+                nsView.stringValue = formatted
+            }
+        }
+
+        func makeCoordinator() -> Coordinator {
+            Coordinator(self)
+        }
+
+        private func format(_ v: Int) -> String {
+            // Pad to 2 digits for everything but year (>= 1000)
+            if range.lowerBound <= 0 && range.upperBound >= 100 { // crude heuristic
+                return String(format: "%02d", v)
+            }
+            if label.uppercased() == "YYYY" {
+                return String(format: "%04d", v)
+            }
+            return String(format: "%02d", v)
+        }
+
+        final class Coordinator: NSObject {
+            var parent: WheelNumberField
+
+            init(_ parent: WheelNumberField) {
+                self.parent = parent
+            }
+
+            @objc func commit(_ sender: Any?) {
+                commitFromText()
+            }
+
+            func commitFromText() {
+                // Parse the text field to int and clamp
+                guard let tf = currentTextField else { return }
+                let raw = tf.stringValue.trimmingCharacters(in: .whitespaces)
+                if let n = Int(raw) {
+                    parent.value = clamp(n, to: parent.range)
+                    tf.stringValue = parent.format(parent.value)
+                } else {
+                    tf.stringValue = parent.format(parent.value)
+                }
+            }
+
+            func adjust(by delta: Int) {
+                let newVal = clamp(parent.value + delta, to: parent.range)
+                if newVal != parent.value {
+                    parent.value = newVal
+                    currentTextField?.stringValue = parent.format(newVal)
+                }
+            }
+
+            private func clamp(_ v: Int, to range: ClosedRange<Int>) -> Int {
+                min(max(v, range.lowerBound), range.upperBound)
+            }
+
+            weak var currentTextField: WheelTextField?
+        }
+
+        // Custom NSTextField subclass to capture arrows + scroll wheel
+        final class WheelTextField: NSTextField {
+            var onAdjust: ((Int) -> Void)?
+            var onCommitText: (() -> Void)?
+
+            override func becomeFirstResponder() -> Bool {
+                let result = super.becomeFirstResponder()
+                // nothing extra; tab focus works naturally
+                return result
+            }
+
+            override func keyDown(with event: NSEvent) {
+                switch event.keyCode {
+                case 126: // up arrow
+                    onAdjust?(+1)
+                case 125: // down arrow
+                    onAdjust?(-1)
+                case 36:  // return
+                    onCommitText?()
+                default:
+                    super.keyDown(with: event)
+                }
+            }
+
+            override func scrollWheel(with event: NSEvent) {
+                // Natural scrolling: positive deltaY is typically down; invert for "up to increase"
+                let delta = event.scrollingDeltaY
+                if abs(delta) >= 0.5 {
+                    onAdjust?(delta > 0 ? -1 : +1)
+                }
+            }
+
+            override func textDidEndEditing(_ notification: Notification) {
+                super.textDidEndEditing(notification)
+                onCommitText?()
+            }
+        }
+    }
