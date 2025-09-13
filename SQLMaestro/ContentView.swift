@@ -482,11 +482,16 @@ struct ContentView: View {
                                     onCommit?(recentValue)
                                     openRecentsKey = nil
                                 }) {
-                                    HStack { Text(recentValue).lineLimit(1); Spacer() }
-                                        .padding(.horizontal, 10)
-                                        .padding(.vertical, 8)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .contentShape(Rectangle())
+                                    HStack {
+                                        Text(recentValue)
+                                            .lineLimit(1)
+                                        Spacer()
+                                    }
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 8)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .contentShape(Rectangle()) // makes full row clickable
+                                    .background(Color.clear)
                                 }
                                 .buttonStyle(.plain)
                                 Divider()
