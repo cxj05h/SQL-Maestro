@@ -306,6 +306,7 @@ struct ContentView: View {
                             LOG("All fields cleared (including static)", ctx: ["session": "\(sessions.current.rawValue)"])
                         }
                         .buttonStyle(.bordered)
+                        .tint(Theme.accent) // <- same green used for Company label
                         .keyboardShortcut("k", modifiers: [.command])
                         .font(.system(size: fontSize))
                         
@@ -471,8 +472,8 @@ struct ContentView: View {
                         Button("Save") {
                             saveMapping()
                         }
-                        .buttonStyle(.bordered)
-                        .tint(Theme.accent)
+                        .buttonStyle(.borderedProminent)
+                        .tint(Theme.pink) // <- same pink as Apply/Populate Query
                         .font(.system(size: fontSize))
                     }
                 }
@@ -872,6 +873,8 @@ struct ContentView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.pink)
                 .font(.system(size: fontSize))
+                .fixedSize(horizontal: true, vertical: false)   // <- keeps width to fit "Apply"
+                .layoutPriority(3)                               // <- resists compression
             }
 
             // Helper hint
