@@ -1640,6 +1640,82 @@ struct ContentView: View {
             deleteSelection = []
         }
 
+        // Toggle SQL comments ("-- ") on the current line(s) in the editor.
+        // If all non-empty selected lines are commented, it will UNcomment; otherwise it will comment them.
+        private func toggleCommentOnSelection() {
+            guard let tv = activeEditorTextView() else {
+                NSSound.beep()
+                return
+            }
+            let ns = self.text as NSString
+            var sel = tv.selectedRange()
+            if sel.location == NSNotFound {
+                sel = NSRange(location: 0, length: 0)
+            }
+            // Expand to full line range covering selection (or caret line)
+            let lineRange = ns.lineRange(for: sel)
+            let segment = ns.substring(with: lineRange)
+
+            // Track trailing newline so we preserve it after transformation
+            let hasTrailingNewline = segment.hasSuffix("\n")
+            var lines = segment.components(separatedBy: "\n")
+            if hasTrailingNewline { lines.removeLast() } // last element is "" from trailing newline
+
+            // Decide if we are commenting or uncommenting
+            // "commented" means: optional leading spaces + "--" optionally followed by a space
+            let nonEmpty = lines.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            let allAlreadyCommented = nonEmpty.allSatisfy { line in
+                let trimmedLeading = line.drop(while: { $0 == " " || $0 == "\t" })
+                return trimmedLeading.hasPrefix("--")
+            }
+
+            var changedCount = 0
+            let transformed: [String] = lines.map { line in
+                let original = line
+                let trimmed = original.trimmingCharacters(in: .whitespaces)
+                if trimmed.isEmpty {
+                    return original // keep blank lines untouched
+                }
+                // Split leading whitespace
+                let leadingWhitespace = original.prefix { $0 == " " || $0 == "\t" }
+                let remainder = original.dropFirst(leadingWhitespace.count)
+
+                if allAlreadyCommented {
+                    // UNcomment: remove leading "--" and an optional single space after
+                    if remainder.hasPrefix("--") {
+                        let afterDashes = remainder.dropFirst(2)
+                        let afterSpace = afterDashes.first == " " ? afterDashes.dropFirst() : afterDashes
+                        changedCount += 1
+                        return String(leadingWhitespace) + String(afterSpace)
+                    } else {
+                        return original
+                    }
+                } else {
+                    // Comment: insert "-- " after any leading indentation
+                    changedCount += 1
+                    return String(leadingWhitespace) + "-- " + String(remainder)
+                }
+            }
+
+            let updatedSegment = transformed.joined(separator: "\n") + (hasTrailingNewline ? "\n" : "")
+            let newString = ns.replacingCharacters(in: lineRange, with: updatedSegment)
+
+            // Update SwiftUI and the NSTextView
+            self.text = newString
+            tv.string = newString
+
+            // Keep selection over the transformed block
+            let newRange = NSRange(location: lineRange.location, length: (updatedSegment as NSString).length)
+            tv.setSelectedRange(newRange)
+            tv.scrollRangeToVisible(newRange)
+
+            LOG("Toggle comment", ctx: [
+                "action": allAlreadyCommented ? "uncomment" : "comment",
+                "lines": "\(lines.count)",
+                "changed": "\(changedCount)"
+            ])
+        }
+
         var body: some View {
             VStack(spacing: 8) {
                 Text("Editing \(item.name).sql")
@@ -1678,6 +1754,23 @@ struct ContentView: View {
                                     .help("Placeholder options")
                             }
                             .menuStyle(.borderlessButton)
+                            Divider()
+                                .frame(height: 18)
+                                .overlay(Color.secondary.opacity(0.2))
+                                .padding(.horizontal, 4)
+                            Button {
+                                toggleCommentOnSelection()
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "text.quote")
+                                    Text("Comment/Uncomment")
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(Theme.purple)
+                            .font(.system(size: fontSize - 1))
+                            .keyboardShortcut("/", modifiers: [.command])
+                            .help("Toggle '--' comments on selected lines (⌘/)")
                         }
                         .padding(6)
                         .background(
