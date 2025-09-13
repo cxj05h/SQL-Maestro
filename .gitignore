@@ -1,0 +1,15 @@
+# macOS
+.DS_Store
+
+# Xcode junk
+DerivedData/
+xcuserdata/
+*.xcworkspace
+
+# Build artifacts
+build/
+dist/
+
+# SwiftPM / misc (if you ever add these)
+.swiftpm/
+.idea/
