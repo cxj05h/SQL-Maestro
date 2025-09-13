@@ -377,18 +377,25 @@ struct ContentView: View {
                     value: $orgId,
                     historyKey: "Org-ID",
                     onCommit: { newVal in
+                        // Remove all whitespace from Org-ID before saving/using it
+                        let cleaned = newVal.replacingOccurrences(of: "\\s+", with: "", options: .regularExpression)
+                        if cleaned != newVal { orgId = cleaned }
+                        // Force-save the cleaned value to global cache/history
+                        sessions.setValue(cleaned, for: "Org-ID")
+
                         // Update session cache
-                        sessionStaticFields[sessions.current] = (newVal, acctId, mysqlDb, companyLabel)
+                        sessionStaticFields[sessions.current] = (cleaned, acctId, mysqlDb, companyLabel)
+
                         // Lookup mapping only on commit
-                        if let m = mapping.lookup(orgId: newVal) {
+                        if let m = mapping.lookup(orgId: cleaned) {
                             mysqlDb = m.mysqlDb
                             companyLabel = m.companyName ?? ""
-                            sessionStaticFields[sessions.current] = (newVal, acctId, mysqlDb, companyLabel)
+                            sessionStaticFields[sessions.current] = (cleaned, acctId, mysqlDb, companyLabel)
                         } else {
                             companyLabel = ""
-                            sessionStaticFields[sessions.current] = (newVal, acctId, mysqlDb, "")
+                            sessionStaticFields[sessions.current] = (cleaned, acctId, mysqlDb, "")
                         }
-                        LOG("OrgID committed", ctx: ["value": newVal])
+                        LOG("OrgID committed", ctx: ["value": cleaned])
                     }
                 )
                 fieldWithDropdown(
@@ -409,8 +416,14 @@ struct ContentView: View {
                             value: $mysqlDb,
                             historyKey: "MySQL-DB",
                             onCommit: { newVal in
-                                sessionStaticFields[sessions.current] = (orgId, acctId, newVal, companyLabel)
-                                LOG("MySQL DB committed", ctx: ["value": newVal])
+                                // Remove all whitespace from MySQL DB before saving/using it
+                                let cleaned = newVal.replacingOccurrences(of: "\\s+", with: "", options: .regularExpression)
+                                if cleaned != newVal { mysqlDb = cleaned }
+                                // Force-save the cleaned value to global cache/history
+                                sessions.setValue(cleaned, for: "MySQL-DB")
+
+                                sessionStaticFields[sessions.current] = (orgId, acctId, cleaned, companyLabel)
+                                LOG("MySQL DB committed", ctx: ["value": cleaned])
                             }
                         )
                         Button("Save") {
@@ -951,6 +964,19 @@ struct ContentView: View {
         guard !mysqlDb.trimmingCharacters(in: .whitespaces).isEmpty else {
             showAlert(title: "Error", message: "MySQL DB is required")
             LOG("Save mapping failed - empty MySQL DB")
+            return
+        }
+
+        // Disallow any whitespace in Org-ID
+        if orgId.rangeOfCharacter(from: .whitespacesAndNewlines) != nil {
+            showAlert(title: "Error", message: "Org-ID cannot contain spaces")
+            LOG("Save mapping failed - Org-ID contains spaces", ctx: ["orgId": orgId])
+            return
+        }
+        // Disallow any whitespace in MySQL DB
+        if mysqlDb.rangeOfCharacter(from: .whitespacesAndNewlines) != nil {
+            showAlert(title: "Error", message: "MySQL DB cannot contain spaces")
+            LOG("Save mapping failed - MySQL DB contains spaces", ctx: ["mysqlDb": mysqlDb])
             return
         }
         
