@@ -49,7 +49,8 @@ struct ContentView: View {
                         .tint(Theme.purple)
                         .font(.system(size: fontSize))
                     Button("Reload") { templates.loadTemplates() }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.borderedProminent)
+                        .tint(Theme.accent)
                         .font(.system(size: fontSize))
                 }
                 
