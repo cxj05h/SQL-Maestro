@@ -29,6 +29,8 @@ struct ContentView: View {
     @State private var mysqlDb: String = ""
     @State private var companyLabel: String = ""
     @State private var draftDynamicValues: [TicketSession:[String:String]] = [:]
+    @State private var sessionSelectedTemplate: [TicketSession: UUID] = [:]
+    @State private var openRecentsKey: String? = nil
 
 
     var body: some View {
@@ -132,7 +134,7 @@ struct ContentView: View {
                     }
                     .onTapGesture {
                         withAnimation(.easeInOut(duration: 0.15)) {
-                            selectedTemplate = template
+                            selectTemplate(template)
                         }
                         LOG("Template selected", ctx: ["template": template.name])
                     }
@@ -143,9 +145,15 @@ struct ContentView: View {
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
                 .onKeyPress(.return) {
-                    if let selected = selectedTemplate {
-                        loadTemplate(selected)
-                        LOG("Template loaded via Enter key", ctx: ["template": selected.name])
+                    if !filteredTemplates.isEmpty {
+                        if selectedTemplate == nil {
+                            selectTemplate(filteredTemplates.first)
+                        }
+                        if let selected = selectedTemplate {
+                            loadTemplate(selected)
+                            LOG("Template loaded via Enter key", ctx: ["template": selected.name])
+                            return .handled
+                        }
                         return .handled
                     }
                     return .ignored
@@ -297,6 +305,11 @@ struct ContentView: View {
             LOG("App started")
             // Initialize with session 1
             sessions.setCurrent(.one)
+            if let tid = sessionSelectedTemplate[sessions.current],
+               let found = templates.templates.first(where: { $0.id == tid }) {
+                selectedTemplate = found
+                currentSQL = found.rawSQL
+            }
         }
     }
     
@@ -438,20 +451,8 @@ struct ContentView: View {
                 .font(.system(size: fontSize))
                 .frame(maxWidth: 420)
 
-                Menu {
-                    let recents = sessions.globalRecents[historyKey] ?? []
-                    if recents.isEmpty {
-                        Text("No recent values")
-                    } else {
-                        ForEach(recents, id: \.self) { recentValue in
-                            Button(recentValue) {
-                                value.wrappedValue = recentValue
-                                LOG("Recent value selected", ctx: ["field": label, "value": recentValue])
-                                sessions.setValue(recentValue, for: historyKey)
-                                onCommit?(recentValue)
-                            }
-                        }
-                    }
+                Button {
+                    openRecentsKey = historyKey
                 } label: {
                     Image(systemName: "chevron.down")
                         .font(.system(size: fontSize - 2))
@@ -459,8 +460,39 @@ struct ContentView: View {
                         .padding(.horizontal, 6)
                         .padding(.vertical, 4)
                 }
-                .menuStyle(.borderlessButton)
+                .buttonStyle(.borderless)
                 .help("Recent values")
+                .popover(isPresented: Binding<Bool>(
+                    get: { openRecentsKey == historyKey },
+                    set: { show in if !show { openRecentsKey = nil } }
+                )) {
+                    let recents = sessions.globalRecents[historyKey] ?? []
+                    VStack(alignment: .leading, spacing: 0) {
+                        if recents.isEmpty {
+                            Text("No recent values")
+                                .padding(8)
+                        } else {
+                            ForEach(recents, id: \.self) { recentValue in
+                                Button(action: {
+                                    value.wrappedValue = recentValue
+                                    LOG("Recent value selected", ctx: ["field": label, "value": recentValue])
+                                    sessions.setValue(recentValue, for: historyKey)
+                                    onCommit?(recentValue)
+                                    openRecentsKey = nil
+                                }) {
+                                    HStack { Text(recentValue).lineLimit(1); Spacer() }
+                                        .padding(.horizontal, 10)
+                                        .padding(.vertical, 8)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                Divider()
+                            }
+                        }
+                    }
+                    .frame(width: 260)
+                }
             }
         }
     }
@@ -472,13 +504,13 @@ struct ContentView: View {
             let newIndex = currentIndex + direction
             if newIndex >= 0 && newIndex < filteredTemplates.count {
                 withAnimation(.easeInOut(duration: 0.15)) {
-                    selectedTemplate = filteredTemplates[newIndex]
+                    selectTemplate(filteredTemplates[newIndex])
                 }
                 LOG("Template navigation", ctx: ["direction": "\(direction)", "template": filteredTemplates[newIndex].name])
             }
         } else {
             withAnimation(.easeInOut(duration: 0.15)) {
-                selectedTemplate = direction > 0 ? filteredTemplates.first : filteredTemplates.last
+                selectTemplate(direction > 0 ? filteredTemplates.first : filteredTemplates.last)
             }
             LOG("Template navigation start", ctx: ["template": selectedTemplate?.name ?? "none"])
         }
@@ -568,6 +600,14 @@ struct ContentView: View {
         }
     }
     
+    // Helper to set selection and persist for current session
+    private func selectTemplate(_ t: TemplateItem?) {
+        selectedTemplate = t
+        if let t = t {
+            sessionSelectedTemplate[sessions.current] = t.id
+        }
+    }
+
     // MARK: – Actions
     // Function to handle session switching
     private func switchToSession(_ newSession: TicketSession) {
@@ -588,12 +628,23 @@ struct ContentView: View {
         mysqlDb = staticData.mysqlDb
         companyLabel = staticData.company
         
+        // Restore this session's selected template, if any
+        if let tid = sessionSelectedTemplate[newSession],
+           let found = templates.templates.first(where: { $0.id == tid }) {
+            selectedTemplate = found
+            currentSQL = found.rawSQL
+        } else {
+            selectedTemplate = nil
+        }
+        
         LOG("Session switched", ctx: ["from": "\(previousSession.rawValue)", "to": "\(newSession.rawValue)"])
     }
     
     private func loadTemplate(_ t: TemplateItem) {
         selectedTemplate = t
         currentSQL = t.rawSQL
+        // Remember the template per session
+        sessionSelectedTemplate[sessions.current] = t.id
         LOG("Template loaded", ctx: ["template": t.name, "phCount":"\(t.placeholders.count)"])
     }
     
@@ -729,7 +780,7 @@ struct ContentView: View {
         do {
             let renamed = try templates.renameTemplate(item, to: newName)
             if selectedTemplate?.id == item.id {
-                selectedTemplate = renamed
+                selectTemplate(renamed)
             }
         } catch {
             NSSound.beep()
@@ -904,3 +955,4 @@ struct ContentView: View {
         }
     }
 }
+
