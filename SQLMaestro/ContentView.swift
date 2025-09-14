@@ -845,12 +845,20 @@ struct ContentView: View {
             if scrollMonitor == nil {
                 scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
                     if dateFocusScrollMode, let tf = WheelNumberField.WheelTextField.focusedInstance {
-                        tf.onScrollDelta?(event.scrollingDeltaY, event.hasPreciseScrollingDeltas)
-                        LOG("Date wheel redirected", ctx: [
-                            "deltaY": String(format: "%.2f", event.scrollingDeltaY),
-                            "precise": event.hasPreciseScrollingDeltas ? "true" : "false"
-                        ])
-                        return nil // consume so hovered fields don't also react
+                        // Only redirect when the pointer is over the focused wheel field.
+                        let loc = event.locationInWindow
+                        let rectInWindow = tf.convert(tf.bounds, to: nil).insetBy(dx: -6, dy: -6) // small slop padding
+                        if rectInWindow.contains(loc) {
+                            tf.onScrollDelta?(event.scrollingDeltaY, event.hasPreciseScrollingDeltas)
+                            LOG("Date wheel redirected", ctx: [
+                                "deltaY": String(format: "%.2f", event.scrollingDeltaY),
+                                "precise": event.hasPreciseScrollingDeltas ? "true" : "false"
+                            ])
+                            return nil // consume for the wheel field only
+                        } else {
+                            // Not hovering the wheel: let the scroll pass through (e.g., to scroll the pane)
+                            return event
+                        }
                     }
                     return event
                 }
