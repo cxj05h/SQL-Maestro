@@ -323,6 +323,7 @@ struct ContentView: View {
     @State private var currentSQL: String = ""
     @State private var populatedSQL: String = ""
     @State private var toastCopied: Bool = false
+    @State private var toastOpenDB: Bool = false
     @State private var fontSize: CGFloat = 13
     @State private var hoverRecentKey: String? = nil
     
@@ -646,15 +647,25 @@ struct ContentView: View {
         }
         .frame(minWidth: 980, minHeight: 640)
         .overlay(alignment: .top) {
-            if toastCopied {
-                Text("Copied to clipboard")
-                    .font(.system(size: fontSize))
-                    .padding(.horizontal, 12).padding(.vertical, 6)
-                    .background(Theme.aqua.opacity(0.9)).foregroundStyle(.black)
-                    .clipShape(Capsule())
-                    .padding(.top, 16)
-                    .transition(.move(edge: .top).combined(with: .opacity))
+            VStack(spacing: 8) {
+                if toastCopied {
+                    Text("Copied to clipboard")
+                        .font(.system(size: fontSize))
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(Theme.aqua.opacity(0.9)).foregroundStyle(.black)
+                        .clipShape(Capsule())
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+                if toastOpenDB {
+                    Text("Opening in Querious…")
+                        .font(.system(size: fontSize))
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(Theme.aqua.opacity(0.9)).foregroundStyle(.black)
+                        .clipShape(Capsule())
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
             }
+            .padding(.top, 16)
         }
         .onReceive(NotificationCenter.default.publisher(for: .fontBump)) { note in
             if let delta = note.object as? Int {
@@ -1745,21 +1756,26 @@ struct ContentView: View {
     
     private func connectToQuerious() {
         LOG("Connect to Database button clicked", ctx: ["orgId": orgId, "mysqlDb": mysqlDb])
-        do {
-            try QueriousConnector.connect(
-                orgId: orgId,
-                mysqlDbKey: mysqlDb,
-                username: userConfig.config.mysql_username,
-                password: userConfig.config.mysql_password,
-                queriousPath: userConfig.config.querious_path
-            )
-        } catch {
-            // If credentials are missing, surface settings quickly
-            if let derr = error as? DBConnectError, case .missingCredentials = derr {
-                NotificationCenter.default.post(name: .showDatabaseSettings, object: nil)
+        withAnimation { toastOpenDB = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+            withAnimation { toastOpenDB = false }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+            do {
+                try QueriousConnector.connect(
+                    orgId: orgId,
+                    mysqlDbKey: mysqlDb,
+                    username: userConfig.config.mysql_username,
+                    password: userConfig.config.mysql_password,
+                    queriousPath: userConfig.config.querious_path
+                )
+            } catch {
+                if let derr = error as? DBConnectError, case .missingCredentials = derr {
+                    NotificationCenter.default.post(name: .showDatabaseSettings, object: nil)
+                }
+                showAlert(title: "Connection Error", message: error.localizedDescription)
+                LOG("Connect to DB failed", ctx: ["error": error.localizedDescription])
             }
-            showAlert(title: "Connection Error", message: error.localizedDescription)
-            LOG("Connect to DB failed", ctx: ["error": error.localizedDescription])
         }
     }
 }

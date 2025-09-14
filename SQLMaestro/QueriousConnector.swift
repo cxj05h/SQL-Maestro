@@ -268,3 +268,58 @@ private func makeQueriousURL(host: String,
     ]
     return comps.url
 }
+
+// MARK: - ToastPresenter (non-blocking bottom banner)
+final class ToastPresenter {
+    /// Shows a small transient banner centered at the bottom of the key window.
+    static func show(_ text: String, duration: TimeInterval = 1.6) {
+        DispatchQueue.main.async {
+            guard let window = NSApp.keyWindow ?? NSApp.mainWindow,
+                  let contentView = window.contentView else {
+                return
+            }
+
+            let toast = NSView()
+            toast.wantsLayer = true
+            toast.layer?.cornerRadius = 10
+            toast.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.85).cgColor
+
+            let label = NSTextField(labelWithString: text)
+            label.textColor = .white
+            label.font = .systemFont(ofSize: 13, weight: .semibold)
+            label.alignment = .center
+            label.lineBreakMode = .byTruncatingTail
+
+            toast.addSubview(label)
+            toast.translatesAutoresizingMaskIntoConstraints = false
+            label.translatesAutoresizingMaskIntoConstraints = false
+
+            contentView.addSubview(toast)
+
+            NSLayoutConstraint.activate([
+                label.leadingAnchor.constraint(equalTo: toast.leadingAnchor, constant: 12),
+                label.trailingAnchor.constraint(equalTo: toast.trailingAnchor, constant: -12),
+                label.topAnchor.constraint(equalTo: toast.topAnchor, constant: 8),
+                label.bottomAnchor.constraint(equalTo: toast.bottomAnchor, constant: -8),
+
+                toast.centerXAnchor.constraint(equalTo: contentView.centerXAnchor),
+                toast.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -20)
+            ])
+
+            toast.alphaValue = 0
+            NSAnimationContext.runAnimationGroup({ ctx in
+                ctx.duration = 0.15
+                toast.animator().alphaValue = 1
+            })
+
+            DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
+                NSAnimationContext.runAnimationGroup({ ctx in
+                    ctx.duration = 0.2
+                    toast.animator().alphaValue = 0
+                }, completionHandler: {
+                    toast.removeFromSuperview()
+                })
+            }
+        }
+    }
+}
