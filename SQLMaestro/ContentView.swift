@@ -1781,6 +1781,378 @@ struct ContentView: View {
     }
 }
 
+// Inline Template Editor Sheet
+struct TemplateInlineEditorSheet: View {
+    let template: TemplateItem
+    @Binding var text: String
+    var fontSize: CGFloat
+    var onSave: (String) -> Void
+    var onCancel: () -> Void
+    @State private var localText: String = ""
+    @ObservedObject private var placeholderStore = PlaceholderStore.shared
+    @State private var isEditingPlaceholders: Bool = false
+    @State private var isDeletingPlaceholders: Bool = false
+    @State private var editingNames: [String] = []
+    @State private var editError: String? = nil
+    @State private var deleteSelection: Set<String> = []
+
+    // Find the NSTextView that backs the SwiftUI TextEditor so we can insert at caret / replace selection.
+    private func activeEditorTextView() -> NSTextView? {
+        if let tv = NSApp.keyWindow?.firstResponder as? NSTextView {
+            return tv
+        }
+        guard let contentView = NSApp.keyWindow?.contentView else { return nil }
+        return findTextView(in: contentView)
+    }
+    private func findTextView(in view: NSView) -> NSTextView? {
+        if let tv = view as? NSTextView { return tv }
+        for sub in view.subviews {
+            if let found = findTextView(in: sub) { return found }
+        }
+        return nil
+    }
+
+    // Insert {{placeholder}} at the current caret or replace the current selection.
+    private func insertPlaceholder(_ name: String) {
+        let token = "{{\(name)}}"
+        let current = self.localText
+        guard let tv = activeEditorTextView() else {
+            // Fallback: append to end if we can't resolve the text view yet.
+            self.localText.append(token)
+            self.text = self.localText
+            LOG("Inserted placeholder (no TV)", ctx: ["ph": name])
+            return
+        }
+        let ns = current as NSString
+        var sel = tv.selectedRange()
+        if sel.location == NSNotFound { sel = NSRange(location: ns.length, length: 0) }
+        let safeLoc = max(0, min(sel.location, ns.length))
+        let safeLen = max(0, min(sel.length, ns.length - safeLoc))
+        let safeRange = NSRange(location: safeLoc, length: safeLen)
+        let updated = ns.replacingCharacters(in: safeRange, with: token)
+        self.localText = updated
+        self.text = updated
+        DispatchQueue.main.async {
+            tv.string = updated
+            let newCaret = NSRange(location: safeRange.location + (token as NSString).length, length: 0)
+            tv.setSelectedRange(newCaret)
+            tv.scrollRangeToVisible(newCaret)
+        }
+        LOG("Inserted placeholder", ctx: ["ph": name, "mode": safeLen > 0 ? "replace" : "insert"])
+    }
+
+    // Detects {{placeholder}} tokens in source, de-duplicated in order
+    private func detectedPlaceholders(from source: String) -> [String] {
+        do {
+            let regex = try NSRegularExpression(pattern: #"\{\{\s*([^}]+?)\s*\}\}"#, options: [])
+            let range = NSRange(source.startIndex..<source.endIndex, in: source)
+            var seen = Set<String>()
+            var results: [String] = []
+            regex.enumerateMatches(in: source, options: [], range: range) { match, _, _ in
+                guard let m = match, m.numberOfRanges >= 2,
+                      let r = Range(m.range(at: 1), in: source) else { return }
+                let name = source[r].trimmingCharacters(in: .whitespacesAndNewlines)
+                if !name.isEmpty, !seen.contains(name) {
+                    seen.insert(name)
+                    results.append(name)
+                }
+            }
+            return results
+        } catch {
+            return []
+        }
+    }
+
+    // Local prompt (editor scope)
+    private func promptForString(title: String, message: String, defaultValue: String = "") -> String? {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = .informational
+        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        input.stringValue = defaultValue
+        alert.accessoryView = input
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Cancel")
+        return alert.runModal() == .alertFirstButtonReturn
+            ? input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            : nil
+    }
+
+    private func sanitizeName(_ raw: String) -> String {
+        raw.replacingOccurrences(of: "{", with: "")
+           .replacingOccurrences(of: "}", with: "")
+           .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // Add / Edit / Delete placeholder flows
+    private func addPlaceholderFlow() {
+        guard let raw = promptForString(
+            title: "Add Placeholder",
+            message: "Enter a placeholder name (do not include braces)."
+        ) else { return }
+        let cleaned = sanitizeName(raw)
+        guard !cleaned.isEmpty else { return }
+        if placeholderStore.names.contains(cleaned) {
+            let dup = NSAlert()
+            dup.messageText = "Already Exists"
+            dup.informativeText = "A placeholder named \"\(cleaned)\" already exists."
+            dup.alertStyle = .warning
+            dup.addButton(withTitle: "OK")
+            dup.runModal()
+            return
+        }
+        placeholderStore.add(cleaned)
+        LOG("Placeholder added via editor", ctx: ["name": cleaned])
+    }
+
+    private func startEditPlaceholders() {
+        editingNames = placeholderStore.names
+        editError = nil
+        isEditingPlaceholders = true
+        LOG("Edit placeholders started", ctx: ["count": "\(editingNames.count)"])
+    }
+    private func cancelEditPlaceholders() {
+        isEditingPlaceholders = false
+        editError = nil
+    }
+    private func applyEditPlaceholders() {
+        var seen = Set<String>()
+        var cleaned: [String] = []
+        for raw in editingNames {
+            let name = sanitizeName(raw)
+            if name.isEmpty {
+                editError = "Placeholder names cannot be empty."
+                return
+            }
+            if !seen.insert(name).inserted {
+                editError = "Duplicate name: \"\(name)\""
+                return
+            }
+            cleaned.append(name)
+        }
+        placeholderStore.set(cleaned)
+        LOG("Edit placeholders applied", ctx: ["count": "\(cleaned.count)"])
+        isEditingPlaceholders = false
+        editError = nil
+    }
+
+    private func startDeletePlaceholders() {
+        deleteSelection = []
+        isDeletingPlaceholders = true
+        LOG("Delete placeholders started", ctx: ["count": "\(placeholderStore.names.count)"])
+    }
+    private func cancelDeletePlaceholders() {
+        isDeletingPlaceholders = false
+        deleteSelection = []
+        LOG("Delete placeholders cancelled")
+    }
+    private func applyDeletePlaceholders() {
+        guard !deleteSelection.isEmpty else { return }
+        let names = Array(deleteSelection).sorted()
+        // Confirm destructive action
+        let alert = NSAlert()
+        alert.messageText = "Delete \(names.count) placeholder\(names.count == 1 ? "" : "s")?"
+        let previewList = names.prefix(6).joined(separator: ", ")
+        let more = names.count > 6 ? " …and \(names.count - 6) more." : ""
+        alert.informativeText = "This will remove the selected placeholders from the global list:\n\(previewList)\(more)"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Delete")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            LOG("Delete placeholders aborted at confirm")
+            return
+        }
+        // Apply deletion atomically
+        let remaining = placeholderStore.names.filter { !deleteSelection.contains($0) }
+        placeholderStore.set(remaining)
+        LOG("Delete placeholders applied", ctx: ["deleted": "\(names.count)", "remaining": "\(remaining.count)"])
+        isDeletingPlaceholders = false
+        deleteSelection = []
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Editing Template:")
+                    .font(.system(size: fontSize + 2, weight: .semibold))
+                Text(template.name)
+                    .font(.system(size: fontSize + 2, weight: .medium))
+                    .foregroundStyle(Theme.purple)
+                Spacer()
+                Button("Cancel", action: onCancel)
+                    .buttonStyle(.bordered)
+                Button("Save") { onSave(localText) }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.pink)
+            }
+            .padding()
+            Divider()
+            // Placeholder toolbar (buttons insert {{name}} at caret)
+            if !placeholderStore.names.isEmpty {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        Text("Placeholders:")
+                            .font(.system(size: fontSize - 2))
+                            .foregroundStyle(.secondary)
+                            .padding(.trailing, 4)
+                        ForEach(placeholderStore.names, id: \.self) { ph in
+                            Button(ph) { insertPlaceholder(ph) }
+                                .buttonStyle(.bordered)
+                                .tint(Theme.pink)
+                                .font(.system(size: fontSize - 1, weight: .medium))
+                                .help("Insert {{\(ph)}} at cursor")
+                        }
+                        Divider()
+                            .frame(height: 18)
+                            .overlay(Color.secondary.opacity(0.2))
+                            .padding(.horizontal, 4)
+                        Menu {
+                            Button("Add new placeholder…") { addPlaceholderFlow() }
+                            Divider()
+                            Button("Edit placeholders…") { startEditPlaceholders() }
+                            Button("Delete placeholders…") { startDeletePlaceholders() }
+                        } label: {
+                            Image(systemName: "ellipsis.circle")
+                                .font(.system(size: fontSize + 2, weight: .medium))
+                                .foregroundStyle(Theme.purple)
+                                .help("Placeholder options")
+                        }
+                        .menuStyle(.borderlessButton)
+                    }
+                    .padding(6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Theme.grayBG.opacity(0.6))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
+                            )
+                    )
+                }
+            }
+            Divider()
+            TextEditor(text: $localText)
+                .font(.system(size: fontSize, design: .monospaced))
+                .frame(minHeight: 340)
+                .padding()
+                .onAppear {
+                    localText = text
+                    let found = detectedPlaceholders(from: localText)
+                    for ph in found { placeholderStore.add(ph) }
+                    LOG("Synced detected placeholders into global store", ctx: ["detected": "\(found.count)", "global": "\(placeholderStore.names.count)"])
+                }
+                .onChange(of: localText) { _, newVal in text = newVal }
+            HStack {
+                Spacer()
+                Text("Tip: ⌘S to save, ⎋ to cancel")
+                    .font(.system(size: fontSize - 3))
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal)
+            .padding(.bottom, 8)
+        }
+        .sheet(isPresented: $isEditingPlaceholders) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Edit Placeholders")
+                    .font(.system(size: fontSize + 2, weight: .semibold))
+                    .foregroundStyle(Theme.purple)
+                    .padding(.bottom, 4)
+                if let err = editError {
+                    Text(err)
+                        .font(.system(size: fontSize - 2))
+                        .foregroundStyle(.red)
+                }
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(Array(editingNames.enumerated()), id: \.offset) { idx, _ in
+                            HStack(spacing: 8) {
+                                Text("\(idx + 1).")
+                                    .frame(width: 24, alignment: .trailing)
+                                    .foregroundStyle(.secondary)
+                                    .font(.system(size: fontSize - 2))
+                                TextField("Placeholder name", text: Binding(
+                                    get: { editingNames[idx] },
+                                    set: { editingNames[idx] = $0 }
+                                ))
+                                .textFieldStyle(.roundedBorder)
+                                .font(.system(size: fontSize))
+                            }
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+                .frame(minHeight: 220)
+                HStack {
+                    Button("Cancel") { cancelEditPlaceholders() }
+                        .font(.system(size: fontSize))
+                    Spacer()
+                    Button("Apply") { applyEditPlaceholders() }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Theme.pink)
+                        .font(.system(size: fontSize))
+                }
+            }
+            .padding(14)
+            .frame(minWidth: 520, minHeight: 360)
+        }
+        .sheet(isPresented: $isDeletingPlaceholders) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Delete Placeholders")
+                    .font(.system(size: fontSize + 2, weight: .semibold))
+                    .foregroundStyle(.red)
+                    .padding(.bottom, 4)
+                HStack(spacing: 8) {
+                    Button("Select All") {
+                        deleteSelection = Set(placeholderStore.names)
+                    }
+                    .font(.system(size: fontSize - 1))
+                    Button("Clear Selection") {
+                        deleteSelection.removeAll()
+                    }
+                    .font(.system(size: fontSize - 1))
+                    Spacer()
+                    Text("\(deleteSelection.count) selected")
+                        .font(.system(size: fontSize - 2))
+                        .foregroundStyle(.secondary)
+                }
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(placeholderStore.names, id: \.self) { name in
+                            Toggle(isOn: Binding<Bool>(
+                                get: { deleteSelection.contains(name) },
+                                set: { newVal in
+                                    if newVal { deleteSelection.insert(name) }
+                                    else { deleteSelection.remove(name) }
+                                }
+                            )) {
+                                Text(name)
+                                    .font(.system(size: fontSize))
+                            }
+                            .toggleStyle(.checkbox)
+                        }
+                    }
+                    .padding(.vertical, 4)
+                }
+                .frame(minHeight: 220)
+                HStack {
+                    Button("Cancel") { cancelDeletePlaceholders() }
+                        .font(.system(size: fontSize))
+                    Spacer()
+                    Button("Delete") { applyDeletePlaceholders() }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.red)
+                        .font(.system(size: fontSize))
+                        .disabled(deleteSelection.isEmpty)
+                }
+            }
+            .padding(14)
+            .frame(minWidth: 520, minHeight: 360)
+        }
+        .frame(minWidth: 720, minHeight: 520)
+    }
+}
+
 // Database Connection Settings Sheet
 struct DatabaseSettingsSheet: View {
     @ObservedObject var userConfig: UserConfigStore
@@ -1921,62 +2293,3 @@ struct DatabaseSettingsSheet: View {
     }
 }
 
-// Inline template editor sheet view
-struct TemplateInlineEditorSheet: View {
-    let template: TemplateItem
-    @Binding var text: String
-    var fontSize: CGFloat
-    var onSave: (String) -> Void
-    var onCancel: () -> Void
-
-    @State private var localText: String = ""
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Editing: \(template.name)")
-                        .font(.system(size: fontSize + 2, weight: .semibold))
-                        .foregroundStyle(Theme.purple)
-                    Text(template.url.lastPathComponent)
-                        .font(.system(size: fontSize - 2))
-                        .foregroundStyle(.secondary)
-                }
-                Spacer()
-                Button("Cancel") { onCancel() }
-                    .font(.system(size: fontSize))
-                Button("Save") {
-                    onSave(localText)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.pink)
-                .keyboardShortcut(.defaultAction)                 // Return to save
-                .keyboardShortcut("s", modifiers: [.command])     // ⌘S to save
-                .font(.system(size: fontSize))
-            }
-            Divider()
-
-            TextEditor(text: $localText)
-                .font(.system(size: fontSize, weight: .regular, design: .monospaced))
-                .frame(minWidth: 620, minHeight: 380)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Theme.purple.opacity(0.25))
-                )
-                .onAppear {
-                    self.localText = text
-                }
-                .onChange(of: localText) { _, newVal in
-                    // keep binding loosely in sync so external tools could read it if needed
-                    self.text = newVal
-                }
-
-            Text("Tip: ⌘S to save, ⎋ to cancel")
-                .font(.system(size: fontSize - 3))
-                .foregroundStyle(.secondary)
-        }
-        .padding(16)
-        .frame(minWidth: 720, minHeight: 520)
-        .onExitCommand { onCancel() }
-    }
-}
