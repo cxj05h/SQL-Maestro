@@ -468,6 +468,7 @@ struct ContentView: View {
     @FocusState private var isSearchFocused: Bool
     @FocusState private var isListFocused: Bool
     @FocusState private var focusedDBTableRow: Int?
+    @State private var dbTablesLocked: Bool = false
     @State private var suggestionIndexByRow: [Int: Int] = [:]
     @State private var keyEventMonitor: Any?
     
@@ -1581,11 +1582,27 @@ struct ContentView: View {
     
     // MARK: – DB Tables pane (per-template, per-session working set)
     private var dbTablesPane: some View {
+
         VStack(alignment: .leading, spacing: 8) {
-            Text("DB Tables for this Template")
-                .font(.system(size: fontSize + 1, weight: .semibold))
-                .foregroundStyle(Theme.purple)
-                .lineLimit(1)
+                    HStack {
+                        Text("DB Tables for this Template")
+                            .font(.system(size: fontSize + 1, weight: .semibold))
+                            .foregroundStyle(Theme.purple)
+                            .lineLimit(1)
+                        
+                        Spacer()
+                        
+                        Toggle(isOn: $dbTablesLocked) {
+                            HStack(spacing: 4) {
+                                Image(systemName: dbTablesLocked ? "lock.fill" : "lock.open.fill")
+                                    .font(.system(size: fontSize - 2))
+                                Text(dbTablesLocked ? "Locked" : "Unlocked")
+                                    .font(.system(size: fontSize - 2))
+                            }
+                        }
+                        .toggleStyle(.checkbox)
+                        .help(dbTablesLocked ? "Tables are locked for copying. Uncheck to edit." : "Tables are editable. Check to lock for easy copying.")
+                    }
             
             if let t = selectedTemplate {
                 let isDirty = dbTablesStore.isDirty(for: sessions.current, template: t)
@@ -1596,54 +1613,78 @@ struct ContentView: View {
                     ForEach(Array(rows.enumerated()), id: \.offset) { idx, value in
                         VStack(alignment: .leading, spacing: 4) {
                             HStack(spacing: 6) {
-                                TextField("table_name_here", text: Binding(
-                                    get: {
+                                if dbTablesLocked {
+                                    // Read-only mode: easy copying, no editing
+                                    let tableValue = {
                                         let current = dbTablesStore.workingSet(for: sessions.current, template: selectedTemplate)
                                         return idx < current.count ? current[idx] : ""
-                                    },
-                                    set: { newVal in
+                                    }()
+                                    
+                                    Text(tableValue.isEmpty ? "empty" : tableValue)
+                                        .font(.system(size: fontSize))
+                                        .foregroundStyle(tableValue.isEmpty ? .secondary : .primary)
+                                        .textSelection(.enabled) // Allows text selection for copying
+                                        .padding(.vertical, 6)
+                                        .padding(.horizontal, 8)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 6)
+                                                .fill(Color.secondary.opacity(0.1))
+                                                .overlay(
+                                                    RoundedRectangle(cornerRadius: 6)
+                                                        .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+                                                )
+                                        )
+                                } else {
+                                    // Editable mode: original functionality
+                                    TextField("table_name_here", text: Binding(
+                                        get: {
+                                            let current = dbTablesStore.workingSet(for: sessions.current, template: selectedTemplate)
+                                            return idx < current.count ? current[idx] : ""
+                                        },
+                                        set: { newVal in
+                                            var current = dbTablesStore.workingSet(for: sessions.current, template: selectedTemplate)
+                                            if idx < current.count {
+                                                current[idx] = newVal
+                                            } else if idx == current.count {
+                                                current.append(newVal)
+                                            }
+                                            dbTablesStore.setWorkingSet(current, for: sessions.current, template: selectedTemplate)
+                                            // Reset keyboard highlight for this row on text change
+                                            suggestionIndexByRow[idx] = nil
+                                        }
+                                    ))
+                                    .textFieldStyle(PlainTextFieldStyle())
+                                    .padding(.vertical, 4)
+                                    .padding(.horizontal, 6)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .stroke(Color.secondary.opacity(0.35), lineWidth: 1)
+                                    )
+                                    .font(.system(size: fontSize))
+                                    .lineLimit(1)
+                                    .focused($focusedDBTableRow, equals: idx)
+                                    .help("Enter a base table name (letters, numbers, underscores).")
+                                    
+                                    Button {
                                         var current = dbTablesStore.workingSet(for: sessions.current, template: selectedTemplate)
                                         if idx < current.count {
-                                            current[idx] = newVal
-                                        } else if idx == current.count {
-                                            current.append(newVal)
+                                            current.remove(at: idx)
+                                            dbTablesStore.setWorkingSet(current, for: sessions.current, template: selectedTemplate)
+                                            LOG("DBTables row removed", ctx: ["newCount": "\(current.count)"])
                                         }
-                                        dbTablesStore.setWorkingSet(current, for: sessions.current, template: selectedTemplate)
-                                        // Reset keyboard highlight for this row on text change
-                                        suggestionIndexByRow[idx] = nil
+                                    } label: {
+                                        Image(systemName: "minus.circle.fill")
                                     }
-                                ))
-                                .textFieldStyle(PlainTextFieldStyle())
-                                .padding(.vertical, 4)
-                                .padding(.horizontal, 6)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 6)
-                                        .stroke(Color.secondary.opacity(0.35), lineWidth: 1)
-                                )
-                                .font(.system(size: fontSize))
-                                .lineLimit(1)
-                                .focused($focusedDBTableRow, equals: idx)
-                                .help("Enter a base table name (letters, numbers, underscores).")
-                                
-                                Button {
-                                    var current = dbTablesStore.workingSet(for: sessions.current, template: selectedTemplate)
-                                    if idx < current.count {
-                                        current.remove(at: idx)
-                                        dbTablesStore.setWorkingSet(current, for: sessions.current, template: selectedTemplate)
-                                        LOG("DBTables row removed", ctx: ["newCount": "\(current.count)"])
-                                    }
-                                } label: {
-                                    Image(systemName: "minus.circle.fill")
+                                    .buttonStyle(.borderless)
+                                    .foregroundStyle(Theme.pink)
+                                    .help("Remove this row")
                                 }
-                                .buttonStyle(.borderless)
-                                .foregroundStyle(Theme.pink)
-                                .help("Remove this row")
                             }
-                            
                             // Inline suggestions (appear when the row is focused and query has matches)
                             let current = dbTablesStore.workingSet(for: sessions.current, template: selectedTemplate)
                             let query = (idx < current.count ? current[idx] : "").trimmingCharacters(in: .whitespaces)
-                            if focusedDBTableRow == idx {
+                            if focusedDBTableRow == idx && !dbTablesLocked {
                                 let suggestions = suggestTables(query, limit: 15)
                                 if !query.isEmpty && !suggestions.isEmpty {
                                     let selectedIdx = suggestionIndexByRow[idx] ?? -1
@@ -1689,44 +1730,54 @@ struct ContentView: View {
                     }
                     
                     // Add row button
-                    Button {
-                        var current = dbTablesStore.workingSet(for: sessions.current, template: selectedTemplate)
-                        current.append("")
-                        dbTablesStore.setWorkingSet(current, for: sessions.current, template: selectedTemplate)
-                        LOG("DBTables row added", ctx: ["count": "\(current.count)"])
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "plus.circle.fill")
-                            Text("Add table")
+                    if !dbTablesLocked {
+                        Button {
+                            var current = dbTablesStore.workingSet(for: sessions.current, template: selectedTemplate)
+                            current.append("")
+                            dbTablesStore.setWorkingSet(current, for: sessions.current, template: selectedTemplate)
+                            LOG("DBTables row added", ctx: ["count": "\(current.count)"])
+                        } label: {
+                            HStack(spacing: 6) {
+                                Image(systemName: "plus.circle.fill")
+                                Text("Add table")
+                            }
                         }
+                        .buttonStyle(.borderless)
+                        .foregroundStyle(Theme.accent)
+                        .padding(.top, 2)
+                    } else {
+                        Text("Tables locked for copying - unlock to edit")
+                            .font(.system(size: fontSize - 3))
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 2)
                     }
-                    .buttonStyle(.borderless)
-                    .foregroundStyle(Theme.accent)
-                    .padding(.top, 2)
                 }
                 
                 HStack(spacing: 8) {
-                    Button("Save Tables") {
-                        _ = dbTablesStore.saveSidecar(for: sessions.current, template: t)
+                    if !dbTablesLocked {
+                        Button("Save Tables") {
+                            _ = dbTablesStore.saveSidecar(for: sessions.current, template: t)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Theme.purple)
+                        .disabled(!isDirty)
+                        
+                        Button("Revert to Saved") {
+                            _ = dbTablesStore.loadSidecar(for: sessions.current, template: t)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(Theme.pink)
+                        .disabled(!isDirty)
+                    } else {
+                        Text("Unlock to save changes")
+                            .font(.system(size: fontSize - 2))
+                            .foregroundStyle(.secondary)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Theme.purple)
-                    .disabled(!isDirty)
-                    
-                    Button("Revert to Saved") {
-                        _ = dbTablesStore.loadSidecar(for: sessions.current, template: t)
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(Theme.pink)
-                    .disabled(!isDirty)
                     
                     Spacer()
                 }
                 .padding(.top, 2)
                 
-                Text("Tip: These tables will be opened in Querious when you connect (if enabled).")
-                    .font(.system(size: fontSize - 3))
-                    .foregroundStyle(.secondary)
             } else {
                 Text("Load a template to manage its DB tables.")
                     .font(.system(size: fontSize - 2))
