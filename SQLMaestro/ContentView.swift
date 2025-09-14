@@ -2082,6 +2082,8 @@ struct TemplateInlineEditorSheet: View {
                 Button("Save") { onSave(localText) }
                     .buttonStyle(.borderedProminent)
                     .tint(Theme.pink)
+                    .keyboardShortcut("s", modifiers: [.command]) // ⌘S to save
+                    .help("Save (⌘S)")
             }
             .padding()
             Divider()
