@@ -29,6 +29,16 @@ struct AppMenuCommands: Commands {
             Button("Edit Org/MySQL Mappings") {
                 openMappingFileInVSCode()
             }
+            
+            Button("Edit MySQL Host Mappings...") {
+                openHostMappingFileInVSCode()
+            }
+            
+            Divider()
+            
+            Button("Database Connection Settings...") {
+                NotificationCenter.default.post(name: .showDatabaseSettings, object: nil)
+            }
         }
 
         CommandMenu("View") {
@@ -53,6 +63,18 @@ struct AppMenuCommands: Commands {
             LOG("Created empty mapping file for VS Code editing", ctx: ["path": url.path])
         }
         
+        openFileInVSCode(url)
+    }
+    
+    // Helper function to open the MySQL hosts mapping file in VS Code
+    private func openHostMappingFileInVSCode() {
+        let url = AppPaths.mysqlHostsMap
+        openFileInVSCode(url)
+        LOG("Opening MySQL hosts mapping file", ctx: ["file": url.lastPathComponent])
+    }
+    
+    // Shared VS Code opening logic
+    private func openFileInVSCode(_ url: URL) {
         let cfg = NSWorkspace.OpenConfiguration()
         cfg.activates = true
 
@@ -70,19 +92,17 @@ struct AppMenuCommands: Commands {
                     NSWorkspace.shared.open(url)
                     LOG("VSCode open fallback via default app", ctx: ["file": url.lastPathComponent, "error": err.localizedDescription])
                 } else {
-                    LOG("Open mapping file in VSCode via NSWorkspace", ctx: ["file": url.lastPathComponent])
+                    LOG("Open file in VSCode via NSWorkspace", ctx: ["file": url.lastPathComponent])
                 }
             }
         }
 
         if fm.fileExists(atPath: stable.path) {
             openWithApp(stable)
-            LOG("Opening mapping file in VS Code (stable)", ctx: ["file": url.lastPathComponent])
             return
         }
         if fm.fileExists(atPath: insiders.path) {
             openWithApp(insiders)
-            LOG("Opening mapping file in VS Code (insiders)", ctx: ["file": url.lastPathComponent])
             return
         }
 
@@ -92,15 +112,16 @@ struct AppMenuCommands: Commands {
         task.arguments = ["open", "-a", "Visual Studio Code", url.path]
         do {
             try task.run()
-            LOG("Open mapping file in VSCode via shell fallback", ctx: ["file": url.lastPathComponent])
+            LOG("Open file in VSCode via shell fallback", ctx: ["file": url.lastPathComponent])
         } catch {
             // Final fallback: default app
             NSWorkspace.shared.open(url)
-            LOG("Open mapping file in default app (VSCode not found)", ctx: ["file": url.lastPathComponent, "error": error.localizedDescription])
+            LOG("Open file in default app (VSCode not found)", ctx: ["file": url.lastPathComponent, "error": error.localizedDescription])
         }
     }
 }
 
 extension Notification.Name {
     static let fontBump = Notification.Name("FontBump")
+    static let showDatabaseSettings = Notification.Name("ShowDatabaseSettings")
 }

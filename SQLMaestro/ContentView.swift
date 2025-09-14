@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 // Global, persistent placeholder store (singleton)
 final class PlaceholderStore: ObservableObject {
@@ -69,12 +70,114 @@ final class PlaceholderStore: ObservableObject {
     }
 }
 
+// MARK: - Temporary Shims (compile-time stand-ins)
+
+/// Minimal Keyboard Shortcuts viewer so the sheet compiles.
+struct KeyboardShortcutsSheet: View {
+    let onClose: () -> Void
+    @ObservedObject private var registry = ShortcutRegistry.shared
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Keyboard Shortcuts")
+                .font(.headline)
+            if registry.items.isEmpty {
+                Text("No shortcuts registered yet.")
+                    .foregroundStyle(.secondary)
+            } else {
+                List(registry.items) { item in
+                    HStack {
+                        VStack(alignment: .leading) {
+                            Text(item.name)
+                            Text(item.scope).font(.caption).foregroundStyle(.secondary)
+                        }
+                        Spacer()
+                        Text(item.display).monospaced()
+                    }
+                }
+                .frame(minHeight: 180)
+            }
+            HStack {
+                Spacer()
+                Button("Close") { onClose() }
+                    .keyboardShortcut(.defaultAction)
+            }
+        }
+        .padding(16)
+        .frame(minWidth: 420, minHeight: 280)
+    }
+}
+
+/// Lightweight numeric wheel field replacement used by the Date row.
+/// Supports integer editing within a range; includes a Stepper.
+struct WheelNumberField: View {
+    @Binding var value: Int
+    let range: ClosedRange<Int>
+    let width: CGFloat
+    let label: String
+    let sensitivity: Double
+    var onReturn: () -> Void = {}
+    var onTabToApply: (() -> Void)? = nil
+
+    private let formatter: NumberFormatter = {
+        let nf = NumberFormatter()
+        nf.allowsFloats = false
+        nf.minimumFractionDigits = 0
+        nf.maximumFractionDigits = 0
+        return nf
+    }()
+
+    var body: some View {
+        HStack(spacing: 6) {
+            TextField(label, value: $value, formatter: formatter)
+                .frame(width: width)
+                .multilineTextAlignment(.center)
+                .textFieldStyle(.roundedBorder)
+                .onSubmit {
+                    clamp()
+                    onReturn()
+                }
+                // Focus traversal hint for Tab -> Apply (no-op if nil)
+                .onExitCommand {
+                    onTabToApply?()
+                }
+
+            Stepper("", value: $value, in: range)
+                .labelsHidden()
+        }
+        .onChange(of: value) { _, _ in clamp() }
+    }
+
+    private func clamp() {
+        if value < range.lowerBound { value = range.lowerBound }
+        if value > range.upperBound { value = range.upperBound }
+    }
+}
+
+// Satisfy references used by the scroll-wheel redirection logic.
+extension WheelNumberField {
+    final class WheelTextField {
+        static var focusedInstance: WheelTextField?
+        var onScrollDelta: ((CGFloat, Bool) -> Void)?
+    }
+}
+
+/// Minimal stub that opens the template file in the default editor.
+/// Replaced by the full-featured editor when that file is linked.
+enum TemplateEditorWindow {
+    static func present(for t: TemplateItem, manager: TemplateManager) {
+        NSWorkspace.shared.open(t.url)
+        LOG("TemplateEditorWindow shim invoked", ctx: ["file": t.url.lastPathComponent])
+    }
+}
+
 private extension Notification.Name {
     static let wheelFieldDidFocus = Notification.Name("WheelFieldDidFocus")
 }
 
 extension Notification.Name {
     static let showKeyboardShortcuts = Notification.Name("ShowKeyboardShortcuts")
+    // `showDatabaseSettings` is declared elsewhere to avoid duplicate symbol errors.
 }
 
 // Central registry for keyboard shortcuts used across the app
@@ -212,6 +315,8 @@ private final class MenuBridge: NSObject {
 struct ContentView: View {
     @EnvironmentObject var templates: TemplateManager
     @StateObject private var mapping = MappingStore()
+    @StateObject private var mysqlHosts = MysqlHostStore()
+    @StateObject private var userConfig = UserConfigStore()
     @EnvironmentObject var sessions: SessionManager
     
     @State private var selectedTemplate: TemplateItem?
@@ -223,6 +328,8 @@ struct ContentView: View {
     
     @State private var searchText: String = ""
     @State private var showShortcutsSheet: Bool = false
+    @State private var showDatabaseSettings: Bool = false
+
     
     @FocusState private var isSearchFocused: Bool
     @FocusState private var isListFocused: Bool
@@ -561,9 +668,16 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .showKeyboardShortcuts)) { _ in
             showShortcutsSheet = true
         }
+        .onReceive(NotificationCenter.default.publisher(for: .showDatabaseSettings)) { _ in
+            showDatabaseSettings = true
+        }
         .sheet(isPresented: $showShortcutsSheet) {
             KeyboardShortcutsSheet(onClose: { showShortcutsSheet = false })
         }
+        .sheet(isPresented: $showDatabaseSettings) {
+            DatabaseSettingsSheet(userConfig: userConfig)
+        }
+     
         .onAppear {
             LOG("App started")
             // Initialize with session 1
@@ -691,6 +805,14 @@ struct ContentView: View {
                         .tint(Theme.pink) // <- same pink as Apply/Populate Query
                         .font(.system(size: fontSize))
                     }
+                    Button("Connect to Database") {
+                        connectToQuerious()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.accent) // Using the green accent color
+                    .font(.system(size: fontSize))
+                    .frame(maxWidth: .infinity) // Full width like you wanted
+                    .disabled(orgId.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
         }
@@ -836,7 +958,7 @@ struct ContentView: View {
     }
     
     private func openTemplateJSON(_ item: TemplateItem) {
-        // Opens with user’s default app for .json/.sql
+        // Opens with user's default app for .json/.sql
         NSWorkspace.shared.open(item.url)
         LOG("Open JSON", ctx: ["file": item.url.lastPathComponent])
     }
@@ -1133,8 +1255,6 @@ struct ContentView: View {
         sessions.setValue(str, for: placeholder)
         LOG("Date inline apply (Enter/Apply)", ctx: ["value": str])
     }
-
-
 
     // Helpers for date math/format/parse
     private func yearsRange() -> ClosedRange<Int> {
@@ -1623,921 +1743,163 @@ struct ContentView: View {
         }
     }
     
-    // Template Editor Window
-    final class TemplateEditorWindow: NSWindowController {
-        static func present(for item: TemplateItem, manager: TemplateManager) {
-            let vc = NSHostingController(rootView: TemplateEditorView(item: item, manager: manager))
-            let win = NSWindow(contentViewController: vc)
-            win.title = "Edit: \(item.name)"
-            win.setContentSize(NSSize(width: 780, height: 520))
-            let ctl = TemplateEditorWindow(window: win)
-            ctl.showWindow(nil)
-            NSApp.activate(ignoringOtherApps: true)
-        }
-    }
-    
-    struct TemplateEditorView: View {
-        let item: TemplateItem
-        @ObservedObject var manager: TemplateManager
-        @State private var text: String = ""
-        @Environment(\.dismiss) var dismiss
-        @State private var fontSize: CGFloat = 13
-        @ObservedObject private var placeholderStore = PlaceholderStore.shared
-        @State private var isEditingPlaceholders: Bool = false
-        @State private var isDeletingPlaceholders: Bool = false
-        @State private var editingNames: [String] = []
-        @State private var editError: String? = nil
-        // Multi-delete selection state for placeholders
-        @State private var deleteSelection: Set<String> = []
-
-        // Extracts {{placeholder}} names in order of appearance, de-duplicated (case-sensitive)
-        private func detectedPlaceholders(from source: String) -> [String] {
-            do {
-                let regex = try NSRegularExpression(pattern: #"\{\{\s*([^}]+?)\s*\}\}"#, options: [])
-                let range = NSRange(source.startIndex..<source.endIndex, in: source)
-                var seen = Set<String>()
-                var results: [String] = []
-                regex.enumerateMatches(in: source, options: [], range: range) { match, _, _ in
-                    guard let m = match, m.numberOfRanges >= 2,
-                          let r = Range(m.range(at: 1), in: source) else { return }
-                    let name = source[r].trimmingCharacters(in: .whitespacesAndNewlines)
-                    if !name.isEmpty, !seen.contains(name) {
-                        seen.insert(name)
-                        results.append(name)
-                    }
-                }
-                return results
-            } catch {
-                return []
+    private func connectToQuerious() {
+        LOG("Connect to Database button clicked", ctx: ["orgId": orgId, "mysqlDb": mysqlDb])
+        do {
+            try QueriousConnector.connect(
+                orgId: orgId,
+                mysqlDbKey: mysqlDb,
+                username: userConfig.config.mysql_username,
+                password: userConfig.config.mysql_password,
+                queriousPath: userConfig.config.querious_path
+            )
+        } catch {
+            // If credentials are missing, surface settings quickly
+            if let derr = error as? DBConnectError, case .missingCredentials = derr {
+                NotificationCenter.default.post(name: .showDatabaseSettings, object: nil)
             }
-        }
-
-        // Inserts {{placeholder}} at the current cursor OR replaces the current selection.
-        // Works even if the button steals focus, by updating SwiftUI state and then pushing to the NSTextView.
-        private func insertPlaceholder(_ name: String) {
-            let token = "{{\(name)}}"
-
-            // Try to find the editor's NSTextView
-            let tv = activeEditorTextView()
-            let current = self.text
-
-            if let tv = tv {
-                // Use the current selection from the text view (replace selection or insert at caret)
-                let sel = tv.selectedRange()
-                let ns = current as NSString
-                let safeLocation = max(0, min(sel.location, ns.length))
-                let safeLength = max(0, min(sel.length, ns.length - safeLocation))
-                let safeRange = NSRange(location: safeLocation, length: safeLength)
-
-                let updated = ns.replacingCharacters(in: safeRange, with: token)
-                self.text = updated
-
-                // Push the updated contents and move caret after the inserted token
-                DispatchQueue.main.async {
-                    tv.string = updated
-                    let newCaret = NSRange(location: safeRange.location + (token as NSString).length, length: 0)
-                    tv.setSelectedRange(newCaret)
-                    tv.scrollRangeToVisible(newCaret)
-                }
-                LOG("Inserted placeholder", ctx: ["ph": name, "mode": safeLength > 0 ? "replace-selection" : "insert-at-caret"])
-            } else {
-                // Fallback: append to the end if we cannot find the text view
-                self.text.append(token)
-                LOG("Inserted placeholder", ctx: ["ph": name, "mode": "append-noTV"])
-            }
-        }
-
-        // Finds the NSTextView used by this editor window.
-        private func activeEditorTextView() -> NSTextView? {
-            if let tv = NSApp.keyWindow?.firstResponder as? NSTextView {
-                return tv
-            }
-            guard let contentView = NSApp.keyWindow?.contentView else { return nil }
-            return findTextView(in: contentView)
-        }
-
-        private func findTextView(in view: NSView) -> NSTextView? {
-            if let tv = view as? NSTextView { return tv }
-            for sub in view.subviews {
-                if let found = findTextView(in: sub) { return found }
-            }
-            return nil
-        }
-
-        // Local prompt for this editor
-        private func promptForString(title: String, message: String, defaultValue: String = "") -> String? {
-            let alert = NSAlert()
-            alert.messageText = title
-            alert.informativeText = message
-            alert.alertStyle = .informational
-            let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
-            input.stringValue = defaultValue
-            input.placeholderString = "e.g., Org-ID"
-            alert.accessoryView = input
-            alert.addButton(withTitle: "OK")
-            alert.addButton(withTitle: "Cancel")
-            return alert.runModal() == .alertFirstButtonReturn
-                ? input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-                : nil
-        }
-
-        // Add new placeholder flow
-        private func addPlaceholderFlow() {
-            guard let raw = promptForString(title: "Add Placeholder",
-                                            message: "Enter a placeholder name (do not include braces).") else { return }
-            let cleaned = raw
-                .replacingOccurrences(of: "{", with: "")
-                .replacingOccurrences(of: "}", with: "")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !cleaned.isEmpty else { return }
-            if placeholderStore.names.contains(cleaned) {
-                let dup = NSAlert()
-                dup.messageText = "Already Exists"
-                dup.informativeText = "A placeholder named \"\(cleaned)\" already exists."
-                dup.alertStyle = .warning
-                dup.addButton(withTitle: "OK")
-                dup.runModal()
-                return
-            }
-            placeholderStore.add(cleaned)
-            LOG("Placeholder added via menu", ctx: ["name": cleaned])
-        }
-
-        // Edit placeholders helpers
-        private func sanitizeName(_ raw: String) -> String {
-            raw.replacingOccurrences(of: "{", with: "")
-               .replacingOccurrences(of: "}", with: "")
-               .trimmingCharacters(in: .whitespacesAndNewlines)
-        }
-
-        private func startEditPlaceholders() {
-            editingNames = placeholderStore.names
-            editError = nil
-            isEditingPlaceholders = true
-            LOG("Edit placeholders started", ctx: ["count": "\(editingNames.count)"])
-        }
-
-        private func cancelEditPlaceholders() {
-            isEditingPlaceholders = false
-            editError = nil
-            LOG("Edit placeholders cancelled")
-        }
-
-        private func applyEditPlaceholders() {
-            // Validate: non-empty, unique after sanitization
-            var seen = Set<String>()
-            var cleaned: [String] = []
-            for raw in editingNames {
-                let name = sanitizeName(raw)
-                if name.isEmpty {
-                    editError = "Placeholder names cannot be empty."
-                    return
-                }
-                if !seen.insert(name).inserted {
-                    editError = "Duplicate name: \"\(name)\""
-                    return
-                }
-                cleaned.append(name)
-            }
-            placeholderStore.set(cleaned)
-            LOG("Edit placeholders applied", ctx: ["count": "\(cleaned.count)"])
-            isEditingPlaceholders = false
-            editError = nil
-        }
-
-        // DELETE placeholders helpers
-        private func startDeletePlaceholders() {
-            deleteSelection = []
-            isDeletingPlaceholders = true
-            LOG("Delete placeholders started", ctx: ["count": "\(placeholderStore.names.count)"])
-        }
-
-        private func cancelDeletePlaceholders() {
-            isDeletingPlaceholders = false
-            deleteSelection = []
-            LOG("Delete placeholders cancelled")
-        }
-
-        private func applyDeletePlaceholders() {
-            guard !deleteSelection.isEmpty else { return }
-            let names = Array(deleteSelection).sorted()
-
-            // Confirm destructive action
-            let alert = NSAlert()
-            alert.messageText = "Delete \(names.count) placeholder\(names.count == 1 ? "" : "s")?"
-            let previewList = names.prefix(6).joined(separator: ", ")
-            let more = names.count > 6 ? " …and \(names.count - 6) more." : ""
-            alert.informativeText = "This will remove the selected placeholders from the global list:\n\(previewList)\(more)"
-            alert.alertStyle = .warning
-            alert.addButton(withTitle: "Delete")
-            alert.addButton(withTitle: "Cancel")
-            guard alert.runModal() == .alertFirstButtonReturn else {
-                LOG("Delete placeholders aborted at confirm")
-                return
-            }
-
-            // Apply deletion atomically
-            let remaining = placeholderStore.names.filter { !deleteSelection.contains($0) }
-            placeholderStore.set(remaining)
-            LOG("Delete placeholders applied", ctx: ["deleted": "\(names.count)", "remaining": "\(remaining.count)"])
-            isDeletingPlaceholders = false
-            deleteSelection = []
-        }
-
-        // Toggle SQL comments ("-- ") on the current line(s) in the editor.
-        // If all non-empty selected lines are commented, it will UNcomment; otherwise it will comment them.
-        private func toggleCommentOnSelection() {
-            guard let tv = activeEditorTextView() else {
-                NSSound.beep()
-                return
-            }
-            let ns = self.text as NSString
-            var sel = tv.selectedRange()
-            if sel.location == NSNotFound {
-                sel = NSRange(location: 0, length: 0)
-            }
-            // Expand to full line range covering selection (or caret line)
-            let lineRange = ns.lineRange(for: sel)
-            let segment = ns.substring(with: lineRange)
-
-            // Track trailing newline so we preserve it after transformation
-            let hasTrailingNewline = segment.hasSuffix("\n")
-            var lines = segment.components(separatedBy: "\n")
-            if hasTrailingNewline { lines.removeLast() } // last element is "" from trailing newline
-
-            // Decide if we are commenting or uncommenting
-            // "commented" means: optional leading spaces + "--" optionally followed by a space
-            let nonEmpty = lines.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-            let allAlreadyCommented = nonEmpty.allSatisfy { line in
-                let trimmedLeading = line.drop(while: { $0 == " " || $0 == "\t" })
-                return trimmedLeading.hasPrefix("--")
-            }
-
-            var changedCount = 0
-            let transformed: [String] = lines.map { line in
-                let original = line
-                let trimmed = original.trimmingCharacters(in: .whitespaces)
-                if trimmed.isEmpty {
-                    return original // keep blank lines untouched
-                }
-                // Split leading whitespace
-                let leadingWhitespace = original.prefix { $0 == " " || $0 == "\t" }
-                let remainder = original.dropFirst(leadingWhitespace.count)
-
-                if allAlreadyCommented {
-                    // UNcomment: remove leading "--" and an optional single space after
-                    if remainder.hasPrefix("--") {
-                        let afterDashes = remainder.dropFirst(2)
-                        let afterSpace = afterDashes.first == " " ? afterDashes.dropFirst() : afterDashes
-                        changedCount += 1
-                        return String(leadingWhitespace) + String(afterSpace)
-                    } else {
-                        return original
-                    }
-                } else {
-                    // Comment: insert "-- " after any leading indentation
-                    changedCount += 1
-                    return String(leadingWhitespace) + "-- " + String(remainder)
-                }
-            }
-
-            let updatedSegment = transformed.joined(separator: "\n") + (hasTrailingNewline ? "\n" : "")
-            let newString = ns.replacingCharacters(in: lineRange, with: updatedSegment)
-
-            // Update SwiftUI and the NSTextView
-            self.text = newString
-            tv.string = newString
-
-            // Keep selection over the transformed block
-            let newRange = NSRange(location: lineRange.location, length: (updatedSegment as NSString).length)
-            tv.setSelectedRange(newRange)
-            tv.scrollRangeToVisible(newRange)
-
-            LOG("Toggle comment", ctx: [
-                "action": allAlreadyCommented ? "uncomment" : "comment",
-                "lines": "\(lines.count)",
-                "changed": "\(changedCount)"
-            ])
-        }
-
-        var body: some View {
-            VStack(spacing: 8) {
-                Text("Editing \(item.name).sql")
-                    .font(.system(size: fontSize + 4, weight: .semibold))
-                    .foregroundStyle(Theme.aqua)
-
-                // Placeholder toolbar (GLOBAL store)
-                let placeholders = placeholderStore.names
-                if !placeholders.isEmpty {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 6) {
-                            Text("Placeholders:")
-                                .font(.system(size: fontSize - 2))
-                                .foregroundStyle(.secondary)
-                                .padding(.trailing, 4)
-                            ForEach(placeholders, id: \.self) { ph in
-                                Button(ph) { insertPlaceholder(ph) }
-                                    .buttonStyle(.bordered)
-                                    .tint(Theme.pink)
-                                    .font(.system(size: fontSize - 1, weight: .medium))
-                                    .help("Insert {{\(ph)}} at cursor")
-                            }
-                            Divider()
-                                .frame(height: 18)
-                                .overlay(Color.secondary.opacity(0.2))
-                                .padding(.horizontal, 4)
-                            Menu {
-                                Button("Add new placeholder…") { addPlaceholderFlow() }
-                                Divider()
-                                Button("Edit placeholders…") { startEditPlaceholders() }
-                                Button("Delete placeholders…") { startDeletePlaceholders() }
-                            } label: {
-                                Image(systemName: "ellipsis.circle")
-                                    .font(.system(size: fontSize + 2, weight: .medium))
-                                    .foregroundStyle(Theme.purple)
-                                    .help("Placeholder options")
-                            }
-                            .menuStyle(.borderlessButton)
-                            Divider()
-                                .frame(height: 18)
-                                .overlay(Color.secondary.opacity(0.2))
-                                .padding(.horizontal, 4)
-                            Button {
-                                toggleCommentOnSelection()
-                            } label: {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "text.quote")
-                                    Text("Comment/Uncomment")
-                                }
-                            }
-                            .buttonStyle(.bordered)
-                            .tint(Theme.purple)
-                            .font(.system(size: fontSize - 1))
-                            .keyboardShortcut("/", modifiers: [.command])
-                            .help("Toggle '--' comments on selected lines (⌘/)")
-                        }
-                        .padding(6)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Theme.grayBG.opacity(0.6))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
-                                )
-                        )
-                    }
-                }
-
-                TextEditor(text: $text)
-                    .font(.system(size: fontSize, design: .monospaced))
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.aqua.opacity(0.3)))
-                    .disableAutocorrection(true)
-                    .autocorrectionDisabled(true)
-                    .onReceive(NotificationCenter.default.publisher(for: NSText.didBeginEditingNotification)) { _ in
-                        if let textView = NSApp.keyWindow?.firstResponder as? NSTextView {
-                            textView.isAutomaticQuoteSubstitutionEnabled = false
-                            textView.isAutomaticDashSubstitutionEnabled = false
-                            textView.isAutomaticTextReplacementEnabled = false
-                        }
-                    }
-                HStack {
-                    Button("Open in VS Code") { openInVSCode(item.url) }
-                        .buttonStyle(.bordered)
-                        .font(.system(size: fontSize))
-                    Spacer()
-                    Button("Cancel") { dismiss() }
-                        .font(.system(size: fontSize))
-                    Button("Save") {
-                        do {
-                            try manager.saveTemplate(url: item.url, newContent: text)
-                            dismiss()
-                        } catch {
-                            NSSound.beep()
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Theme.pink)
-                    .font(.system(size: fontSize))
-                }
-            }
-            .padding()
-            .sheet(isPresented: $isEditingPlaceholders) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Edit Placeholders")
-                        .font(.system(size: fontSize + 2, weight: .semibold))
-                        .foregroundStyle(Theme.purple)
-                        .padding(.bottom, 4)
-
-                    if let err = editError {
-                        Text(err)
-                            .font(.system(size: fontSize - 2))
-                            .foregroundStyle(.red)
-                    }
-
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 6) {
-                            ForEach(Array(editingNames.enumerated()), id: \.offset) { idx, _ in
-                                HStack(spacing: 8) {
-                                    Text("\(idx + 1).")
-                                        .frame(width: 24, alignment: .trailing)
-                                        .foregroundStyle(.secondary)
-                                        .font(.system(size: fontSize - 2))
-                                    TextField("Placeholder name", text: Binding(
-                                        get: { editingNames[idx] },
-                                        set: { editingNames[idx] = $0 }
-                                    ))
-                                    .textFieldStyle(.roundedBorder)
-                                    .font(.system(size: fontSize))
-                                }
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
-                    .frame(minHeight: 220)
-
-                    HStack {
-                        Button("Cancel") { cancelEditPlaceholders() }
-                            .font(.system(size: fontSize))
-                        Spacer()
-                        Button("Apply") { applyEditPlaceholders() }
-                            .buttonStyle(.borderedProminent)
-                            .tint(Theme.pink)
-                            .font(.system(size: fontSize))
-                    }
-                }
-                .padding(14)
-                .frame(minWidth: 520, minHeight: 360)
-            }
-            .onAppear {
-                text = (try? String(contentsOf: item.url, encoding: .utf8)) ?? item.rawSQL
-                // One-time sync: harvest placeholders from this file into the global store
-                let found = detectedPlaceholders(from: text)
-                for ph in found { placeholderStore.add(ph) }
-                LOG("Synced detected placeholders into global store", ctx: ["detected": "\(found.count)", "global": "\(placeholderStore.names.count)"])
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .fontBump)) { note in
-                if let delta = note.object as? Int {
-                    fontSize = max(10, min(22, fontSize + CGFloat(delta)))
-                }
-            }
-            .sheet(isPresented: $isDeletingPlaceholders) {
-                VStack(alignment: .leading, spacing: 10) {
-                    Text("Delete Placeholders")
-                        .font(.system(size: fontSize + 2, weight: .semibold))
-                        .foregroundStyle(.red)
-                        .padding(.bottom, 4)
-
-                    // Controls
-                    HStack(spacing: 8) {
-                        Button("Select All") {
-                            deleteSelection = Set(placeholderStore.names)
-                        }
-                        .font(.system(size: fontSize - 1))
-                        Button("Clear Selection") {
-                            deleteSelection.removeAll()
-                        }
-                        .font(.system(size: fontSize - 1))
-                        Spacer()
-                        Text("\(deleteSelection.count) selected")
-                            .font(.system(size: fontSize - 2))
-                            .foregroundStyle(.secondary)
-                    }
-
-                    // List with toggles
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 6) {
-                            ForEach(placeholderStore.names, id: \.self) { name in
-                                Toggle(isOn: Binding<Bool>(
-                                    get: { deleteSelection.contains(name) },
-                                    set: { newVal in
-                                        if newVal { deleteSelection.insert(name) }
-                                        else { deleteSelection.remove(name) }
-                                    }
-                                )) {
-                                    Text(name)
-                                        .font(.system(size: fontSize))
-                                }
-                                .toggleStyle(.checkbox)
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
-                    .frame(minHeight: 220)
-
-                    HStack {
-                        Button("Cancel") { cancelDeletePlaceholders() }
-                            .font(.system(size: fontSize))
-                        Spacer()
-                        Button("Delete") { applyDeletePlaceholders() }
-                            .buttonStyle(.borderedProminent)
-                            .tint(.red)
-                            .font(.system(size: fontSize))
-                            .disabled(deleteSelection.isEmpty)
-                    }
-                }
-                .padding(14)
-                .frame(minWidth: 520, minHeight: 360)
-            }
-        }
-
-        private func openInVSCode(_ url: URL) {
-            let cfg = NSWorkspace.OpenConfiguration()
-            cfg.activates = true
-            let stable = URL(fileURLWithPath: "/Applications/Visual Studio Code.app")
-            let insiders = URL(fileURLWithPath: "/Applications/Visual Studio Code - Insiders.app")
-            let fm = FileManager.default
-
-            if fm.fileExists(atPath: stable.path) {
-                NSWorkspace.shared.open([url], withApplicationAt: stable, configuration: cfg, completionHandler: nil)
-                return
-            }
-            if fm.fileExists(atPath: insiders.path) {
-                NSWorkspace.shared.open([url], withApplicationAt: insiders, configuration: cfg, completionHandler: nil)
-                return
-            }
-            // Generic fallback
-            NSWorkspace.shared.open(url)
+            showAlert(title: "Connection Error", message: error.localizedDescription)
+            LOG("Connect to DB failed", ctx: ["error": error.localizedDescription])
         }
     }
 }
 
-    // MARK: Inline numeric "wheel" field — arrow keys + mouse wheel to adjust value
-    private struct WheelNumberField: NSViewRepresentable {
-        @Binding var value: Int
-        let range: ClosedRange<Int>
-        let width: CGFloat
-        let label: String  // placeholder label like "YYYY", "MM"
-        let sensitivity: Double
-        let onReturn: (() -> Void)?
-        let onTabToApply: (() -> Void)?
-        
-        init(
-            value: Binding<Int>,
-            range: ClosedRange<Int>,
-            width: CGFloat,
-            label: String,
-            sensitivity: Double,
-            onReturn: (() -> Void)?,
-            onTabToApply: (() -> Void)? = nil
-        ) {
-            self._value = value
-            self.range = range
-            self.width = width
-            self.label = label
-            self.sensitivity = sensitivity
-            self.onReturn = onReturn
-            self.onTabToApply = onTabToApply
-        }
-        
-        func makeNSView(context: Context) -> NSTextField {
-            let tf = WheelTextField()
-            tf.isBordered = false
-            tf.drawsBackground = true
-            tf.backgroundColor = .clear
-            tf.focusRingType = .default
-            tf.font = NSFont.monospacedDigitSystemFont(ofSize: NSFont.systemFontSize(for: .small), weight: .regular)
-            tf.alignment = .center
-            tf.cell?.usesSingleLineMode = true
-            tf.maximumNumberOfLines = 1
-            tf.lineBreakMode = .byTruncatingTail
-            tf.placeholderString = label
-            tf.target = context.coordinator
-            tf.action = #selector(Coordinator.commit(_:))
-            tf.translatesAutoresizingMaskIntoConstraints = false
-
-            tf.widthAnchor.constraint(equalToConstant: width).isActive = true
-            WheelTextField.register(tf)
-            tf.delegate = context.coordinator
-
-            // Wire handlers
-            tf.onAdjust = { delta in
-                context.coordinator.adjust(by: delta)
+// Database Connection Settings Sheet
+struct DatabaseSettingsSheet: View {
+    @ObservedObject var userConfig: UserConfigStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var fontSize: CGFloat = 13
+    
+    @State private var username: String = ""
+    @State private var password: String = ""
+    @State private var queriousPath: String = ""
+    @State private var saveError: String?
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Database Connection Settings")
+                .font(.system(size: fontSize + 4, weight: .semibold))
+                .foregroundStyle(Theme.purple)
+            
+            Text("Configure your MySQL credentials for connecting to Querious.")
+                .font(.system(size: fontSize))
+                .foregroundStyle(.secondary)
+            
+            VStack(alignment: .leading, spacing: 8) {
+                Text("MySQL Username")
+                    .font(.system(size: fontSize - 1))
+                    .foregroundStyle(.secondary)
+                
+                TextField("e.g., chris_jones_ro", text: $username)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: fontSize))
             }
-            tf.onCommitText = {
-                context.coordinator.commitFromText()
+            
+            VStack(alignment: .leading, spacing: 8) {
+                Text("MySQL Password")
+                    .font(.system(size: fontSize - 1))
+                    .foregroundStyle(.secondary)
+                
+                SecureField("Enter your MySQL password", text: $password)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(size: fontSize))
             }
-            tf.onReturn = { onReturn?() }
-            tf.onScrollDelta = { delta, precise in
-                context.coordinator.handleScroll(deltaY: delta, precise: precise)
-            }
-            context.coordinator.currentTextField = tf
-            return tf
-        }
-
-        func updateNSView(_ nsView: NSTextField, context: Context) {
-            let formatted = format(value)
-            if nsView.stringValue != formatted {
-                nsView.stringValue = formatted
-            }
-            context.coordinator.sensitivity = sensitivity
-        }
-
-        func makeCoordinator() -> Coordinator {
-            Coordinator(self)
-        }
-
-        private func format(_ v: Int) -> String {
-            // Pad to 2 digits for everything but year (>= 1000)
-            if range.lowerBound <= 0 && range.upperBound >= 100 { // crude heuristic
-                return String(format: "%02d", v)
-            }
-            if label.uppercased() == "YYYY" {
-                return String(format: "%04d", v)
-            }
-            return String(format: "%02d", v)
-        }
-
-        final class Coordinator: NSObject {
-            var parent: WheelNumberField
-            var sensitivity: Double = 1.0
-            private var accum: CGFloat = 0
-
-            init(_ parent: WheelNumberField) {
-                self.parent = parent
-            }
-
-            @objc func commit(_ sender: Any?) {
-                commitFromText()
-            }
-
-            func commitFromText() {
-                // Parse the text field to int and clamp
-                guard let tf = currentTextField else { return }
-                let raw = tf.stringValue.trimmingCharacters(in: .whitespaces)
-                if let n = Int(raw) {
-                    parent.value = clamp(n, to: parent.range)
-                    tf.stringValue = parent.format(parent.value)
-                } else {
-                    tf.stringValue = parent.format(parent.value)
-                }
-            }
-
-            func adjust(by delta: Int) {
-                let newVal = clamp(parent.value + delta, to: parent.range)
-                if newVal != parent.value {
-                    parent.value = newVal
-                    currentTextField?.stringValue = parent.format(newVal)
-                }
-            }
-
-            func handleScroll(deltaY: CGFloat, precise: Bool) {
-                // Invert so "scroll up" increases value
-                let inverted = -deltaY
-
-                // Base scale: precise devices send larger continuous deltas
-                let base: CGFloat = precise ? 40.0 : 8.0
-
-                // Treat slider as "speed": 0.5 = slower, 3.0 = faster
-                let speed = max(0.5, min(3.0, CGFloat(sensitivity)))
-
-                // Convert delta to fractional steps (higher speed → larger increments)
-                let increment = (inverted * speed) / base
-                accum += increment
-
-                // Step once per whole unit; handle fast flicks (multi-steps)
-                while abs(accum) >= 1.0 {
-                    let step = accum > 0 ? 1 : -1
-                    adjust(by: step)
-                    LOG("Date wheel step", ctx: [
-                        "label": parent.label,
-                        "step": "\(step)",
-                        "accum": String(format: "%.2f", accum),
-                        "precise": precise ? "true" : "false",
-                        "speed": String(format: "%.2f", Double(sensitivity))
-                    ])
-                    accum -= CGFloat(step)
+            
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Querious Application Path")
+                    .font(.system(size: fontSize - 1))
+                    .foregroundStyle(.secondary)
+                
+                HStack {
+                    TextField("/Applications/Querious.app", text: $queriousPath)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: fontSize))
+                    
+                    Button("Browse...") {
+                        let panel = NSOpenPanel()
+                        panel.allowsMultipleSelection = false
+                        panel.canChooseDirectories = false
+                        panel.canChooseFiles = true
+                        panel.allowedContentTypes = [UTType.application]
+                        panel.directoryURL = URL(fileURLWithPath: "/Applications")
+                        
+                        if panel.runModal() == .OK, let url = panel.url {
+                            queriousPath = url.path
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .font(.system(size: fontSize))
                 }
             }
             
-
-            private func clamp(_ v: Int, to range: ClosedRange<Int>) -> Int {
-                min(max(v, range.lowerBound), range.upperBound)
+            if let error = saveError {
+                Text(error)
+                    .font(.system(size: fontSize - 2))
+                    .foregroundStyle(.red)
             }
-
-            weak var currentTextField: WheelTextField?
-        }
-
-
-        // Custom NSTextField subclass to capture arrows + scroll wheel
-        final class WheelTextField: NSTextField {
-            static weak var focusedInstance: WheelTextField?
-
-            // Keep a registry of wheel fields to implement deterministic Tab navigation
-            private struct WeakRef<T: AnyObject> { weak var value: T? }
-            private static var registry: [WeakRef<WheelTextField>] = []
-
-            static func register(_ tf: WheelTextField) {
-                cleanup()
-                if !registry.contains(where: { $0.value === tf }) {
-                    registry.append(WeakRef(value: tf))
-                }
-            }
-            private static func cleanup() {
-                registry.removeAll { $0.value == nil }
-            }
-            private static func index(of tf: WheelTextField) -> Int? {
-                cleanup(); return registry.firstIndex { $0.value === tf }
-            }
-            static func next(after tf: WheelTextField) -> WheelTextField? {
-                guard let i = index(of: tf) else { return nil }
-                let n = i + 1
-                return n < registry.count ? registry[n].value : nil
-            }
-            static func previous(before tf: WheelTextField) -> WheelTextField? {
-                guard let i = index(of: tf) else { return nil }
-                let p = i - 1
-                return p >= 0 ? registry[p].value : nil
-            }
-
-            var onAdjust: ((Int) -> Void)?
-            var onCommitText: (() -> Void)?
-            var onReturn: (() -> Void)?
-            var onScrollDelta: ((CGFloat, Bool) -> Void)?
-
-            override func becomeFirstResponder() -> Bool {
-                let result = super.becomeFirstResponder()
-                if result {
-                    WheelTextField.focusedInstance = self
-                    NotificationCenter.default.post(name: .wheelFieldDidFocus, object: nil)
-                }
-                return result
-            }
-
-            override func resignFirstResponder() -> Bool {
-                let result = super.resignFirstResponder()
-                if result {
-                    if WheelTextField.focusedInstance === self {
-                        WheelTextField.focusedInstance = nil
-                    }
-                }
-                return result
-            }
-
-            override func keyDown(with event: NSEvent) {
-                switch event.keyCode {
-                case 126: // up arrow
-                    onAdjust?(+1)
-                case 125: // down arrow
-                    onAdjust?(-1)
-                case 124: // right arrow → step up
-                    onAdjust?(+1)
-                case 123: // left arrow  → step down
-                    onAdjust?(-1)
-                case 36:  // return
-                    onCommitText?()
-                    onReturn?()
-                case 48:  // tab / shift-tab — move focus explicitly across controls
-                    if event.modifierFlags.contains(.shift) {
-                        self.window?.selectPreviousKeyView(self)
-                    } else {
-                        self.window?.selectNextKeyView(self)
-                    }
-                    return
-                default:
-                    super.keyDown(with: event)
-                }
-            }
-
-            override func scrollWheel(with event: NSEvent) {
-                onScrollDelta?(event.scrollingDeltaY, event.hasPreciseScrollingDeltas)
-            }
-
-            override func textDidEndEditing(_ notification: Notification) {
-                super.textDidEndEditing(notification)
-                onCommitText?()
-            }
-        }
-    }
-// Intercept arrow keys, Return, and Tab from the field editor (NSTextView)
-extension WheelNumberField.Coordinator: NSTextFieldDelegate {
-    func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
-        if commandSelector == #selector(NSResponder.moveUp(_:)) {
-            adjust(by: +1)
-            return true
-        }
-        if commandSelector == #selector(NSResponder.moveDown(_:)) {
-            adjust(by: -1)
-            return true
-        }
-        if commandSelector == #selector(NSResponder.moveRight(_:)) {
-            adjust(by: +1)
-            return true
-        }
-        if commandSelector == #selector(NSResponder.moveLeft(_:)) {
-            adjust(by: -1)
-            return true
-        }
-        if commandSelector == #selector(NSResponder.insertNewline(_:)) {
-            commitFromText()
-            parent.onReturn?()
-            return true
-        }
-        if commandSelector == #selector(NSResponder.insertTab(_:)) {
-            if let tf = control as? WheelNumberField.WheelTextField {
-                if let next = WheelNumberField.WheelTextField.next(after: tf) {
-                    control.window?.makeFirstResponder(next)
-                } else {
-                    // Last wheel: ask SwiftUI to focus the Apply button
-                    parent.onTabToApply?()
-                    // Fallbacks for AppKit key loop (in case SwiftUI focus doesn't manifest)
-                    if let btn = control.window?.contentView?.findButton(titled: "Apply") {
-                        control.window?.makeFirstResponder(btn)
-                    } else {
-                        control.window?.selectNextKeyView(control)
-                    }
-                }
-                return true
-            }
-            control.window?.selectNextKeyView(control)
-            return true
-        }
-        if commandSelector == #selector(NSResponder.insertBacktab(_:)) {
-            if let tf = control as? WheelNumberField.WheelTextField {
-                if let prev = WheelNumberField.WheelTextField.previous(before: tf) {
-                    control.window?.makeFirstResponder(prev)
-                } else {
-                    control.window?.selectPreviousKeyView(control)
-                }
-                return true
-            }
-            control.window?.selectPreviousKeyView(control)
-            return true
-        }
-        return false
-    }
-}
-private extension NSView {
-    func findButton(titled title: String) -> NSButton? {
-        if let b = self as? NSButton, b.title == title { return b }
-        for sub in subviews { if let found = sub.findButton(titled: title) { return found } }
-        return nil
-    }
-}
-
-
-// Live list of registered keyboard shortcuts (grouped by scope)
-private struct KeyboardShortcutsSheet: View {
-    @ObservedObject private var reg = ShortcutRegistry.shared
-    @Environment(\.dismiss) private var dismiss
-    var onClose: (() -> Void)? = nil
-    @State private var fontSize: CGFloat = 13
-
-    private var grouped: [(scope: String, items: [ShortcutRegistry.Item])] {
-        let groups = Dictionary(grouping: reg.items, by: { $0.scope })
-        return groups
-            .map { (key: $0.key, value: $0.value.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }) }
-            .sorted { $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending }
-            .map { (scope: $0.key, items: $0.value) }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(alignment: .firstTextBaseline) {
-                Text("Keyboard Shortcuts")
-                    .font(.system(size: fontSize + 4, weight: .semibold))
-                    .foregroundStyle(Theme.purple)
-                Spacer()
-                Button("Close") {
-                    onClose?()
+            
+            HStack {
+                Button("Cancel") {
                     dismiss()
                 }
-                .keyboardShortcut(.escape, modifiers: [])
-            }
-
-            if reg.items.isEmpty {
-                Text("No shortcuts are registered yet.")
-                    .font(.system(size: fontSize))
-                    .foregroundStyle(.secondary)
-                    .padding(.top, 6)
-            } else {
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 14) {
-                        ForEach(grouped, id: \.scope) { group in
-                            VStack(alignment: .leading, spacing: 6) {
-                                Text(group.scope)
-                                    .font(.system(size: fontSize, weight: .semibold))
-                                    .foregroundStyle(Theme.aqua)
-                                ForEach(group.items) { it in
-                                    HStack(spacing: 10) {
-                                        Text(it.name)
-                                            .font(.system(size: fontSize))
-                                            .frame(maxWidth: .infinity, alignment: .leading)
-                                        Text(it.display)
-                                            .font(.system(size: fontSize, weight: .medium, design: .monospaced))
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    .padding(.vertical, 2)
-                                }
-                            }
-                            .padding(.vertical, 4)
-                        }
-                    }
-                    .padding(.top, 6)
+                .font(.system(size: fontSize))
+                
+                Spacer()
+                
+                Button("Save") {
+                    saveSettings()
                 }
-                .frame(minHeight: 260)
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.pink)
+                .font(.system(size: fontSize))
             }
         }
         .padding(16)
-        .frame(minWidth: 520, minHeight: 360)
+        .frame(minWidth: 480, minHeight: 320)
+        .onAppear {
+            loadCurrentSettings()
+        }
+    }
+    
+    private func loadCurrentSettings() {
+        username = userConfig.config.mysql_username
+        password = userConfig.config.mysql_password
+        queriousPath = userConfig.config.querious_path
+    }
+    
+    private func saveSettings() {
+        saveError = nil
+        
+        let trimmedUsername = username.trimmingCharacters(in: .whitespaces)
+        let trimmedPassword = password.trimmingCharacters(in: .whitespaces)
+        let trimmedPath = queriousPath.trimmingCharacters(in: .whitespaces)
+        
+        if trimmedUsername.isEmpty {
+            saveError = "Username cannot be empty"
+            return
+        }
+        
+        if trimmedPassword.isEmpty {
+            saveError = "Password cannot be empty"
+            return
+        }
+        
+        if trimmedPath.isEmpty {
+            saveError = "Querious path cannot be empty"
+            return
+        }
+        
+        do {
+            try userConfig.updateCredentials(
+                username: trimmedUsername,
+                password: trimmedPassword,
+                queriousPath: trimmedPath
+            )
+            LOG("Database settings saved successfully")
+            dismiss()
+        } catch {
+            saveError = "Failed to save settings: \(error.localizedDescription)"
+            LOG("Database settings save failed", ctx: ["error": error.localizedDescription])
+        }
     }
 }
