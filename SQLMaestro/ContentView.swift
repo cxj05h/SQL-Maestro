@@ -1,7 +1,10 @@
 import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
-
+#if os(macOS)
+import AppKit
+import ApplicationServices
+#endif
 
 // MARK: - Temporary Shims (compile-time stand-ins)
 
@@ -920,6 +923,22 @@ struct ContentView: View {
             }
         }
     }
+    
+#if os(macOS)
+@discardableResult
+private func ensureAccessibilityPermission() -> Bool {
+    let opts: CFDictionary = [kAXTrustedCheckOptionPrompt.takeRetainedValue() as String: true] as CFDictionary
+    let ok = AXIsProcessTrustedWithOptions(opts)
+    LOG("AX permission check", ctx: ["granted": ok ? "1" : "0"])
+    return ok
+}
+
+private func openAccessibilitySettings() {
+    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+        NSWorkspace.shared.open(url)
+    }
+}
+#endif
     
     // MARK: – Static fields (now with dropdown history)
     private var staticFields: some View {
@@ -2226,11 +2245,47 @@ struct ContentView: View {
     }
     
     private func connectToQuerious() {
-        LOG("Connect to Database button clicked", ctx: ["orgId": orgId, "mysqlDb": mysqlDb])
+        LOG("Connect to Database button clicked", ctx: ["orgId": orgId, "mysqlDb": mysqlDb, "openTables": openTablesOnConnect ? "1" : "0"])
         withAnimation { toastOpenDB = true }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
             withAnimation { toastOpenDB = false }
         }
+
+        // If we're going to open tables, enforce "save-first" rule
+        var tablesToOpen: [String] = []
+        var selected: TemplateItem? = nil
+        if openTablesOnConnect, let t = selectedTemplate {
+            selected = t
+            if DBTablesStore.shared.isDirty(for: sessions.current, template: t) {
+                let alert = NSAlert()
+                alert.messageText = "Save DB Tables First?"
+                alert.informativeText = "You have unsaved changes to the DB tables for this template. Only the last saved list is used when opening tables.\n\nSave now and continue?"
+                alert.alertStyle = .warning
+                alert.addButton(withTitle: "Save & Continue")
+                alert.addButton(withTitle: "Cancel")
+                if alert.runModal() == .alertFirstButtonReturn {
+                    if !DBTablesStore.shared.saveSidecar(for: sessions.current, template: t) {
+                        NSSound.beep()
+                        showAlert(title: "Save Failed", message: "Could not save DB tables. Please try again.")
+                        LOG("Auto-save before connect failed")
+                        return
+                    }
+                } else {
+                    LOG("Connect aborted (user cancelled due to unsaved DB tables)")
+                    return
+                }
+            }
+            // Use the (now-saved/cleaned) working set
+            tablesToOpen = DBTablesStore.shared.workingSet(for: sessions.current, template: t)
+        }
+#if os(macOS)
+if openTablesOnConnect {
+    let granted = ensureAccessibilityPermission()
+    LOG("AX preflight (non-blocking)", ctx: ["granted": granted ? "1" : "0"])
+    // Do not block here; we proceed so macOS can show the Automation/Accessibility prompts on first use.
+}
+#endif
+        // Kick the Querious connection
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
             do {
                 try QueriousConnector.connect(
@@ -2246,8 +2301,124 @@ struct ContentView: View {
                 }
                 showAlert(title: "Connection Error", message: error.localizedDescription)
                 LOG("Connect to DB failed", ctx: ["error": error.localizedDescription])
+                return
+            }
+
+            // After a short delay to allow the UI to be ready, open tables if requested
+            if openTablesOnConnect, let t = selected, !tablesToOpen.isEmpty {
+                let delaySeconds: Double = 6.0 // settle time after connection (per user: 5–6s before Quick Open is reliable)
+                DispatchQueue.main.asyncAfter(deadline: .now() + delaySeconds) {
+                    openSavedTablesInQuerious(for: t, baseTables: tablesToOpen)
+                }
             }
         }
+    }
+    /// Opens the given saved tables in Querious using Cmd+Shift+O, typing the table name, and pressing Enter for each.
+    private func openSavedTablesInQuerious(for template: TemplateItem, baseTables: [String]) {
+        // Use the saved order exactly as entered; Querious is already connected to the org DB
+        let tableNames = baseTables
+        guard !tableNames.isEmpty else {
+            LOG("Open tables skipped — empty list")
+            return
+        }
+
+        // Derive an app name from the configured path; fallback to "Querious"
+        let qPath = userConfig.config.querious_path.trimmingCharacters(in: .whitespacesAndNewlines)
+        let appName: String = {
+            if qPath.isEmpty { return "Querious" }
+            let last = URL(fileURLWithPath: qPath).deletingPathExtension().lastPathComponent
+            return last.isEmpty ? "Querious" : last
+        }()
+
+        LOG("Open tables workflow starting", ctx: ["count": "\(tableNames.count)", "app": appName])
+
+        // Build AppleScript to ensure the app is running, wait for it, activate, then quick-open each table
+        var lines: [String] = []
+        lines.append("set __appName__ to \"\(appName)\"")
+
+        // If app not running, open it via path if we have one; otherwise via name
+        let escapedPath = userConfig.config.querious_path.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !escapedPath.isEmpty {
+            let asEsc = appleScriptStringEscape(escapedPath)
+            lines.append("tell application \"System Events\" to set __running__ to exists process __appName__")
+            lines.append("if __running__ is false then")
+            lines.append("  do shell script \"open -a \\(\\\"\(asEsc)\\\")\"")
+            lines.append("end if")
+        } else {
+            lines.append("tell application \"System Events\" to set __running__ to exists process __appName__")
+            lines.append("if __running__ is false then")
+            lines.append("  do shell script \"open -a \\(\\\"\(appName)\\\")\"")
+            lines.append("end if")
+        }
+
+        // Poll for up to ~20s until the process appears
+        lines.append("set __seen__ to false")
+        lines.append("repeat with i from 1 to 80")
+        lines.append("  delay 0.25")
+        lines.append("  tell application \"System Events\" to set __seen__ to exists process __appName__")
+        lines.append("  if __seen__ then exit repeat")
+        lines.append("end repeat")
+
+        // Activate once found, then a small settle
+        lines.append("if __seen__ then")
+        lines.append("  tell application __appName__ to activate")
+        lines.append("  delay 0.8")
+        lines.append("end if")
+
+        // Now perform the Quick Open sequence for each table
+        lines.append("tell application \"System Events\"")
+        for (i, name) in tableNames.enumerated() {
+            let n = appleScriptStringEscape(name)
+            lines.append("keystroke \"O\" using {command down, shift down}")
+            // First popup needs more time to appear; subsequent ones can be faster
+            if i == 0 {
+                lines.append("delay 0.8")
+            } else {
+                lines.append("delay 0.35")
+            }
+            lines.append("keystroke \"\(n)\"")
+            lines.append("delay 0.25")
+            lines.append("key code 36") // Return to open
+            lines.append("delay 0.8")   // allow table to finish opening before next
+        }
+        lines.append("end tell")
+
+        let source = lines.joined(separator: "\n")
+        LOG("AppleScript prepared", ctx: ["lines": "\(lines.count)"])
+
+        #if os(macOS)
+        if let script = NSAppleScript(source: source) {
+            var err: NSDictionary?
+            let result = script.executeAndReturnError(&err)
+            if let err = err {
+                let code = (err[NSAppleScript.errorNumber] as? NSNumber)?.intValue ?? 0
+                let msg  = (err[NSAppleScript.errorMessage] as? String)
+                        ?? (err["NSAppleScriptErrorBriefMessage"] as? String)
+                        ?? err.description
+                let app  = (err[NSAppleScript.errorAppName] as? String) ?? ""
+                LOG("AppleScript open tables error", ctx: ["code": "\(code)", "message": msg, "app": app])
+                // Common codes:
+                //  -1719 / -1743: Not permitted to send Apple events (Automation permission)
+                //  -25211: TCC deny (missing NSAppleEventsUsageDescription)
+                //  -10004: Not allowed / privilege error
+                _ = result // keep to silence unused warning in release
+            } else {
+                LOG("Querious tables opened", ctx: ["count": "\(tableNames.count)"])
+            }
+        } else {
+            LOG("AppleScript compile failed")
+        }
+        #else
+        LOG("AppleScript not supported on this platform")
+        #endif
+    }
+
+    /// Escape a Swift string for use inside AppleScript string literal.
+    private func appleScriptStringEscape(_ s: String) -> String {
+        // Escape backslashes and double-quotes for AppleScript literal
+        var out = s.replacingOccurrences(of: "\\", with: "\\\\")
+        out = out.replacingOccurrences(of: "\"", with: "\\\"")
+        return out
     }
 }
 
