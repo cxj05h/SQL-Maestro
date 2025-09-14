@@ -44,6 +44,133 @@ struct KeyboardShortcutsSheet: View {
 /// Lightweight numeric wheel field replacement used by the Date row.
 /// Supports integer editing within a range; includes a Stepper.
 struct WheelNumberField: View {
+    // Cocoa bridge for native key + wheel handling (NSTextField subclass)
+    private struct CocoaField: NSViewRepresentable {
+        @Binding var value: Int
+        let range: ClosedRange<Int>
+        let label: String
+        let sensitivity: Double
+        let onReturn: () -> Void
+
+        func makeCoordinator() -> Coordinator {
+            Coordinator(self)
+        }
+
+        func makeNSView(context: Context) -> WheelTextField {
+            let tf = WheelTextField()
+            tf.isBezeled = true
+            tf.bezelStyle = .roundedBezel
+            tf.alignment = .center
+            tf.placeholderString = label
+            tf.stringValue = String(value)
+            tf.isEditable = true
+            tf.isSelectable = true
+            tf.usesSingleLineMode = true
+            tf.lineBreakMode = .byClipping
+            tf.focusRingType = .default
+            tf.target = context.coordinator
+            tf.action = #selector(Coordinator.commitFromTextField)
+
+            tf.onAdjust = { step in
+                context.coordinator.adjust(by: step)
+            }
+            tf.onCommitText = {
+                context.coordinator.commitFromText()
+            }
+            tf.onReturn = {
+                onReturn()
+            }
+            tf.onScrollDelta = { delta, precise in
+                context.coordinator.handleScroll(deltaY: delta, precise: precise)
+            }
+
+            return tf
+        }
+
+        func updateNSView(_ nsView: WheelTextField, context: Context) {
+            let newText = String(value)
+            if nsView.stringValue != newText {
+                nsView.stringValue = newText
+            }
+            context.coordinator.range = range
+            context.coordinator.sensitivity = sensitivity
+        }
+
+        final class Coordinator: NSObject {
+            var parent: CocoaField
+            var range: ClosedRange<Int>
+            var sensitivity: Double = 1.0
+            private var accum: CGFloat = 0
+
+            init(_ parent: CocoaField) {
+                self.parent = parent
+                self.range = parent.range
+            }
+
+            // Clamp and assign to binding
+            private func setValue(_ v: Int) {
+                let clamped = min(max(v, range.lowerBound), range.upperBound)
+                if clamped != parent.value {
+                    parent.value = clamped
+                }
+            }
+
+            @objc func commitFromTextField(_ sender: Any?) {
+                commitFromText()
+            }
+
+            func commitFromText() {
+                // Parse current text; fallback to existing binding if invalid
+                if let tf = currentTextField(),
+                   let n = Int(tf.stringValue.trimmingCharacters(in: .whitespaces)) {
+                    setValue(n)
+                } else {
+                    // keep existing value
+                }
+            }
+
+            func adjust(by step: Int) {
+                setValue(parent.value + step)
+            }
+
+            func handleScroll(deltaY: CGFloat, precise: Bool) {
+                // Invert so "scroll up" increases value
+                let inverted = -deltaY
+                // Base scale: precise devices send larger continuous deltas
+                let base: CGFloat = precise ? 40.0 : 8.0
+                // Treat slider as "speed": 0.5 = slower, 3.0 = faster
+                let speed = max(0.5, min(3.0, CGFloat(sensitivity)))
+                // Convert delta to fractional steps (higher speed → larger increments)
+                let increment = (inverted * speed) / base
+                accum += increment
+                // Step once per whole unit; handle fast flicks (multi-steps)
+                while abs(accum) >= 1.0 {
+                    let step = accum > 0 ? 1 : -1
+                    adjust(by: step)
+                    LOG("Date wheel step", ctx: [
+                        "label": parent.label,
+                        "step": "\(step)",
+                        "accum": String(format: "%.2f", accum),
+                        "precise": precise ? "true" : "false",
+                        "speed": String(format: "%.2f", Double(sensitivity))
+                    ])
+                    accum -= CGFloat(step)
+                }
+            }
+
+            private func currentTextField() -> WheelTextField? {
+                // Try the view hierarchy first (most reliable)
+                if let tv = NSApp.keyWindow?.firstResponder as? WheelTextField {
+                    return tv
+                }
+                // Fallback: use the static focusedInstance marker
+                if let tf = WheelTextField.focusedInstance {
+                    return tf
+                }
+                return nil
+            }
+        }
+    }
     @Binding var value: Int
     let range: ClosedRange<Int>
     let width: CGFloat
@@ -62,18 +189,21 @@ struct WheelNumberField: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            TextField(label, value: $value, formatter: formatter)
-                .frame(width: width)
-                .multilineTextAlignment(.center)
-                .textFieldStyle(.roundedBorder)
-                .onSubmit {
+            CocoaField(
+                value: $value,
+                range: range,
+                label: label,
+                sensitivity: sensitivity,
+                onReturn: {
                     clamp()
                     onReturn()
                 }
-                // Focus traversal hint for Tab -> Apply (no-op if nil)
-                .onExitCommand {
-                    onTabToApply?()
-                }
+            )
+            .frame(width: width)
+            // Preserve Tab-to-Apply behavior
+            .onExitCommand {
+                onTabToApply?()
+            }
 
             Stepper("", value: $value, in: range)
                 .labelsHidden()
@@ -89,9 +219,49 @@ struct WheelNumberField: View {
 
 // Satisfy references used by the scroll-wheel redirection logic.
 extension WheelNumberField {
-    final class WheelTextField {
-        static var focusedInstance: WheelTextField?
-        var onScrollDelta: ((CGFloat, Bool) -> Void)?
+    // Native NSTextField subclass that exposes key + wheel events via closures.
+    final class WheelTextField: NSTextField {
+        static weak var focusedInstance: WheelTextField?
+
+        var onAdjust: ((Int) -> Void)?          // +1 / -1 from arrow keys
+        var onCommitText: (() -> Void)?         // Return triggers a commit
+        var onReturn: (() -> Void)?             // Optional extra action on Return
+        var onScrollDelta: ((CGFloat, Bool) -> Void)? // deltaY, hasPreciseScrollingDeltas
+
+        override func becomeFirstResponder() -> Bool {
+            let ok = super.becomeFirstResponder()
+            if ok {
+                WheelTextField.focusedInstance = self
+                NotificationCenter.default.post(name: .wheelFieldDidFocus, object: nil)
+            }
+            return ok
+        }
+
+        override func resignFirstResponder() -> Bool {
+            let ok = super.resignFirstResponder()
+            if ok, WheelTextField.focusedInstance === self {
+                WheelTextField.focusedInstance = nil
+            }
+            return ok
+        }
+
+        override func keyDown(with event: NSEvent) {
+            switch event.keyCode {
+            case 126: // up
+                onAdjust?(+1)
+            case 125: // down
+                onAdjust?(-1)
+            case 36:  // return
+                onCommitText?()
+                onReturn?()
+            default:
+                super.keyDown(with: event)
+            }
+        }
+
+        override func scrollWheel(with event: NSEvent) {
+            onScrollDelta?(event.scrollingDeltaY, event.hasPreciseScrollingDeltas)
+        }
     }
 }
 
