@@ -70,6 +70,7 @@ struct WheelNumberField: View {
             tf.focusRingType = .default
             tf.target = context.coordinator
             tf.action = #selector(Coordinator.commitFromTextField)
+            tf.delegate = context.coordinator
 
             tf.onAdjust = { step in
                 context.coordinator.adjust(by: step)
@@ -96,7 +97,7 @@ struct WheelNumberField: View {
             context.coordinator.sensitivity = sensitivity
         }
 
-        final class Coordinator: NSObject {
+        final class Coordinator: NSObject, NSTextFieldDelegate, NSControlTextEditingDelegate {
             var parent: CocoaField
             var range: ClosedRange<Int>
             var sensitivity: Double = 1.0
@@ -131,6 +132,27 @@ struct WheelNumberField: View {
 
             func adjust(by step: Int) {
                 setValue(parent.value + step)
+            }
+
+            // Intercept arrow keys and Return from the field editor (NSTextView)
+            func control(_ control: NSControl, textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
+                switch commandSelector {
+                case #selector(NSResponder.moveUp(_:)):
+                    adjust(by: +1)
+                    LOG("Date wheel arrow", ctx: ["label": parent.label, "dir": "up"])
+                    return true
+                case #selector(NSResponder.moveDown(_:)):
+                    adjust(by: -1)
+                    LOG("Date wheel arrow", ctx: ["label": parent.label, "dir": "down"])
+                    return true
+                case #selector(NSResponder.insertNewline(_:)):
+                    commitFromText()
+                    parent.onReturn()
+                    LOG("Date wheel return", ctx: ["label": parent.label])
+                    return true
+                default:
+                    return false
+                }
             }
 
             func handleScroll(deltaY: CGFloat, precise: Bool) {
