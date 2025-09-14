@@ -1795,6 +1795,7 @@ struct TemplateInlineEditorSheet: View {
     @State private var editingNames: [String] = []
     @State private var editError: String? = nil
     @State private var deleteSelection: Set<String> = []
+    @State private var editListVersion: Int = 0
 
     // Find the NSTextView that backs the SwiftUI TextEditor so we can insert at caret / replace selection.
     private func activeEditorTextView() -> NSTextView? {
@@ -1909,7 +1910,12 @@ struct TemplateInlineEditorSheet: View {
     private func startEditPlaceholders() {
         editingNames = placeholderStore.names
         editError = nil
-        isEditingPlaceholders = true
+        // Bump version so the sheet rebuilds with fresh data
+        editListVersion &+= 1
+        // Present on next runloop so data is ready before the sheet builds
+        DispatchQueue.main.async {
+            isEditingPlaceholders = true
+        }
         LOG("Edit placeholders started", ctx: ["count": "\(editingNames.count)"])
     }
     private func cancelEditPlaceholders() {
@@ -2095,6 +2101,12 @@ struct TemplateInlineEditorSheet: View {
             }
             .padding(14)
             .frame(minWidth: 520, minHeight: 360)
+            .id(editListVersion)
+            .onAppear {
+                // Ensure list is populated and force a rebuild when the sheet appears
+                editingNames = placeholderStore.names
+                editListVersion &+= 1
+            }
         }
         .sheet(isPresented: $isDeletingPlaceholders) {
             VStack(alignment: .leading, spacing: 10) {
