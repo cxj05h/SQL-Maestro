@@ -1796,6 +1796,7 @@ struct TemplateInlineEditorSheet: View {
     @State private var editError: String? = nil
     @State private var deleteSelection: Set<String> = []
     @State private var editListVersion: Int = 0
+    @State private var detectedFromFile: [String] = []
 
     // Find the NSTextView that backs the SwiftUI TextEditor so we can insert at caret / replace selection.
     private func activeEditorTextView() -> NSTextView? {
@@ -2045,8 +2046,8 @@ struct TemplateInlineEditorSheet: View {
                 .onAppear {
                     localText = text
                     let found = detectedPlaceholders(from: localText)
-                    for ph in found { placeholderStore.add(ph) }
-                    LOG("Synced detected placeholders into global store", ctx: ["detected": "\(found.count)", "global": "\(placeholderStore.names.count)"])
+                    detectedFromFile = found
+                    LOG("Detected placeholders in file", ctx: ["detected": "\(found.count)"])
                 }
                 .onChange(of: localText) { _, newVal in text = newVal }
             HStack {
