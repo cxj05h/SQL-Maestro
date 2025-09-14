@@ -77,16 +77,101 @@ enum QueriousConnector {
             throw DBConnectError.urlBuildFailed
         }
 
-        // 6) Open via URL scheme (let macOS route it to Querious)
-        LOG("Opening Querious via URL scheme", ctx: [
-            "mysqlDbKey": dbKey,
-            "host": host.hostname,
-            "port": "\(host.port)",
-            "database": database,
-            "url": url.absoluteString
-        ])
+        // 6) Prefer existing instance; otherwise launch then send URL
+        let appURL = URL(fileURLWithPath: appPath)
+        let isRunning = NSWorkspace.shared.runningApplications.contains { app in
+            if let b = app.bundleURL { return b == appURL }
+            return app.localizedName == "Querious"
+        }
 
-        NSWorkspace.shared.open(url)
+        if isRunning {
+            // Try targeted AppleEvent first so it reuses the existing instance/window.
+            let asSource = """
+            set theURL to "\(url.absoluteString)"
+            -- Capture current window count
+            tell application "System Events"
+                set winCount to 0
+                if exists process "Querious" then
+                    tell process "Querious"
+                        try
+                            set winCount to count of windows
+                        on error
+                            set winCount to 0
+                        end try
+                    end tell
+                end if
+            end tell
+
+            -- Send the URL to Querious (this may open a new window)
+            tell application "Querious"
+                activate
+                open location theURL
+            end tell
+
+            -- Wait briefly for a new window to appear
+            set maxTries to 30
+            repeat with i from 1 to maxTries
+                delay 0.12
+                tell application "System Events"
+                    if exists process "Querious" then
+                        tell process "Querious"
+                            try
+                                set newCount to count of windows
+                                if newCount > winCount then exit repeat
+                            end try
+                        end tell
+                    end if
+                end tell
+            end repeat
+
+            -- Best-effort: Merge All Windows into tabs
+            try
+                tell application "System Events"
+                    if exists process "Querious" then
+                        tell process "Querious"
+                            tell menu bar 1
+                                tell menu bar item "Window"
+                                    tell menu 1
+                                        if exists menu item "Merge All Windows" then
+                                            click menu item "Merge All Windows"
+                                        end if
+                                    end tell
+                                end tell
+                            end tell
+                        end tell
+                    end if
+                end tell
+            end try
+            """
+            var asError: NSDictionary?
+            if let asObj = NSAppleScript(source: asSource) {
+                let result = asObj.executeAndReturnError(&asError)
+                if let asError = asError {
+                    LOG("AppleScript open location failed; falling back to NSWorkspace.open", ctx: ["error": String(describing: asError), "url": url.absoluteString])
+                    NSWorkspace.shared.open(url)
+                } else {
+                    LOG("Sent URL to existing Querious instance via AppleScript", ctx: ["result": result.stringValue ?? "ok"])
+                }
+            } else {
+                LOG("Failed to create AppleScript object; falling back to NSWorkspace.open", ctx: [:])
+                NSWorkspace.shared.open(url)
+            }
+        } else {
+            LOG("Launching Querious, then sending URL", ctx: ["appPath": appPath, "url": url.absoluteString])
+            let cfg = NSWorkspace.OpenConfiguration()
+            cfg.activates = true
+            NSWorkspace.shared.openApplication(at: appURL, configuration: cfg) { _, err in
+                if let err = err {
+                    LOG("Querious launch failed; falling back to direct URL open", ctx: ["error": err.localizedDescription])
+                    NSWorkspace.shared.open(url)
+                    return
+                }
+                // small delay to allow the app to register URL handlers
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+        }
     }
 }
 
