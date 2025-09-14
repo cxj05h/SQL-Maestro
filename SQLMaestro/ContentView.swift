@@ -981,6 +981,7 @@ struct ContentView: View {
                 }
             }
         }
+        .padding(.bottom, 16)
     }
     
     // MARK: – Dynamic fields from template placeholders
