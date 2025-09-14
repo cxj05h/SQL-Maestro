@@ -637,7 +637,7 @@ struct ContentView: View {
                     editorTemplate = nil
                 }
             )
-            .frame(minWidth: 720, minHeight: 520)
+            .frame(minWidth: 760, minHeight: 520)
         }
      
         .onAppear {
@@ -2064,6 +2064,19 @@ struct TemplateInlineEditorSheet: View {
                     .font(.system(size: fontSize + 2, weight: .medium))
                     .foregroundStyle(Theme.purple)
                 Spacer()
+                Button {
+                    toggleCommentOnSelection()
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "text.quote")
+                        Text("Comment/Uncomment")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .tint(Theme.purple)
+                .font(.system(size: fontSize - 1))
+                .keyboardShortcut("/", modifiers: [.command]) // ⌘/
+                .help("Toggle '--' comments on selected lines (⌘/)")
                 Button("Cancel", action: onCancel)
                     .buttonStyle(.bordered)
                 Button("Save") { onSave(localText) }
@@ -2103,23 +2116,6 @@ struct TemplateInlineEditorSheet: View {
                                 .help("Placeholder options")
                         }
                         .menuStyle(.borderlessButton)
-                        Divider()
-                            .frame(height: 18)
-                            .overlay(Color.secondary.opacity(0.2))
-                            .padding(.horizontal, 4)
-                        Button {
-                            toggleCommentOnSelection()
-                        } label: {
-                            HStack(spacing: 4) {
-                                Image(systemName: "text.quote")
-                                Text("Comment/Uncomment")
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(Theme.purple)
-                        .font(.system(size: fontSize - 1))
-                        .keyboardShortcut("/", modifiers: [.command]) // ⌘/
-                        .help("Toggle '--' comments on selected lines (⌘/)")
                     }
                     .padding(6)
                     .background(
@@ -2130,6 +2126,7 @@ struct TemplateInlineEditorSheet: View {
                                     .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
                             )
                     )
+                    .padding(.trailing, 12)
                 }
             }
             Divider()
@@ -2256,7 +2253,7 @@ struct TemplateInlineEditorSheet: View {
             .padding(14)
             .frame(minWidth: 520, minHeight: 360)
         }
-        .frame(minWidth: 720, minHeight: 520)
+        .frame(minWidth: 760, minHeight: 520)
     }
 }
 
