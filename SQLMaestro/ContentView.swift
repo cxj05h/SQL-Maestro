@@ -721,6 +721,7 @@ struct ContentView: View {
                 Divider()
                 
                 staticFields
+                    .padding(.bottom, 8)
                 Divider()
                 dynamicFields
                 
@@ -897,7 +898,7 @@ struct ContentView: View {
             Text("Static Info")
                 .font(.system(size: fontSize + 4, weight: .semibold))
                 .foregroundStyle(Theme.purple)
-            HStack {
+            HStack(alignment: .top) {
                 fieldWithDropdown(
                     label: "Org-ID",
                     placeholder: "e.g., 606079893960",
@@ -935,8 +936,9 @@ struct ContentView: View {
                         LOG("AcctID committed", ctx: ["value": newVal])
                     }
                 )
-                VStack(alignment: .leading) {
-                    HStack {
+                HStack(alignment: .top, spacing: 8) {
+                    // Left: fieldWithDropdown + centered Connect button under the field area
+                    VStack(alignment: .leading, spacing: 0) {
                         fieldWithDropdown(
                             label: "MySQL DB",
                             placeholder: "e.g., mySQL04",
@@ -953,21 +955,29 @@ struct ContentView: View {
                                 LOG("MySQL DB committed", ctx: ["value": cleaned])
                             }
                         )
-                        Button("Save") {
-                            saveMapping()
+                        HStack {
+                            Spacer()
+                            Button("Connect to Database") {
+                                connectToQuerious()
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(Theme.accent)
+                            .font(.system(size: fontSize))
+                            .disabled(orgId.trimmingCharacters(in: .whitespaces).isEmpty)
+                            Spacer()
                         }
-                        .buttonStyle(.borderedProminent)
-                        .tint(Theme.pink) // <- same pink as Apply/Populate Query
-                        .font(.system(size: fontSize))
+                        // Match the text field visual width (420) so centering aligns under the field, not the Save button
+                        .frame(width: 420)
+                        .padding(.top, 4)
                     }
-                    Button("Connect to Database") {
-                        connectToQuerious()
+
+                    // Right: Save button remains beside the field
+                    Button("Save") {
+                        saveMapping()
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(Theme.accent) // Using the green accent color
+                    .tint(Theme.pink)
                     .font(.system(size: fontSize))
-                    .frame(maxWidth: .infinity) // Full width like you wanted
-                    .disabled(orgId.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
         }
