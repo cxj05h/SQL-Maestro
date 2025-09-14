@@ -1,10 +1,8 @@
 import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
-#if os(macOS)
-import AppKit
-import ApplicationServices
-#endif
+
+
 
 // MARK: - Temporary Shims (compile-time stand-ins)
 
@@ -439,6 +437,9 @@ private final class MenuBridge: NSObject {
         }
     }
 }
+
+
+
 //MARK: Content View
 struct ContentView: View {
     @EnvironmentObject var templates: TemplateManager
@@ -455,7 +456,6 @@ struct ContentView: View {
     @State private var toastOpenDB: Bool = false
     @State private var fontSize: CGFloat = 13
     @State private var hoverRecentKey: String? = nil
-    @State private var openTablesOnConnect: Bool = false
     
     @State private var searchText: String = ""
     @State private var showShortcutsSheet: Bool = false
@@ -463,7 +463,7 @@ struct ContentView: View {
     @State private var showTemplateEditor: Bool = false // (no longer controls presentation)
     @State private var editorTemplate: TemplateItem? = nil
     @State private var editorText: String = ""
-
+    
     
     @FocusState private var isSearchFocused: Bool
     @FocusState private var isListFocused: Bool
@@ -489,7 +489,7 @@ struct ContentView: View {
     @AppStorage("dateScrollSensitivity") private var dateScrollSensitivity: Double = 1.0  // 0.5 (slower) … 3.0 (faster)
     @State private var dateFocusScrollMode: Bool = false
     @State private var scrollMonitor: Any? = nil
-
+    
     // Date picker working components
     @State private var dpYear: Int = Calendar.current.component(.year, from: Date())
     @State private var dpMonth: Int = Calendar.current.component(.month, from: Date())
@@ -497,7 +497,7 @@ struct ContentView: View {
     @State private var dpHour: Int = Calendar.current.component(.hour, from: Date())
     @State private var dpMinute: Int = Calendar.current.component(.minute, from: Date())
     @State private var dpSecond: Int = Calendar.current.component(.second, from: Date())
-
+    
     var body: some View {
         NavigationSplitView {
             // Query Templates Pane
@@ -607,13 +607,13 @@ struct ContentView: View {
                     .contextMenu {
                         Button("Open in VS Code") { openInVSCode(template.url) }
                         Button("Edit in App") { editTemplateInline(template) }
-
+                        
                         Button("Open JSON") { openTemplateJSON(template) }
                         Button("Show in Finder") { revealTemplateInFinder(template) }
-
+                        
                         Divider()
                         Button("Rename…") { renameTemplateFlow(template) }
-
+                        
                         Divider()
                         Button(role: .destructive) { deleteTemplateFlow(template) } label: {
                             Text("Delete Template…")
@@ -763,11 +763,11 @@ struct ContentView: View {
                         
                         Spacer()
                     }
-
+                    
                     // Centered session buttons overlay
                     sessionButtons
                         .frame(maxWidth: .infinity, alignment: .center)
-
+                    
                     // Right-aligned DB Tables pane
                     HStack {
                         Spacer()
@@ -847,7 +847,7 @@ struct ContentView: View {
             )
             .frame(minWidth: 760, minHeight: 520)
         }
-     
+        
         .onAppear {
             LOG("App started")
             // Initialize with session 1
@@ -878,21 +878,21 @@ struct ContentView: View {
             }
             // Ensure Help ▸ Keyboard Shortcuts… exists
             MenuBridge.installHelpMenuItem()
-            #if os(macOS)
+#if os(macOS)
             if keyEventMonitor == nil {
                 keyEventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event in
                     return handleDBSuggestKeyEvent(event)
                 }
             }
-            #endif
+#endif
         }
         .onDisappear {
-            #if os(macOS)
+#if os(macOS)
             if let m = keyEventMonitor {
                 NSEvent.removeMonitor(m)
                 keyEventMonitor = nil
             }
-            #endif
+#endif
             if let m = scrollMonitor {
                 NSEvent.removeMonitor(m)
                 scrollMonitor = nil
@@ -900,7 +900,7 @@ struct ContentView: View {
             }
         }
     }
-
+    
     // Commit any non-empty draft values for the CURRENT session to global history
     private func commitDraftsForCurrentSession() {
         let cur = sessions.current
@@ -925,19 +925,19 @@ struct ContentView: View {
     }
     
 #if os(macOS)
-@discardableResult
-private func ensureAccessibilityPermission() -> Bool {
-    let opts: CFDictionary = [kAXTrustedCheckOptionPrompt.takeRetainedValue() as String: true] as CFDictionary
-    let ok = AXIsProcessTrustedWithOptions(opts)
-    LOG("AX permission check", ctx: ["granted": ok ? "1" : "0"])
-    return ok
-}
-
-private func openAccessibilitySettings() {
-    if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
-        NSWorkspace.shared.open(url)
+    @discardableResult
+    private func ensureAccessibilityPermission() -> Bool {
+        let opts: CFDictionary = [kAXTrustedCheckOptionPrompt.takeRetainedValue() as String: true] as CFDictionary
+        let ok = AXIsProcessTrustedWithOptions(opts)
+        LOG("AX permission check", ctx: ["granted": ok ? "1" : "0"])
+        return ok
     }
-}
+    
+    private func openAccessibilitySettings() {
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            NSWorkspace.shared.open(url)
+        }
+    }
 #endif
     
     // MARK: – Static fields (now with dropdown history)
@@ -958,10 +958,10 @@ private func openAccessibilitySettings() {
                         if cleaned != newVal { orgId = cleaned }
                         // Force-save the cleaned value to global cache/history
                         sessions.setValue(cleaned, for: "Org-ID")
-
+                        
                         // Update session cache
                         sessionStaticFields[sessions.current] = (cleaned, acctId, mysqlDb, companyLabel)
-
+                        
                         // Lookup mapping only on commit
                         if let m = mapping.lookup(orgId: cleaned) {
                             mysqlDb = m.mysqlDb
@@ -998,7 +998,7 @@ private func openAccessibilitySettings() {
                                 if cleaned != newVal { mysqlDb = cleaned }
                                 // Force-save the cleaned value to global cache/history
                                 sessions.setValue(cleaned, for: "MySQL-DB")
-
+                                
                                 sessionStaticFields[sessions.current] = (orgId, acctId, cleaned, companyLabel)
                                 LOG("MySQL DB committed", ctx: ["value": cleaned])
                             }
@@ -1018,7 +1018,7 @@ private func openAccessibilitySettings() {
                         .frame(width: 420)
                         .padding(.top, 4)
                     }
-
+                    
                     // Right: Save button remains beside the field
                     Button("Save") {
                         saveMapping()
@@ -1082,9 +1082,9 @@ private func openAccessibilitySettings() {
             Text(label)
                 .font(.system(size: fontSize - 1))
                 .foregroundStyle(.secondary)
-
+            
             HStack(spacing: 6) {
-
+                
                 // Text field
                 TextField(placeholder, text: value, onEditingChanged: { isEditing in
                     // Commit when editing ENDS (blur / click-away / tab out)
@@ -1115,7 +1115,7 @@ private func openAccessibilitySettings() {
                     }
                     onCommit?(finalVal)
                 }
-
+                
                 // Recents popover trigger
                 Button {
                     openRecentsKey = historyKey
@@ -1175,22 +1175,22 @@ private func openAccessibilitySettings() {
     private func suggestTables(_ query: String, limit: Int = 15) -> [String] {
         DBTablesCatalog.shared.suggest(query, limit: limit)
     }
-
+    
 #if os(macOS)
     /// Handle ↑/↓ to move through suggestions, Return/Enter to accept, Esc to close.
     private func handleDBSuggestKeyEvent(_ event: NSEvent) -> NSEvent? {
         guard let row = focusedDBTableRow else { return event }
         // Must have a selected template and a visible suggestions context
         guard selectedTemplate != nil else { return event }
-
+        
         // Build suggestions for the focused row
         let current = dbTablesStore.workingSet(for: sessions.current, template: selectedTemplate)
         let query = (row < current.count ? current[row] : "").trimmingCharacters(in: .whitespaces)
         let suggestions = suggestTables(query, limit: 15)
         guard !suggestions.isEmpty else { return event }
-
+        
         var idx = suggestionIndexByRow[row] ?? -1
-
+        
         switch event.keyCode {
         case 125: // ↓
             idx = (idx + 1) % suggestions.count
@@ -1237,13 +1237,13 @@ private func openAccessibilitySettings() {
             editTemplateInline(item)
         }
     }
-
+    
     private func revealTemplateInFinder(_ item: TemplateItem) {
         // Highlights the file in Finder
         NSWorkspace.shared.activateFileViewerSelecting([item.url])
         LOG("Reveal in Finder", ctx: ["file": item.url.lastPathComponent])
     }
-
+    
     private func deleteTemplateFlow(_ item: TemplateItem) {
         let alert = NSAlert()
         alert.messageText = "Delete Template"
@@ -1251,25 +1251,25 @@ private func openAccessibilitySettings() {
         alert.alertStyle = .warning
         alert.addButton(withTitle: "Delete")
         alert.addButton(withTitle: "Cancel")
-
+        
         if alert.runModal() == .alertFirstButtonReturn {
             do {
                 // Delete the file from disk
                 try FileManager.default.removeItem(at: item.url)
                 LOG("Template file removed", ctx: ["file": item.url.path])
-
+                
                 // Clear selection if we just deleted the selected item
                 if selectedTemplate?.id == item.id {
                     selectedTemplate = nil
                 }
-
+                
                 // Remove session memory pointing to this template
                 for s in TicketSession.allCases {
                     if sessionSelectedTemplate[s] == item.id {
                         sessionSelectedTemplate[s] = nil
                     }
                 }
-
+                
                 // Reload templates from disk
                 templates.loadTemplates()
                 LOG("Template deleted", ctx: ["template": item.name])
@@ -1319,7 +1319,7 @@ private func openAccessibilitySettings() {
             }
         )
     }
-
+    
     @FocusState private var applyButtonFocused: Bool
     // MARK: NEW — Date field row specialized UI for {{Date}} with inline "wheel" spinners (no popovers)
     private func dateFieldRow(_ placeholder: String) -> some View {
@@ -1334,17 +1334,17 @@ private func openAccessibilitySettings() {
                 draftDynamicValues[currentSession] = bucket
             }
         )
-
+        
         // Prefill components from current value (or "now") when this row appears
         let _ = {
             prefillDateComponents(from: valBinding.wrappedValue)
         }()
-
+        
         return VStack(alignment: .leading, spacing: 4) {
             Text(placeholder)
                 .font(.system(size: fontSize - 1))
                 .foregroundStyle(.secondary)
-
+            
             // Row: value field + inline "wheel" controls + Apply
             HStack(spacing: 8) {
                 // The visible text field showing the formatted date string
@@ -1370,7 +1370,7 @@ private func openAccessibilitySettings() {
                 .onSubmit {
                     performDateApply(for: placeholder, binding: valBinding)
                 }
-
+                
                 // Inline numeric "wheels": Year / Month / Day / Hour / Minute / Second
                 HStack(alignment: .center, spacing: 8) {
                     VStack(spacing: 4) {
@@ -1487,7 +1487,7 @@ private func openAccessibilitySettings() {
                         .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
                 )
                 .frame(minHeight: 48)
-
+                
                 Button("Apply") {
                     performDateApply(for: placeholder, binding: valBinding)
                 }
@@ -1501,7 +1501,7 @@ private func openAccessibilitySettings() {
                 .fixedSize(horizontal: true, vertical: false)   // <- keeps width to fit "Apply"
                 .layoutPriority(3)                               // <- resists compression
             }
-
+            
             // Helper hint
             Text("Tip: Use ↑/↓ or the mouse wheel to change values. Press Tab to move across fields.")
                 .font(.system(size: fontSize - 3))
@@ -1518,7 +1518,7 @@ private func openAccessibilitySettings() {
             return .ignored
         }
     }
-
+    
     private func performDateApply(for placeholder: String, binding valBinding: Binding<String>) {
         let maxDay = daysInMonth(year: dpYear, month: dpMonth)
         if dpDay > maxDay { dpDay = maxDay }
@@ -1530,14 +1530,14 @@ private func openAccessibilitySettings() {
         sessions.setValue(str, for: placeholder)
         LOG("Date inline apply (Enter/Apply)", ctx: ["value": str])
     }
-
+    
     // Helpers for date math/format/parse
     private func yearsRange() -> ClosedRange<Int> {
         let current = Calendar.current.component(.year, from: Date())
         // Generous range around current year; adjust if desired
         return (current - 30)...(current + 30)
     }
-
+    
     private func daysInMonth(year: Int, month: Int) -> Int {
         var comps = DateComponents()
         comps.year = year
@@ -1546,19 +1546,19 @@ private func openAccessibilitySettings() {
         let date = calendar.date(from: comps)!
         return calendar.range(of: .day, in: .month, for: date)?.count ?? 31
     }
-
+    
     private func formatDateString(year: Int, month: Int, day: Int, hour: Int, minute: Int, second: Int) -> String {
         // Always "YYYY-MM-DD HH:MM:SS"
         String(format: "%04d-%02d-%02d %02d:%02d:%02d", year, month, day, hour, minute, second)
     }
-
+    
     private func prefillDateComponents(from str: String) {
         // Try parse "YYYY-MM-DD HH:MM:SS"
         let trimmed = str.trimmingCharacters(in: .whitespacesAndNewlines)
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
         formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-
+        
         if let d = formatter.date(from: trimmed) {
             let cal = Calendar.current
             dpYear = cal.component(.year, from: d)
@@ -1587,17 +1587,10 @@ private func openAccessibilitySettings() {
                 .foregroundStyle(Theme.purple)
                 .lineLimit(1)
             
-            Toggle(isOn: $openTablesOnConnect) {
-                Text("Open tables on connect")
-                    .font(.system(size: fontSize - 2))
-            }
-            .toggleStyle(.checkbox)
-            .help("When enabled, connecting will quick-open the saved tables for this template in Querious.")
-
             if let t = selectedTemplate {
                 let isDirty = dbTablesStore.isDirty(for: sessions.current, template: t)
                 let rows = dbTablesStore.workingSet(for: sessions.current, template: t)
-
+                
                 VStack(alignment: .leading, spacing: 6) {
                     // Rows
                     ForEach(Array(rows.enumerated()), id: \.offset) { idx, value in
@@ -1631,7 +1624,7 @@ private func openAccessibilitySettings() {
                                 .lineLimit(1)
                                 .focused($focusedDBTableRow, equals: idx)
                                 .help("Enter a base table name (letters, numbers, underscores).")
-
+                                
                                 Button {
                                     var current = dbTablesStore.workingSet(for: sessions.current, template: selectedTemplate)
                                     if idx < current.count {
@@ -1646,7 +1639,7 @@ private func openAccessibilitySettings() {
                                 .foregroundStyle(Theme.pink)
                                 .help("Remove this row")
                             }
-
+                            
                             // Inline suggestions (appear when the row is focused and query has matches)
                             let current = dbTablesStore.workingSet(for: sessions.current, template: selectedTemplate)
                             let query = (idx < current.count ? current[idx] : "").trimmingCharacters(in: .whitespaces)
@@ -1694,7 +1687,7 @@ private func openAccessibilitySettings() {
                             }
                         }
                     }
-
+                    
                     // Add row button
                     Button {
                         var current = dbTablesStore.workingSet(for: sessions.current, template: selectedTemplate)
@@ -1711,7 +1704,7 @@ private func openAccessibilitySettings() {
                     .foregroundStyle(Theme.accent)
                     .padding(.top, 2)
                 }
-
+                
                 HStack(spacing: 8) {
                     Button("Save Tables") {
                         _ = dbTablesStore.saveSidecar(for: sessions.current, template: t)
@@ -1719,18 +1712,18 @@ private func openAccessibilitySettings() {
                     .buttonStyle(.borderedProminent)
                     .tint(Theme.purple)
                     .disabled(!isDirty)
-
+                    
                     Button("Revert to Saved") {
                         _ = dbTablesStore.loadSidecar(for: sessions.current, template: t)
                     }
                     .buttonStyle(.bordered)
                     .tint(Theme.pink)
                     .disabled(!isDirty)
-
+                    
                     Spacer()
                 }
                 .padding(.top, 2)
-
+                
                 Text("Tip: These tables will be opened in Querious when you connect (if enabled).")
                     .font(.system(size: fontSize - 3))
                     .foregroundStyle(.secondary)
@@ -1750,7 +1743,7 @@ private func openAccessibilitySettings() {
                 )
         )
     }
-
+    
     // MARK: – Output area
     private var outputView: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -1823,7 +1816,7 @@ private func openAccessibilitySettings() {
             LOG("DBTables sidecar hydrated", ctx: ["template": t.name, "session": "\(sessions.current.rawValue)"])
         }
     }
-
+    
     // MARK: – Actions
     // Function to handle session switching
     private func switchToSession(_ newSession: TicketSession) {
@@ -1886,7 +1879,7 @@ private func openAccessibilitySettings() {
             LOG("Inline editor open failed", ctx: ["template": t.name, "error": error.localizedDescription])
         }
     }
-
+    
     private func saveTemplateEdits(template: TemplateItem, newText: String) {
         let fm = FileManager.default
         let url = template.url
@@ -1898,7 +1891,7 @@ private func openAccessibilitySettings() {
                 .appendingPathComponent("SQLMaestro", isDirectory: true)
                 .appendingPathComponent("backups", isDirectory: true)
             try? fm.createDirectory(at: backupsDir, withIntermediateDirectories: true)
-
+            
             let ext = url.pathExtension.isEmpty ? "sql" : url.pathExtension
             let df = DateFormatter()
             df.locale = Locale(identifier: "en_US_POSIX")
@@ -1908,11 +1901,11 @@ private func openAccessibilitySettings() {
             let backupURL = backupsDir.appendingPathComponent(backupName)
             try original.write(to: backupURL, options: .atomic)
             LOG("Template backup created", ctx: ["file": backupName])
-
+            
             // 2) Save new contents
             try newText.data(using: .utf8)?.write(to: url, options: .atomic)
             LOG("Template saved", ctx: ["template": template.name, "bytes": "\(newText.utf8.count)"])
-
+            
             // 3) Reload templates so UI reflects latest
             templates.loadTemplates()
         } catch {
@@ -1925,14 +1918,14 @@ private func openAccessibilitySettings() {
     private func openInVSCode(_ url: URL) {
         let cfg = NSWorkspace.OpenConfiguration()
         cfg.activates = true
-
+        
         // Prefer stable VS Code
         let stable = URL(fileURLWithPath: "/Applications/Visual Studio Code.app")
         // Fallback to Insiders build if present
         let insiders = URL(fileURLWithPath: "/Applications/Visual Studio Code - Insiders.app")
-
+        
         let fm = FileManager.default
-
+        
         let openWithApp: (URL) -> Void = { appURL in
             NSWorkspace.shared.open([url], withApplicationAt: appURL, configuration: cfg) { _, err in
                 if let err = err {
@@ -1944,7 +1937,7 @@ private func openAccessibilitySettings() {
                 }
             }
         }
-
+        
         if fm.fileExists(atPath: stable.path) {
             openWithApp(stable)
             return
@@ -1953,7 +1946,7 @@ private func openAccessibilitySettings() {
             openWithApp(insiders)
             return
         }
-
+        
         // If neither app bundle exists, try generic `open -a` as a best-effort
         let task = Process()
         task.executableURL = URL(fileURLWithPath: "/usr/bin/env")
@@ -2109,7 +2102,7 @@ private func openAccessibilitySettings() {
             LOG("Save mapping failed - empty MySQL DB")
             return
         }
-
+        
         // Disallow any whitespace in Org-ID
         if orgId.rangeOfCharacter(from: .whitespacesAndNewlines) != nil {
             showAlert(title: "Error", message: "Org-ID cannot contain spaces")
@@ -2200,7 +2193,7 @@ private func openAccessibilitySettings() {
         alert.addButton(withTitle: "OK")
         alert.runModal()
     }
-
+    
     // Rewrites the org→mysql mapping JSON with pretty formatting so each entry
     // is on its own line (instead of raw string appends).
     private func prettyRewriteMappingFile() {
@@ -2217,26 +2210,26 @@ private func openAccessibilitySettings() {
                 .appendingPathComponent("SQLMaestro")
                 .appendingPathComponent("mappings")
                 .appendingPathComponent("org_mysql_map.json")
-
+            
             guard fm.fileExists(atPath: fileURL.path) else {
                 LOG("Pretty rewrite skipped — mapping file missing", ctx: ["path": fileURL.path])
                 return
             }
-
+            
             let data = try Data(contentsOf: fileURL)
             let obj = try JSONSerialization.jsonObject(with: data, options: [])
-
+            
             // Pretty-print (and keep keys stable if available on this macOS SDK)
             var options: JSONSerialization.WritingOptions = [.prettyPrinted]
-            #if swift(>=5.0)
+#if swift(>=5.0)
             if #available(macOS 10.13, *) { options.insert(.sortedKeys) }
-            #endif
-
+#endif
+            
             var output = try JSONSerialization.data(withJSONObject: obj, options: options)
-
+            
             // Ensure a trailing newline for nicer diffs / editors
             if output.last != 0x0A { output.append(0x0A) }
-
+            
             try output.write(to: fileURL, options: .atomic)
             LOG("Mapping file pretty-printed", ctx: ["path": fileURL.path])
         } catch {
@@ -2245,174 +2238,37 @@ private func openAccessibilitySettings() {
     }
     
     private func connectToQuerious() {
-        LOG("Connect to Database button clicked", ctx: ["orgId": orgId, "mysqlDb": mysqlDb, "openTables": openTablesOnConnect ? "1" : "0"])
-        withAnimation { toastOpenDB = true }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
-            withAnimation { toastOpenDB = false }
-        }
-
-        // If we're going to open tables, enforce "save-first" rule
-        var tablesToOpen: [String] = []
-        var selected: TemplateItem? = nil
-        if openTablesOnConnect, let t = selectedTemplate {
-            selected = t
-            if DBTablesStore.shared.isDirty(for: sessions.current, template: t) {
-                let alert = NSAlert()
-                alert.messageText = "Save DB Tables First?"
-                alert.informativeText = "You have unsaved changes to the DB tables for this template. Only the last saved list is used when opening tables.\n\nSave now and continue?"
-                alert.alertStyle = .warning
-                alert.addButton(withTitle: "Save & Continue")
-                alert.addButton(withTitle: "Cancel")
-                if alert.runModal() == .alertFirstButtonReturn {
-                    if !DBTablesStore.shared.saveSidecar(for: sessions.current, template: t) {
-                        NSSound.beep()
-                        showAlert(title: "Save Failed", message: "Could not save DB tables. Please try again.")
-                        LOG("Auto-save before connect failed")
-                        return
+            LOG("Connect to Database button clicked", ctx: ["orgId": orgId, "mysqlDb": mysqlDb])
+            
+            // Show the "Opening in Querious..." toast
+            withAnimation { toastOpenDB = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+                withAnimation { toastOpenDB = false }
+            }
+            
+            // Small delay to let the UI update, then connect
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
+                do {
+                    try QueriousConnector.connect(
+                        orgId: orgId,
+                        mysqlDbKey: mysqlDb,
+                        username: userConfig.config.mysql_username,
+                        password: userConfig.config.mysql_password,
+                        queriousPath: userConfig.config.querious_path
+                    )
+                    LOG("Database connection initiated successfully")
+                } catch {
+                    // Handle specific credential errors
+                    if let derr = error as? DBConnectError, case .missingCredentials = derr {
+                        NotificationCenter.default.post(name: .showDatabaseSettings, object: nil)
                     }
-                } else {
-                    LOG("Connect aborted (user cancelled due to unsaved DB tables)")
-                    return
-                }
-            }
-            // Use the (now-saved/cleaned) working set
-            tablesToOpen = DBTablesStore.shared.workingSet(for: sessions.current, template: t)
-        }
-#if os(macOS)
-if openTablesOnConnect {
-    let granted = ensureAccessibilityPermission()
-    LOG("AX preflight (non-blocking)", ctx: ["granted": granted ? "1" : "0"])
-    // Do not block here; we proceed so macOS can show the Automation/Accessibility prompts on first use.
-}
-#endif
-        // Kick the Querious connection
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.18) {
-            do {
-                try QueriousConnector.connect(
-                    orgId: orgId,
-                    mysqlDbKey: mysqlDb,
-                    username: userConfig.config.mysql_username,
-                    password: userConfig.config.mysql_password,
-                    queriousPath: userConfig.config.querious_path
-                )
-            } catch {
-                if let derr = error as? DBConnectError, case .missingCredentials = derr {
-                    NotificationCenter.default.post(name: .showDatabaseSettings, object: nil)
-                }
-                showAlert(title: "Connection Error", message: error.localizedDescription)
-                LOG("Connect to DB failed", ctx: ["error": error.localizedDescription])
-                return
-            }
-
-            // After a short delay to allow the UI to be ready, open tables if requested
-            if openTablesOnConnect, let t = selected, !tablesToOpen.isEmpty {
-                let delaySeconds: Double = 6.0 // settle time after connection (per user: 5–6s before Quick Open is reliable)
-                DispatchQueue.main.asyncAfter(deadline: .now() + delaySeconds) {
-                    openSavedTablesInQuerious(for: t, baseTables: tablesToOpen)
+                    
+                    // Show error to user
+                    showAlert(title: "Connection Error", message: error.localizedDescription)
+                    LOG("Connect to DB failed", ctx: ["error": error.localizedDescription])
                 }
             }
         }
-    }
-    /// Opens the given saved tables in Querious using Cmd+Shift+O, typing the table name, and pressing Enter for each.
-    private func openSavedTablesInQuerious(for template: TemplateItem, baseTables: [String]) {
-        // Use the saved order exactly as entered; Querious is already connected to the org DB
-        let tableNames = baseTables
-        guard !tableNames.isEmpty else {
-            LOG("Open tables skipped — empty list")
-            return
-        }
-
-        // Derive an app name from the configured path; fallback to "Querious"
-        let qPath = userConfig.config.querious_path.trimmingCharacters(in: .whitespacesAndNewlines)
-        let appName: String = {
-            if qPath.isEmpty { return "Querious" }
-            let last = URL(fileURLWithPath: qPath).deletingPathExtension().lastPathComponent
-            return last.isEmpty ? "Querious" : last
-        }()
-
-        LOG("Open tables workflow starting", ctx: ["count": "\(tableNames.count)", "app": appName])
-
-        // Build AppleScript to ensure the app is running, wait for it, activate, then quick-open each table
-        var lines: [String] = []
-        lines.append("set __appName__ to \"\(appName)\"")
-
-        // If app not running, open it via path if we have one; otherwise via name
-        let escapedPath = userConfig.config.querious_path.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !escapedPath.isEmpty {
-            let asEsc = appleScriptStringEscape(escapedPath)
-            lines.append("tell application \"System Events\" to set __running__ to exists process __appName__")
-            lines.append("if __running__ is false then")
-            lines.append("  do shell script \"open -a \\(\\\"\(asEsc)\\\")\"")
-            lines.append("end if")
-        } else {
-            lines.append("tell application \"System Events\" to set __running__ to exists process __appName__")
-            lines.append("if __running__ is false then")
-            lines.append("  do shell script \"open -a \\(\\\"\(appName)\\\")\"")
-            lines.append("end if")
-        }
-
-        // Poll for up to ~20s until the process appears
-        lines.append("set __seen__ to false")
-        lines.append("repeat with i from 1 to 80")
-        lines.append("  delay 0.25")
-        lines.append("  tell application \"System Events\" to set __seen__ to exists process __appName__")
-        lines.append("  if __seen__ then exit repeat")
-        lines.append("end repeat")
-
-        // Activate once found, then a small settle
-        lines.append("if __seen__ then")
-        lines.append("  tell application __appName__ to activate")
-        lines.append("  delay 0.8")
-        lines.append("end if")
-
-        // Now perform the Quick Open sequence for each table
-        lines.append("tell application \"System Events\"")
-        for (i, name) in tableNames.enumerated() {
-            let n = appleScriptStringEscape(name)
-            lines.append("keystroke \"O\" using {command down, shift down}")
-            // First popup needs more time to appear; subsequent ones can be faster
-            if i == 0 {
-                lines.append("delay 0.8")
-            } else {
-                lines.append("delay 0.35")
-            }
-            lines.append("keystroke \"\(n)\"")
-            lines.append("delay 0.25")
-            lines.append("key code 36") // Return to open
-            lines.append("delay 0.8")   // allow table to finish opening before next
-        }
-        lines.append("end tell")
-
-        let source = lines.joined(separator: "\n")
-        LOG("AppleScript prepared", ctx: ["lines": "\(lines.count)"])
-
-        #if os(macOS)
-        if let script = NSAppleScript(source: source) {
-            var err: NSDictionary?
-            let result = script.executeAndReturnError(&err)
-            if let err = err {
-                let code = (err[NSAppleScript.errorNumber] as? NSNumber)?.intValue ?? 0
-                let msg  = (err[NSAppleScript.errorMessage] as? String)
-                        ?? (err["NSAppleScriptErrorBriefMessage"] as? String)
-                        ?? err.description
-                let app  = (err[NSAppleScript.errorAppName] as? String) ?? ""
-                LOG("AppleScript open tables error", ctx: ["code": "\(code)", "message": msg, "app": app])
-                // Common codes:
-                //  -1719 / -1743: Not permitted to send Apple events (Automation permission)
-                //  -25211: TCC deny (missing NSAppleEventsUsageDescription)
-                //  -10004: Not allowed / privilege error
-                _ = result // keep to silence unused warning in release
-            } else {
-                LOG("Querious tables opened", ctx: ["count": "\(tableNames.count)"])
-            }
-        } else {
-            LOG("AppleScript compile failed")
-        }
-        #else
-        LOG("AppleScript not supported on this platform")
-        #endif
-    }
-
     /// Escape a Swift string for use inside AppleScript string literal.
     private func appleScriptStringEscape(_ s: String) -> String {
         // Escape backslashes and double-quotes for AppleScript literal
@@ -2420,622 +2276,622 @@ if openTablesOnConnect {
         out = out.replacingOccurrences(of: "\"", with: "\\\"")
         return out
     }
-}
-
-// Inline Template Editor Sheet
-struct TemplateInlineEditorSheet: View {
-    let template: TemplateItem
-    @Binding var text: String
-    var fontSize: CGFloat
-    var onSave: (String) -> Void
-    var onCancel: () -> Void
-    @State private var localText: String = ""
-    @ObservedObject private var placeholderStore = PlaceholderStore.shared
-    @State private var isEditingPlaceholders: Bool = false
-    @State private var isDeletingPlaceholders: Bool = false
-    @State private var editingNames: [String] = []
-    @State private var editError: String? = nil
-    @State private var deleteSelection: Set<String> = []
-    @State private var editListVersion: Int = 0
-    @State private var detectedFromFile: [String] = []
-
-    // Find the NSTextView that backs the SwiftUI TextEditor so we can insert at caret / replace selection.
-    private func activeEditorTextView() -> NSTextView? {
-        if let tv = NSApp.keyWindow?.firstResponder as? NSTextView {
-            return tv
-        }
-        guard let contentView = NSApp.keyWindow?.contentView else { return nil }
-        return findTextView(in: contentView)
-    }
-    private func findTextView(in view: NSView) -> NSTextView? {
-        if let tv = view as? NSTextView { return tv }
-        for sub in view.subviews {
-            if let found = findTextView(in: sub) { return found }
-        }
-        return nil
-    }
-
-    // Insert {{placeholder}} at the current caret or replace the current selection.
-    private func insertPlaceholder(_ name: String) {
-        let token = "{{\(name)}}"
-        let current = self.localText
-        guard let tv = activeEditorTextView() else {
-            // Fallback: append to end if we can't resolve the text view yet.
-            self.localText.append(token)
-            self.text = self.localText
-            LOG("Inserted placeholder (no TV)", ctx: ["ph": name])
-            return
-        }
-        let ns = current as NSString
-        var sel = tv.selectedRange()
-        if sel.location == NSNotFound { sel = NSRange(location: ns.length, length: 0) }
-        let safeLoc = max(0, min(sel.location, ns.length))
-        let safeLen = max(0, min(sel.length, ns.length - safeLoc))
-        let safeRange = NSRange(location: safeLoc, length: safeLen)
-        let updated = ns.replacingCharacters(in: safeRange, with: token)
-        self.localText = updated
-        self.text = updated
-        DispatchQueue.main.async {
-            tv.string = updated
-            let newCaret = NSRange(location: safeRange.location + (token as NSString).length, length: 0)
-            tv.setSelectedRange(newCaret)
-            tv.scrollRangeToVisible(newCaret)
-        }
-        LOG("Inserted placeholder", ctx: ["ph": name, "mode": safeLen > 0 ? "replace" : "insert"])
-    }
-
-    // Detects {{placeholder}} tokens in source, de-duplicated in order
-    private func detectedPlaceholders(from source: String) -> [String] {
-        do {
-            let regex = try NSRegularExpression(pattern: #"\{\{\s*([^}]+?)\s*\}\}"#, options: [])
-            let range = NSRange(source.startIndex..<source.endIndex, in: source)
-            var seen = Set<String>()
-            var results: [String] = []
-            regex.enumerateMatches(in: source, options: [], range: range) { match, _, _ in
-                guard let m = match, m.numberOfRanges >= 2,
-                      let r = Range(m.range(at: 1), in: source) else { return }
-                let name = source[r].trimmingCharacters(in: .whitespacesAndNewlines)
-                if !name.isEmpty, !seen.contains(name) {
-                    seen.insert(name)
-                    results.append(name)
-                }
+    
+    // Inline Template Editor Sheet
+    struct TemplateInlineEditorSheet: View {
+        let template: TemplateItem
+        @Binding var text: String
+        var fontSize: CGFloat
+        var onSave: (String) -> Void
+        var onCancel: () -> Void
+        @State private var localText: String = ""
+        @ObservedObject private var placeholderStore = PlaceholderStore.shared
+        @State private var isEditingPlaceholders: Bool = false
+        @State private var isDeletingPlaceholders: Bool = false
+        @State private var editingNames: [String] = []
+        @State private var editError: String? = nil
+        @State private var deleteSelection: Set<String> = []
+        @State private var editListVersion: Int = 0
+        @State private var detectedFromFile: [String] = []
+        
+        // Find the NSTextView that backs the SwiftUI TextEditor so we can insert at caret / replace selection.
+        private func activeEditorTextView() -> NSTextView? {
+            if let tv = NSApp.keyWindow?.firstResponder as? NSTextView {
+                return tv
             }
-            return results
-        } catch {
-            return []
+            guard let contentView = NSApp.keyWindow?.contentView else { return nil }
+            return findTextView(in: contentView)
         }
-    }
-
-    // Local prompt (editor scope)
-    private func promptForString(title: String, message: String, defaultValue: String = "") -> String? {
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = message
-        alert.alertStyle = .informational
-        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
-        input.stringValue = defaultValue
-        alert.accessoryView = input
-        alert.addButton(withTitle: "OK")
-        alert.addButton(withTitle: "Cancel")
-        return alert.runModal() == .alertFirstButtonReturn
+        private func findTextView(in view: NSView) -> NSTextView? {
+            if let tv = view as? NSTextView { return tv }
+            for sub in view.subviews {
+                if let found = findTextView(in: sub) { return found }
+            }
+            return nil
+        }
+        
+        // Insert {{placeholder}} at the current caret or replace the current selection.
+        private func insertPlaceholder(_ name: String) {
+            let token = "{{\(name)}}"
+            let current = self.localText
+            guard let tv = activeEditorTextView() else {
+                // Fallback: append to end if we can't resolve the text view yet.
+                self.localText.append(token)
+                self.text = self.localText
+                LOG("Inserted placeholder (no TV)", ctx: ["ph": name])
+                return
+            }
+            let ns = current as NSString
+            var sel = tv.selectedRange()
+            if sel.location == NSNotFound { sel = NSRange(location: ns.length, length: 0) }
+            let safeLoc = max(0, min(sel.location, ns.length))
+            let safeLen = max(0, min(sel.length, ns.length - safeLoc))
+            let safeRange = NSRange(location: safeLoc, length: safeLen)
+            let updated = ns.replacingCharacters(in: safeRange, with: token)
+            self.localText = updated
+            self.text = updated
+            DispatchQueue.main.async {
+                tv.string = updated
+                let newCaret = NSRange(location: safeRange.location + (token as NSString).length, length: 0)
+                tv.setSelectedRange(newCaret)
+                tv.scrollRangeToVisible(newCaret)
+            }
+            LOG("Inserted placeholder", ctx: ["ph": name, "mode": safeLen > 0 ? "replace" : "insert"])
+        }
+        
+        // Detects {{placeholder}} tokens in source, de-duplicated in order
+        private func detectedPlaceholders(from source: String) -> [String] {
+            do {
+                let regex = try NSRegularExpression(pattern: #"\{\{\s*([^}]+?)\s*\}\}"#, options: [])
+                let range = NSRange(source.startIndex..<source.endIndex, in: source)
+                var seen = Set<String>()
+                var results: [String] = []
+                regex.enumerateMatches(in: source, options: [], range: range) { match, _, _ in
+                    guard let m = match, m.numberOfRanges >= 2,
+                          let r = Range(m.range(at: 1), in: source) else { return }
+                    let name = source[r].trimmingCharacters(in: .whitespacesAndNewlines)
+                    if !name.isEmpty, !seen.contains(name) {
+                        seen.insert(name)
+                        results.append(name)
+                    }
+                }
+                return results
+            } catch {
+                return []
+            }
+        }
+        
+        // Local prompt (editor scope)
+        private func promptForString(title: String, message: String, defaultValue: String = "") -> String? {
+            let alert = NSAlert()
+            alert.messageText = title
+            alert.informativeText = message
+            alert.alertStyle = .informational
+            let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+            input.stringValue = defaultValue
+            alert.accessoryView = input
+            alert.addButton(withTitle: "OK")
+            alert.addButton(withTitle: "Cancel")
+            return alert.runModal() == .alertFirstButtonReturn
             ? input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             : nil
-    }
-
-    private func sanitizeName(_ raw: String) -> String {
-        raw.replacingOccurrences(of: "{", with: "")
-           .replacingOccurrences(of: "}", with: "")
-           .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    // Add / Edit / Delete placeholder flows
-    private func addPlaceholderFlow() {
-        guard let raw = promptForString(
-            title: "Add Placeholder",
-            message: "Enter a placeholder name (do not include braces)."
-        ) else { return }
-        let cleaned = sanitizeName(raw)
-        guard !cleaned.isEmpty else { return }
-        if placeholderStore.names.contains(cleaned) {
-            let dup = NSAlert()
-            dup.messageText = "Already Exists"
-            dup.informativeText = "A placeholder named \"\(cleaned)\" already exists."
-            dup.alertStyle = .warning
-            dup.addButton(withTitle: "OK")
-            dup.runModal()
-            return
         }
-        placeholderStore.add(cleaned)
-        LOG("Placeholder added via editor", ctx: ["name": cleaned])
-    }
-
-    private func startEditPlaceholders() {
-        editingNames = placeholderStore.names
-        editError = nil
-        // Bump version so the sheet rebuilds with fresh data
-        editListVersion &+= 1
-        // Present on next runloop so data is ready before the sheet builds
-        DispatchQueue.main.async {
-            isEditingPlaceholders = true
+        
+        private func sanitizeName(_ raw: String) -> String {
+            raw.replacingOccurrences(of: "{", with: "")
+                .replacingOccurrences(of: "}", with: "")
+                .trimmingCharacters(in: .whitespacesAndNewlines)
         }
-        LOG("Edit placeholders started", ctx: ["count": "\(editingNames.count)"])
-    }
-    private func cancelEditPlaceholders() {
-        isEditingPlaceholders = false
-        editError = nil
-    }
-    private func applyEditPlaceholders() {
-        var seen = Set<String>()
-        var cleaned: [String] = []
-        for raw in editingNames {
-            let name = sanitizeName(raw)
-            if name.isEmpty {
-                editError = "Placeholder names cannot be empty."
+        
+        // Add / Edit / Delete placeholder flows
+        private func addPlaceholderFlow() {
+            guard let raw = promptForString(
+                title: "Add Placeholder",
+                message: "Enter a placeholder name (do not include braces)."
+            ) else { return }
+            let cleaned = sanitizeName(raw)
+            guard !cleaned.isEmpty else { return }
+            if placeholderStore.names.contains(cleaned) {
+                let dup = NSAlert()
+                dup.messageText = "Already Exists"
+                dup.informativeText = "A placeholder named \"\(cleaned)\" already exists."
+                dup.alertStyle = .warning
+                dup.addButton(withTitle: "OK")
+                dup.runModal()
                 return
             }
-            if !seen.insert(name).inserted {
-                editError = "Duplicate name: \"\(name)\""
-                return
+            placeholderStore.add(cleaned)
+            LOG("Placeholder added via editor", ctx: ["name": cleaned])
+        }
+        
+        private func startEditPlaceholders() {
+            editingNames = placeholderStore.names
+            editError = nil
+            // Bump version so the sheet rebuilds with fresh data
+            editListVersion &+= 1
+            // Present on next runloop so data is ready before the sheet builds
+            DispatchQueue.main.async {
+                isEditingPlaceholders = true
             }
-            cleaned.append(name)
+            LOG("Edit placeholders started", ctx: ["count": "\(editingNames.count)"])
         }
-        placeholderStore.set(cleaned)
-        LOG("Edit placeholders applied", ctx: ["count": "\(cleaned.count)"])
-        isEditingPlaceholders = false
-        editError = nil
-    }
-
-    private func startDeletePlaceholders() {
-        deleteSelection = []
-        isDeletingPlaceholders = true
-        LOG("Delete placeholders started", ctx: ["count": "\(placeholderStore.names.count)"])
-    }
-    private func cancelDeletePlaceholders() {
-        isDeletingPlaceholders = false
-        deleteSelection = []
-        LOG("Delete placeholders cancelled")
-    }
-    private func applyDeletePlaceholders() {
-        guard !deleteSelection.isEmpty else { return }
-        let names = Array(deleteSelection).sorted()
-        // Confirm destructive action
-        let alert = NSAlert()
-        alert.messageText = "Delete \(names.count) placeholder\(names.count == 1 ? "" : "s")?"
-        let previewList = names.prefix(6).joined(separator: ", ")
-        let more = names.count > 6 ? " …and \(names.count - 6) more." : ""
-        alert.informativeText = "This will remove the selected placeholders from the global list:\n\(previewList)\(more)"
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: "Delete")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else {
-            LOG("Delete placeholders aborted at confirm")
-            return
+        private func cancelEditPlaceholders() {
+            isEditingPlaceholders = false
+            editError = nil
         }
-        // Apply deletion atomically
-        let remaining = placeholderStore.names.filter { !deleteSelection.contains($0) }
-        placeholderStore.set(remaining)
-        LOG("Delete placeholders applied", ctx: ["deleted": "\(names.count)", "remaining": "\(remaining.count)"])
-        isDeletingPlaceholders = false
-        deleteSelection = []
-    }
-
-    // Toggle SQL comments ("-- ") on the current line(s) in the editor.
-    // If all non-empty selected lines are commented, it will UNcomment; otherwise it will comment them.
-    private func toggleCommentOnSelection() {
-        guard let tv = activeEditorTextView() else {
-            NSSound.beep()
-            return
-        }
-        let ns = self.localText as NSString
-        var sel = tv.selectedRange()
-        if sel.location == NSNotFound {
-            sel = NSRange(location: 0, length: 0)
-        }
-        // Expand to full line range covering selection (or caret line)
-        let lineRange = ns.lineRange(for: sel)
-        let segment = ns.substring(with: lineRange)
-
-        // Track trailing newline so we preserve it after transformation
-        let hasTrailingNewline = segment.hasSuffix("\n")
-        var lines = segment.components(separatedBy: "\n")
-        if hasTrailingNewline { lines.removeLast() } // last element is "" from trailing newline
-
-        // Decide if we are commenting or uncommenting
-        // "commented" means: optional leading spaces + "--" optionally followed by a space
-        let nonEmpty = lines.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-        let allAlreadyCommented = nonEmpty.allSatisfy { line in
-            let trimmedLeading = line.drop(while: { $0 == " " || $0 == "\t" })
-            return trimmedLeading.hasPrefix("--")
-        }
-
-        var changedCount = 0
-        let transformed: [String] = lines.map { line in
-            let original = line
-            let trimmed = original.trimmingCharacters(in: .whitespaces)
-            if trimmed.isEmpty {
-                return original // keep blank lines untouched
-            }
-            // Split leading whitespace
-            let leadingWhitespace = original.prefix { $0 == " " || $0 == "\t" }
-            let remainder = original.dropFirst(leadingWhitespace.count)
-
-            if allAlreadyCommented {
-                // UNcomment: remove leading "--" and an optional single space after
-                if remainder.hasPrefix("--") {
-                    let afterDashes = remainder.dropFirst(2)
-                    let afterSpace = afterDashes.first == " " ? afterDashes.dropFirst() : afterDashes
-                    changedCount += 1
-                    return String(leadingWhitespace) + String(afterSpace)
-                } else {
-                    return original
+        private func applyEditPlaceholders() {
+            var seen = Set<String>()
+            var cleaned: [String] = []
+            for raw in editingNames {
+                let name = sanitizeName(raw)
+                if name.isEmpty {
+                    editError = "Placeholder names cannot be empty."
+                    return
                 }
-            } else {
-                // Comment: insert "-- " after any leading indentation
-                changedCount += 1
-                return String(leadingWhitespace) + "-- " + String(remainder)
+                if !seen.insert(name).inserted {
+                    editError = "Duplicate name: \"\(name)\""
+                    return
+                }
+                cleaned.append(name)
             }
+            placeholderStore.set(cleaned)
+            LOG("Edit placeholders applied", ctx: ["count": "\(cleaned.count)"])
+            isEditingPlaceholders = false
+            editError = nil
         }
-
-        let updatedSegment = transformed.joined(separator: "\n") + (hasTrailingNewline ? "\n" : "")
-        let newString = ns.replacingCharacters(in: lineRange, with: updatedSegment)
-
-        // Update SwiftUI and the NSTextView
-        self.localText = newString
-        self.text = newString
-        tv.string = newString
-
-        // Keep selection over the transformed block
-        let newRange = NSRange(location: lineRange.location, length: (updatedSegment as NSString).length)
-        tv.setSelectedRange(newRange)
-        tv.scrollRangeToVisible(newRange)
-
-        LOG("Toggle comment", ctx: [
-            "action": allAlreadyCommented ? "uncomment" : "comment",
-            "lines": "\(lines.count)",
-            "changed": "\(changedCount)"
-        ])
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("Editing Template:")
-                    .font(.system(size: fontSize + 2, weight: .semibold))
-                Text(template.name)
-                    .font(.system(size: fontSize + 2, weight: .medium))
-                    .foregroundStyle(Theme.purple)
-                Spacer()
-                Button {
-                    toggleCommentOnSelection()
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "text.quote")
-                        Text("Comment/Uncomment")
+        
+        private func startDeletePlaceholders() {
+            deleteSelection = []
+            isDeletingPlaceholders = true
+            LOG("Delete placeholders started", ctx: ["count": "\(placeholderStore.names.count)"])
+        }
+        private func cancelDeletePlaceholders() {
+            isDeletingPlaceholders = false
+            deleteSelection = []
+            LOG("Delete placeholders cancelled")
+        }
+        private func applyDeletePlaceholders() {
+            guard !deleteSelection.isEmpty else { return }
+            let names = Array(deleteSelection).sorted()
+            // Confirm destructive action
+            let alert = NSAlert()
+            alert.messageText = "Delete \(names.count) placeholder\(names.count == 1 ? "" : "s")?"
+            let previewList = names.prefix(6).joined(separator: ", ")
+            let more = names.count > 6 ? " …and \(names.count - 6) more." : ""
+            alert.informativeText = "This will remove the selected placeholders from the global list:\n\(previewList)\(more)"
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "Delete")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else {
+                LOG("Delete placeholders aborted at confirm")
+                return
+            }
+            // Apply deletion atomically
+            let remaining = placeholderStore.names.filter { !deleteSelection.contains($0) }
+            placeholderStore.set(remaining)
+            LOG("Delete placeholders applied", ctx: ["deleted": "\(names.count)", "remaining": "\(remaining.count)"])
+            isDeletingPlaceholders = false
+            deleteSelection = []
+        }
+        
+        // Toggle SQL comments ("-- ") on the current line(s) in the editor.
+        // If all non-empty selected lines are commented, it will UNcomment; otherwise it will comment them.
+        private func toggleCommentOnSelection() {
+            guard let tv = activeEditorTextView() else {
+                NSSound.beep()
+                return
+            }
+            let ns = self.localText as NSString
+            var sel = tv.selectedRange()
+            if sel.location == NSNotFound {
+                sel = NSRange(location: 0, length: 0)
+            }
+            // Expand to full line range covering selection (or caret line)
+            let lineRange = ns.lineRange(for: sel)
+            let segment = ns.substring(with: lineRange)
+            
+            // Track trailing newline so we preserve it after transformation
+            let hasTrailingNewline = segment.hasSuffix("\n")
+            var lines = segment.components(separatedBy: "\n")
+            if hasTrailingNewline { lines.removeLast() } // last element is "" from trailing newline
+            
+            // Decide if we are commenting or uncommenting
+            // "commented" means: optional leading spaces + "--" optionally followed by a space
+            let nonEmpty = lines.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+            let allAlreadyCommented = nonEmpty.allSatisfy { line in
+                let trimmedLeading = line.drop(while: { $0 == " " || $0 == "\t" })
+                return trimmedLeading.hasPrefix("--")
+            }
+            
+            var changedCount = 0
+            let transformed: [String] = lines.map { line in
+                let original = line
+                let trimmed = original.trimmingCharacters(in: .whitespaces)
+                if trimmed.isEmpty {
+                    return original // keep blank lines untouched
+                }
+                // Split leading whitespace
+                let leadingWhitespace = original.prefix { $0 == " " || $0 == "\t" }
+                let remainder = original.dropFirst(leadingWhitespace.count)
+                
+                if allAlreadyCommented {
+                    // UNcomment: remove leading "--" and an optional single space after
+                    if remainder.hasPrefix("--") {
+                        let afterDashes = remainder.dropFirst(2)
+                        let afterSpace = afterDashes.first == " " ? afterDashes.dropFirst() : afterDashes
+                        changedCount += 1
+                        return String(leadingWhitespace) + String(afterSpace)
+                    } else {
+                        return original
+                    }
+                } else {
+                    // Comment: insert "-- " after any leading indentation
+                    changedCount += 1
+                    return String(leadingWhitespace) + "-- " + String(remainder)
+                }
+            }
+            
+            let updatedSegment = transformed.joined(separator: "\n") + (hasTrailingNewline ? "\n" : "")
+            let newString = ns.replacingCharacters(in: lineRange, with: updatedSegment)
+            
+            // Update SwiftUI and the NSTextView
+            self.localText = newString
+            self.text = newString
+            tv.string = newString
+            
+            // Keep selection over the transformed block
+            let newRange = NSRange(location: lineRange.location, length: (updatedSegment as NSString).length)
+            tv.setSelectedRange(newRange)
+            tv.scrollRangeToVisible(newRange)
+            
+            LOG("Toggle comment", ctx: [
+                "action": allAlreadyCommented ? "uncomment" : "comment",
+                "lines": "\(lines.count)",
+                "changed": "\(changedCount)"
+            ])
+        }
+        
+        var body: some View {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack {
+                    Text("Editing Template:")
+                        .font(.system(size: fontSize + 2, weight: .semibold))
+                    Text(template.name)
+                        .font(.system(size: fontSize + 2, weight: .medium))
+                        .foregroundStyle(Theme.purple)
+                    Spacer()
+                    Button {
+                        toggleCommentOnSelection()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "text.quote")
+                            Text("Comment/Uncomment")
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(Theme.purple)
+                    .font(.system(size: fontSize - 1))
+                    .keyboardShortcut("/", modifiers: [.command]) // ⌘/
+                    .help("Toggle '--' comments on selected lines (⌘/)")
+                    Button("Cancel", action: onCancel)
+                        .buttonStyle(.bordered)
+                    Button("Save") { onSave(localText) }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Theme.pink)
+                        .keyboardShortcut("s", modifiers: [.command]) // ⌘S to save
+                        .help("Save (⌘S)")
+                }
+                .padding()
+                Divider()
+                // Placeholder toolbar (buttons insert {{name}} at caret)
+                if !placeholderStore.names.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            Text("Placeholders:")
+                                .font(.system(size: fontSize - 2))
+                                .foregroundStyle(.secondary)
+                                .padding(.trailing, 4)
+                            ForEach(placeholderStore.names, id: \.self) { ph in
+                                Button(ph) { insertPlaceholder(ph) }
+                                    .buttonStyle(.bordered)
+                                    .tint(Theme.pink)
+                                    .font(.system(size: fontSize - 1, weight: .medium))
+                                    .help("Insert {{\(ph)}} at cursor")
+                            }
+                            Divider()
+                                .frame(height: 18)
+                                .overlay(Color.secondary.opacity(0.2))
+                                .padding(.horizontal, 4)
+                            Menu {
+                                Button("Add new placeholder…") { addPlaceholderFlow() }
+                                Divider()
+                                Button("Edit placeholders…") { startEditPlaceholders() }
+                                Button("Delete placeholders…") { startDeletePlaceholders() }
+                            } label: {
+                                Image(systemName: "ellipsis.circle")
+                                    .font(.system(size: fontSize + 2, weight: .medium))
+                                    .foregroundStyle(Theme.purple)
+                                    .help("Placeholder options")
+                            }
+                            .menuStyle(.borderlessButton)
+                        }
+                        .padding(6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Theme.grayBG.opacity(0.6))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
+                                )
+                        )
+                        .padding(.trailing, 12)
                     }
                 }
-                .buttonStyle(.bordered)
-                .tint(Theme.purple)
-                .font(.system(size: fontSize - 1))
-                .keyboardShortcut("/", modifiers: [.command]) // ⌘/
-                .help("Toggle '--' comments on selected lines (⌘/)")
-                Button("Cancel", action: onCancel)
-                    .buttonStyle(.bordered)
-                Button("Save") { onSave(localText) }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Theme.pink)
-                    .keyboardShortcut("s", modifiers: [.command]) // ⌘S to save
-                    .help("Save (⌘S)")
+                Divider()
+                TextEditor(text: $localText)
+                    .font(.system(size: fontSize, design: .monospaced))
+                    .frame(minHeight: 340)
+                    .padding()
+                    .onAppear {
+                        localText = text
+                        let found = detectedPlaceholders(from: localText)
+                        detectedFromFile = found
+                        LOG("Detected placeholders in file", ctx: ["detected": "\(found.count)"])
+                    }
+                    .onChange(of: localText) { _, newVal in text = newVal }
+                HStack {
+                    Spacer()
+                    Text("Tip: ⌘S to save, ⎋ to cancel")
+                        .font(.system(size: fontSize - 3))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.horizontal)
+                .padding(.bottom, 8)
             }
-            .padding()
-            Divider()
-            // Placeholder toolbar (buttons insert {{name}} at caret)
-            if !placeholderStore.names.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        Text("Placeholders:")
+            .sheet(isPresented: $isEditingPlaceholders) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Edit Placeholders")
+                        .font(.system(size: fontSize + 2, weight: .semibold))
+                        .foregroundStyle(Theme.purple)
+                        .padding(.bottom, 4)
+                    if let err = editError {
+                        Text(err)
+                            .font(.system(size: fontSize - 2))
+                            .foregroundStyle(.red)
+                    }
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(Array(editingNames.enumerated()), id: \.offset) { idx, _ in
+                                HStack(spacing: 8) {
+                                    Text("\(idx + 1).")
+                                        .frame(width: 24, alignment: .trailing)
+                                        .foregroundStyle(.secondary)
+                                        .font(.system(size: fontSize - 2))
+                                    TextField("Placeholder name", text: Binding(
+                                        get: { editingNames[idx] },
+                                        set: { editingNames[idx] = $0 }
+                                    ))
+                                    .textFieldStyle(.roundedBorder)
+                                    .font(.system(size: fontSize))
+                                }
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .frame(minHeight: 220)
+                    HStack {
+                        Button("Cancel") { cancelEditPlaceholders() }
+                            .font(.system(size: fontSize))
+                        Spacer()
+                        Button("Apply") { applyEditPlaceholders() }
+                            .buttonStyle(.borderedProminent)
+                            .tint(Theme.pink)
+                            .font(.system(size: fontSize))
+                    }
+                }
+                .padding(14)
+                .frame(minWidth: 520, minHeight: 360)
+                .id(editListVersion)
+                .onAppear {
+                    // Ensure list is populated and force a rebuild when the sheet appears
+                    editingNames = placeholderStore.names
+                    editListVersion &+= 1
+                }
+            }
+            .sheet(isPresented: $isDeletingPlaceholders) {
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Delete Placeholders")
+                        .font(.system(size: fontSize + 2, weight: .semibold))
+                        .foregroundStyle(.red)
+                        .padding(.bottom, 4)
+                    HStack(spacing: 8) {
+                        Button("Select All") {
+                            deleteSelection = Set(placeholderStore.names)
+                        }
+                        .font(.system(size: fontSize - 1))
+                        Button("Clear Selection") {
+                            deleteSelection.removeAll()
+                        }
+                        .font(.system(size: fontSize - 1))
+                        Spacer()
+                        Text("\(deleteSelection.count) selected")
                             .font(.system(size: fontSize - 2))
                             .foregroundStyle(.secondary)
-                            .padding(.trailing, 4)
-                        ForEach(placeholderStore.names, id: \.self) { ph in
-                            Button(ph) { insertPlaceholder(ph) }
-                                .buttonStyle(.bordered)
-                                .tint(Theme.pink)
-                                .font(.system(size: fontSize - 1, weight: .medium))
-                                .help("Insert {{\(ph)}} at cursor")
-                        }
-                        Divider()
-                            .frame(height: 18)
-                            .overlay(Color.secondary.opacity(0.2))
-                            .padding(.horizontal, 4)
-                        Menu {
-                            Button("Add new placeholder…") { addPlaceholderFlow() }
-                            Divider()
-                            Button("Edit placeholders…") { startEditPlaceholders() }
-                            Button("Delete placeholders…") { startDeletePlaceholders() }
-                        } label: {
-                            Image(systemName: "ellipsis.circle")
-                                .font(.system(size: fontSize + 2, weight: .medium))
-                                .foregroundStyle(Theme.purple)
-                                .help("Placeholder options")
-                        }
-                        .menuStyle(.borderlessButton)
                     }
-                    .padding(6)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Theme.grayBG.opacity(0.6))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
-                            )
-                    )
-                    .padding(.trailing, 12)
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(placeholderStore.names, id: \.self) { name in
+                                Toggle(isOn: Binding<Bool>(
+                                    get: { deleteSelection.contains(name) },
+                                    set: { newVal in
+                                        if newVal { deleteSelection.insert(name) }
+                                        else { deleteSelection.remove(name) }
+                                    }
+                                )) {
+                                    Text(name)
+                                        .font(.system(size: fontSize))
+                                }
+                                .toggleStyle(.checkbox)
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .frame(minHeight: 220)
+                    HStack {
+                        Button("Cancel") { cancelDeletePlaceholders() }
+                            .font(.system(size: fontSize))
+                        Spacer()
+                        Button("Delete") { applyDeletePlaceholders() }
+                            .buttonStyle(.borderedProminent)
+                            .tint(.red)
+                            .font(.system(size: fontSize))
+                            .disabled(deleteSelection.isEmpty)
+                    }
                 }
+                .padding(14)
+                .frame(minWidth: 520, minHeight: 360)
             }
-            Divider()
-            TextEditor(text: $localText)
-                .font(.system(size: fontSize, design: .monospaced))
-                .frame(minHeight: 340)
-                .padding()
-                .onAppear {
-                    localText = text
-                    let found = detectedPlaceholders(from: localText)
-                    detectedFromFile = found
-                    LOG("Detected placeholders in file", ctx: ["detected": "\(found.count)"])
-                }
-                .onChange(of: localText) { _, newVal in text = newVal }
-            HStack {
-                Spacer()
-                Text("Tip: ⌘S to save, ⎋ to cancel")
-                    .font(.system(size: fontSize - 3))
-                    .foregroundStyle(.secondary)
-            }
-            .padding(.horizontal)
-            .padding(.bottom, 8)
+            .frame(minWidth: 760, minHeight: 520)
         }
-        .sheet(isPresented: $isEditingPlaceholders) {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Edit Placeholders")
-                    .font(.system(size: fontSize + 2, weight: .semibold))
+    }
+    
+    // Database Connection Settings Sheet
+    struct DatabaseSettingsSheet: View {
+        @ObservedObject var userConfig: UserConfigStore
+        @Environment(\.dismiss) private var dismiss
+        @State private var fontSize: CGFloat = 13
+        
+        @State private var username: String = ""
+        @State private var password: String = ""
+        @State private var queriousPath: String = ""
+        @State private var saveError: String?
+        
+        var body: some View {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Database Connection Settings")
+                    .font(.system(size: fontSize + 4, weight: .semibold))
                     .foregroundStyle(Theme.purple)
-                    .padding(.bottom, 4)
-                if let err = editError {
-                    Text(err)
+                
+                Text("Configure your MySQL credentials for connecting to Querious.")
+                    .font(.system(size: fontSize))
+                    .foregroundStyle(.secondary)
+                
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("MySQL Username")
+                        .font(.system(size: fontSize - 1))
+                        .foregroundStyle(.secondary)
+                    
+                    TextField("e.g., chris_jones_ro", text: $username)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: fontSize))
+                }
+                
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("MySQL Password")
+                        .font(.system(size: fontSize - 1))
+                        .foregroundStyle(.secondary)
+                    
+                    SecureField("Enter your MySQL password", text: $password)
+                        .textFieldStyle(.roundedBorder)
+                        .font(.system(size: fontSize))
+                }
+                
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Querious Application Path")
+                        .font(.system(size: fontSize - 1))
+                        .foregroundStyle(.secondary)
+                    
+                    HStack {
+                        TextField("/Applications/Querious.app", text: $queriousPath)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: fontSize))
+                        
+                        Button("Browse...") {
+                            let panel = NSOpenPanel()
+                            panel.allowsMultipleSelection = false
+                            panel.canChooseDirectories = false
+                            panel.canChooseFiles = true
+                            panel.allowedContentTypes = [UTType.application]
+                            panel.directoryURL = URL(fileURLWithPath: "/Applications")
+                            
+                            if panel.runModal() == .OK, let url = panel.url {
+                                queriousPath = url.path
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .font(.system(size: fontSize))
+                    }
+                }
+                
+                if let error = saveError {
+                    Text(error)
                         .font(.system(size: fontSize - 2))
                         .foregroundStyle(.red)
                 }
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(Array(editingNames.enumerated()), id: \.offset) { idx, _ in
-                            HStack(spacing: 8) {
-                                Text("\(idx + 1).")
-                                    .frame(width: 24, alignment: .trailing)
-                                    .foregroundStyle(.secondary)
-                                    .font(.system(size: fontSize - 2))
-                                TextField("Placeholder name", text: Binding(
-                                    get: { editingNames[idx] },
-                                    set: { editingNames[idx] = $0 }
-                                ))
-                                .textFieldStyle(.roundedBorder)
-                                .font(.system(size: fontSize))
-                            }
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
-                .frame(minHeight: 220)
-                HStack {
-                    Button("Cancel") { cancelEditPlaceholders() }
-                        .font(.system(size: fontSize))
-                    Spacer()
-                    Button("Apply") { applyEditPlaceholders() }
-                        .buttonStyle(.borderedProminent)
-                        .tint(Theme.pink)
-                        .font(.system(size: fontSize))
-                }
-            }
-            .padding(14)
-            .frame(minWidth: 520, minHeight: 360)
-            .id(editListVersion)
-            .onAppear {
-                // Ensure list is populated and force a rebuild when the sheet appears
-                editingNames = placeholderStore.names
-                editListVersion &+= 1
-            }
-        }
-        .sheet(isPresented: $isDeletingPlaceholders) {
-            VStack(alignment: .leading, spacing: 10) {
-                Text("Delete Placeholders")
-                    .font(.system(size: fontSize + 2, weight: .semibold))
-                    .foregroundStyle(.red)
-                    .padding(.bottom, 4)
-                HStack(spacing: 8) {
-                    Button("Select All") {
-                        deleteSelection = Set(placeholderStore.names)
-                    }
-                    .font(.system(size: fontSize - 1))
-                    Button("Clear Selection") {
-                        deleteSelection.removeAll()
-                    }
-                    .font(.system(size: fontSize - 1))
-                    Spacer()
-                    Text("\(deleteSelection.count) selected")
-                        .font(.system(size: fontSize - 2))
-                        .foregroundStyle(.secondary)
-                }
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 6) {
-                        ForEach(placeholderStore.names, id: \.self) { name in
-                            Toggle(isOn: Binding<Bool>(
-                                get: { deleteSelection.contains(name) },
-                                set: { newVal in
-                                    if newVal { deleteSelection.insert(name) }
-                                    else { deleteSelection.remove(name) }
-                                }
-                            )) {
-                                Text(name)
-                                    .font(.system(size: fontSize))
-                            }
-                            .toggleStyle(.checkbox)
-                        }
-                    }
-                    .padding(.vertical, 4)
-                }
-                .frame(minHeight: 220)
-                HStack {
-                    Button("Cancel") { cancelDeletePlaceholders() }
-                        .font(.system(size: fontSize))
-                    Spacer()
-                    Button("Delete") { applyDeletePlaceholders() }
-                        .buttonStyle(.borderedProminent)
-                        .tint(.red)
-                        .font(.system(size: fontSize))
-                        .disabled(deleteSelection.isEmpty)
-                }
-            }
-            .padding(14)
-            .frame(minWidth: 520, minHeight: 360)
-        }
-        .frame(minWidth: 760, minHeight: 520)
-    }
-}
-
-// Database Connection Settings Sheet
-struct DatabaseSettingsSheet: View {
-    @ObservedObject var userConfig: UserConfigStore
-    @Environment(\.dismiss) private var dismiss
-    @State private var fontSize: CGFloat = 13
-    
-    @State private var username: String = ""
-    @State private var password: String = ""
-    @State private var queriousPath: String = ""
-    @State private var saveError: String?
-    
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Text("Database Connection Settings")
-                .font(.system(size: fontSize + 4, weight: .semibold))
-                .foregroundStyle(Theme.purple)
-            
-            Text("Configure your MySQL credentials for connecting to Querious.")
-                .font(.system(size: fontSize))
-                .foregroundStyle(.secondary)
-            
-            VStack(alignment: .leading, spacing: 8) {
-                Text("MySQL Username")
-                    .font(.system(size: fontSize - 1))
-                    .foregroundStyle(.secondary)
                 
-                TextField("e.g., chris_jones_ro", text: $username)
-                    .textFieldStyle(.roundedBorder)
+                HStack {
+                    Button("Cancel") {
+                        dismiss()
+                    }
                     .font(.system(size: fontSize))
-            }
-            
-            VStack(alignment: .leading, spacing: 8) {
-                Text("MySQL Password")
-                    .font(.system(size: fontSize - 1))
-                    .foregroundStyle(.secondary)
-                
-                SecureField("Enter your MySQL password", text: $password)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(size: fontSize))
-            }
-            
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Querious Application Path")
-                    .font(.system(size: fontSize - 1))
-                    .foregroundStyle(.secondary)
-                
-                HStack {
-                    TextField("/Applications/Querious.app", text: $queriousPath)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(size: fontSize))
                     
-                    Button("Browse...") {
-                        let panel = NSOpenPanel()
-                        panel.allowsMultipleSelection = false
-                        panel.canChooseDirectories = false
-                        panel.canChooseFiles = true
-                        panel.allowedContentTypes = [UTType.application]
-                        panel.directoryURL = URL(fileURLWithPath: "/Applications")
-                        
-                        if panel.runModal() == .OK, let url = panel.url {
-                            queriousPath = url.path
-                        }
+                    Spacer()
+                    
+                    Button("Save") {
+                        saveSettings()
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.pink)
                     .font(.system(size: fontSize))
                 }
             }
-            
-            if let error = saveError {
-                Text(error)
-                    .font(.system(size: fontSize - 2))
-                    .foregroundStyle(.red)
-            }
-            
-            HStack {
-                Button("Cancel") {
-                    dismiss()
-                }
-                .font(.system(size: fontSize))
-                
-                Spacer()
-                
-                Button("Save") {
-                    saveSettings()
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.pink)
-                .font(.system(size: fontSize))
+            .padding(16)
+            .frame(minWidth: 480, minHeight: 320)
+            .onAppear {
+                loadCurrentSettings()
             }
         }
-        .padding(16)
-        .frame(minWidth: 480, minHeight: 320)
-        .onAppear {
-            loadCurrentSettings()
-        }
-    }
-    
-    private func loadCurrentSettings() {
-        username = userConfig.config.mysql_username
-        password = userConfig.config.mysql_password
-        queriousPath = userConfig.config.querious_path
-    }
-    
-    private func saveSettings() {
-        saveError = nil
         
-        let trimmedUsername = username.trimmingCharacters(in: .whitespaces)
-        let trimmedPassword = password.trimmingCharacters(in: .whitespaces)
-        let trimmedPath = queriousPath.trimmingCharacters(in: .whitespaces)
-        
-        if trimmedUsername.isEmpty {
-            saveError = "Username cannot be empty"
-            return
+        private func loadCurrentSettings() {
+            username = userConfig.config.mysql_username
+            password = userConfig.config.mysql_password
+            queriousPath = userConfig.config.querious_path
         }
         
-        if trimmedPassword.isEmpty {
-            saveError = "Password cannot be empty"
-            return
-        }
-        
-        if trimmedPath.isEmpty {
-            saveError = "Querious path cannot be empty"
-            return
-        }
-        
-        do {
-            try userConfig.updateCredentials(
-                username: trimmedUsername,
-                password: trimmedPassword,
-                queriousPath: trimmedPath
-            )
-            LOG("Database settings saved successfully")
-            dismiss()
-        } catch {
-            saveError = "Failed to save settings: \(error.localizedDescription)"
-            LOG("Database settings save failed", ctx: ["error": error.localizedDescription])
+        private func saveSettings() {
+            saveError = nil
+            
+            let trimmedUsername = username.trimmingCharacters(in: .whitespaces)
+            let trimmedPassword = password.trimmingCharacters(in: .whitespaces)
+            let trimmedPath = queriousPath.trimmingCharacters(in: .whitespaces)
+            
+            if trimmedUsername.isEmpty {
+                saveError = "Username cannot be empty"
+                return
+            }
+            
+            if trimmedPassword.isEmpty {
+                saveError = "Password cannot be empty"
+                return
+            }
+            
+            if trimmedPath.isEmpty {
+                saveError = "Querious path cannot be empty"
+                return
+            }
+            
+            do {
+                try userConfig.updateCredentials(
+                    username: trimmedUsername,
+                    password: trimmedPassword,
+                    queriousPath: trimmedPath
+                )
+                LOG("Database settings saved successfully")
+                dismiss()
+            } catch {
+                saveError = "Failed to save settings: \(error.localizedDescription)"
+                LOG("Database settings save failed", ctx: ["error": error.localizedDescription])
+            }
         }
     }
 }
