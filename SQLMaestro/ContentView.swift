@@ -436,14 +436,15 @@ private final class MenuBridge: NSObject {
         }
     }
 }
-
+//MARK: Content View
 struct ContentView: View {
     @EnvironmentObject var templates: TemplateManager
     @StateObject private var mapping = MappingStore()
     @StateObject private var mysqlHosts = MysqlHostStore()
     @StateObject private var userConfig = UserConfigStore()
     @EnvironmentObject var sessions: SessionManager
-    
+    @ObservedObject private var dbTablesStore = DBTablesStore.shared
+    @ObservedObject private var dbTablesCatalog = DBTablesCatalog.shared
     @State private var selectedTemplate: TemplateItem?
     @State private var currentSQL: String = ""
     @State private var populatedSQL: String = ""
@@ -451,6 +452,7 @@ struct ContentView: View {
     @State private var toastOpenDB: Bool = false
     @State private var fontSize: CGFloat = 13
     @State private var hoverRecentKey: String? = nil
+    @State private var openTablesOnConnect: Bool = false
     
     @State private var searchText: String = ""
     @State private var showShortcutsSheet: Bool = false
@@ -462,6 +464,9 @@ struct ContentView: View {
     
     @FocusState private var isSearchFocused: Bool
     @FocusState private var isListFocused: Bool
+    @FocusState private var focusedDBTableRow: Int?
+    @State private var suggestionIndexByRow: [Int: Int] = [:]
+    @State private var keyEventMonitor: Any?
     
     // Track static fields per session - but now using SessionManager for global cache too
     @State private var sessionStaticFields: [TicketSession: (orgId: String, acctId: String, mysqlDb: String, company: String)] = [
@@ -755,10 +760,17 @@ struct ContentView: View {
                         
                         Spacer()
                     }
-                    
+
                     // Centered session buttons overlay
                     sessionButtons
                         .frame(maxWidth: .infinity, alignment: .center)
+
+                    // Right-aligned DB Tables pane
+                    HStack {
+                        Spacer()
+                        dbTablesPane
+                            .frame(width: 360)  // fixed width pane to the right of the session buttons
+                    }
                 }
                 
                 outputView
@@ -842,6 +854,10 @@ struct ContentView: View {
                 selectedTemplate = found
                 currentSQL = found.rawSQL
             }
+            if let t = selectedTemplate {
+                _ = DBTablesStore.shared.loadSidecar(for: sessions.current, template: t)
+                LOG("DBTables sidecar hydrated (onAppear)", ctx: ["template": t.name, "session": "\(sessions.current.rawValue)"])
+            }
             // Install local scroll monitor to redirect wheel to focused date field while focus-scroll mode is ON
             if scrollMonitor == nil {
                 scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
@@ -859,8 +875,21 @@ struct ContentView: View {
             }
             // Ensure Help ▸ Keyboard Shortcuts… exists
             MenuBridge.installHelpMenuItem()
+            #if os(macOS)
+            if keyEventMonitor == nil {
+                keyEventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event in
+                    return handleDBSuggestKeyEvent(event)
+                }
+            }
+            #endif
         }
         .onDisappear {
+            #if os(macOS)
+            if let m = keyEventMonitor {
+                NSEvent.removeMonitor(m)
+                keyEventMonitor = nil
+            }
+            #endif
             if let m = scrollMonitor {
                 NSEvent.removeMonitor(m)
                 scrollMonitor = nil
@@ -1122,6 +1151,62 @@ struct ContentView: View {
             }
         }
     }
+    
+    // Suggest tables using the global catalog (substring/fuzzy provided by the catalog)
+    private func suggestTables(_ query: String, limit: Int = 15) -> [String] {
+        DBTablesCatalog.shared.suggest(query, limit: limit)
+    }
+
+#if os(macOS)
+    /// Handle ↑/↓ to move through suggestions, Return/Enter to accept, Esc to close.
+    private func handleDBSuggestKeyEvent(_ event: NSEvent) -> NSEvent? {
+        guard let row = focusedDBTableRow else { return event }
+        // Must have a selected template and a visible suggestions context
+        guard selectedTemplate != nil else { return event }
+
+        // Build suggestions for the focused row
+        let current = dbTablesStore.workingSet(for: sessions.current, template: selectedTemplate)
+        let query = (row < current.count ? current[row] : "").trimmingCharacters(in: .whitespaces)
+        let suggestions = suggestTables(query, limit: 15)
+        guard !suggestions.isEmpty else { return event }
+
+        var idx = suggestionIndexByRow[row] ?? -1
+
+        switch event.keyCode {
+        case 125: // ↓
+            idx = (idx + 1) % suggestions.count
+            suggestionIndexByRow[row] = idx
+            return nil // consume
+        case 126: // ↑
+            idx = (idx - 1 + suggestions.count) % suggestions.count
+            suggestionIndexByRow[row] = idx
+            return nil // consume
+        case 36, 76: // Return or Enter
+            if idx >= 0 && idx < suggestions.count {
+                var arr = current
+                let value = suggestions[idx]
+                if row < arr.count {
+                    arr[row] = value
+                } else if row == arr.count {
+                    arr.append(value)
+                }
+                dbTablesStore.setWorkingSet(arr, for: sessions.current, template: selectedTemplate)
+                focusedDBTableRow = nil
+                suggestionIndexByRow[row] = nil
+                LOG("DBTables suggest selected (kbd)", ctx: ["row": "\(row)", "value": value])
+                return nil // consume
+            }
+            return event
+        case 53: // Esc
+            focusedDBTableRow = nil
+            suggestionIndexByRow[row] = nil
+            return nil // consume
+        default:
+            return event
+        }
+    }
+#endif
+    
     
     private func openTemplateJSON(_ item: TemplateItem) {
         let ext = item.url.pathExtension.lowercased()
@@ -1475,6 +1560,178 @@ struct ContentView: View {
         }
     }
     
+    // MARK: – DB Tables pane (per-template, per-session working set)
+    private var dbTablesPane: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("DB Tables for this Template")
+                .font(.system(size: fontSize + 1, weight: .semibold))
+                .foregroundStyle(Theme.purple)
+                .lineLimit(1)
+            
+            Toggle(isOn: $openTablesOnConnect) {
+                Text("Open tables on connect")
+                    .font(.system(size: fontSize - 2))
+            }
+            .toggleStyle(.checkbox)
+            .help("When enabled, connecting will quick-open the saved tables for this template in Querious.")
+
+            if let t = selectedTemplate {
+                let isDirty = dbTablesStore.isDirty(for: sessions.current, template: t)
+                let rows = dbTablesStore.workingSet(for: sessions.current, template: t)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    // Rows
+                    ForEach(Array(rows.enumerated()), id: \.offset) { idx, value in
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack(spacing: 6) {
+                                TextField("table_name_here", text: Binding(
+                                    get: {
+                                        let current = dbTablesStore.workingSet(for: sessions.current, template: selectedTemplate)
+                                        return idx < current.count ? current[idx] : ""
+                                    },
+                                    set: { newVal in
+                                        var current = dbTablesStore.workingSet(for: sessions.current, template: selectedTemplate)
+                                        if idx < current.count {
+                                            current[idx] = newVal
+                                        } else if idx == current.count {
+                                            current.append(newVal)
+                                        }
+                                        dbTablesStore.setWorkingSet(current, for: sessions.current, template: selectedTemplate)
+                                        // Reset keyboard highlight for this row on text change
+                                        suggestionIndexByRow[idx] = nil
+                                    }
+                                ))
+                                .textFieldStyle(PlainTextFieldStyle())
+                                .padding(.vertical, 4)
+                                .padding(.horizontal, 6)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .stroke(Color.secondary.opacity(0.35), lineWidth: 1)
+                                )
+                                .font(.system(size: fontSize))
+                                .lineLimit(1)
+                                .focused($focusedDBTableRow, equals: idx)
+                                .help("Enter a base table name (letters, numbers, underscores).")
+
+                                Button {
+                                    var current = dbTablesStore.workingSet(for: sessions.current, template: selectedTemplate)
+                                    if idx < current.count {
+                                        current.remove(at: idx)
+                                        dbTablesStore.setWorkingSet(current, for: sessions.current, template: selectedTemplate)
+                                        LOG("DBTables row removed", ctx: ["newCount": "\(current.count)"])
+                                    }
+                                } label: {
+                                    Image(systemName: "minus.circle.fill")
+                                }
+                                .buttonStyle(.borderless)
+                                .foregroundStyle(Theme.pink)
+                                .help("Remove this row")
+                            }
+
+                            // Inline suggestions (appear when the row is focused and query has matches)
+                            let current = dbTablesStore.workingSet(for: sessions.current, template: selectedTemplate)
+                            let query = (idx < current.count ? current[idx] : "").trimmingCharacters(in: .whitespaces)
+                            if focusedDBTableRow == idx {
+                                let suggestions = suggestTables(query, limit: 15)
+                                if !query.isEmpty && !suggestions.isEmpty {
+                                    let selectedIdx = suggestionIndexByRow[idx] ?? -1
+                                    VStack(alignment: .leading, spacing: 0) {
+                                        ForEach(Array(suggestions.enumerated()), id: \.1) { (sIndex, s) in
+                                            Button {
+                                                var arr = current
+                                                if idx < arr.count {
+                                                    arr[idx] = s
+                                                } else if idx == arr.count {
+                                                    arr.append(s)
+                                                }
+                                                dbTablesStore.setWorkingSet(arr, for: sessions.current, template: selectedTemplate)
+                                                focusedDBTableRow = nil
+                                                suggestionIndexByRow[idx] = nil
+                                                LOG("DBTables suggest selected", ctx: ["row": "\(idx)", "value": s])
+                                            } label: {
+                                                Text(s)
+                                                    .font(.system(size: fontSize - 1))
+                                                    .lineLimit(1)
+                                                    .padding(.vertical, 4)
+                                                    .padding(.horizontal, 8)
+                                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                                    .background(
+                                                        RoundedRectangle(cornerRadius: 4)
+                                                            .fill(selectedIdx == sIndex ? Theme.purple.opacity(0.25) : Color.clear)
+                                                    )
+                                            }
+                                            .buttonStyle(.plain)
+                                        }
+                                    }
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .fill(Theme.grayBG.opacity(0.9))
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 6)
+                                                    .stroke(Theme.purple.opacity(0.3), lineWidth: 1)
+                                            )
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Add row button
+                    Button {
+                        var current = dbTablesStore.workingSet(for: sessions.current, template: selectedTemplate)
+                        current.append("")
+                        dbTablesStore.setWorkingSet(current, for: sessions.current, template: selectedTemplate)
+                        LOG("DBTables row added", ctx: ["count": "\(current.count)"])
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "plus.circle.fill")
+                            Text("Add table")
+                        }
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(Theme.accent)
+                    .padding(.top, 2)
+                }
+
+                HStack(spacing: 8) {
+                    Button("Save Tables") {
+                        _ = dbTablesStore.saveSidecar(for: sessions.current, template: t)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.purple)
+                    .disabled(!isDirty)
+
+                    Button("Revert to Saved") {
+                        _ = dbTablesStore.loadSidecar(for: sessions.current, template: t)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(Theme.pink)
+                    .disabled(!isDirty)
+
+                    Spacer()
+                }
+                .padding(.top, 2)
+
+                Text("Tip: These tables will be opened in Querious when you connect (if enabled).")
+                    .font(.system(size: fontSize - 3))
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("Load a template to manage its DB tables.")
+                    .font(.system(size: fontSize - 2))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Theme.grayBG.opacity(0.4))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
+                )
+        )
+    }
+
     // MARK: – Output area
     private var outputView: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -1542,6 +1799,9 @@ struct ContentView: View {
         selectedTemplate = t
         if let t = t {
             sessionSelectedTemplate[sessions.current] = t.id
+            // NEW: hydrate this session's working set from sidecar
+            _ = DBTablesStore.shared.loadSidecar(for: sessions.current, template: t)
+            LOG("DBTables sidecar hydrated", ctx: ["template": t.name, "session": "\(sessions.current.rawValue)"])
         }
     }
 
@@ -1570,6 +1830,9 @@ struct ContentView: View {
            let found = templates.templates.first(where: { $0.id == tid }) {
             selectedTemplate = found
             currentSQL = found.rawSQL
+            // NEW: hydrate DB tables for this session/template
+            _ = DBTablesStore.shared.loadSidecar(for: newSession, template: found)
+            LOG("DBTables sidecar hydrated (session switch)", ctx: ["template": found.name, "session": "\(newSession.rawValue)"])
         } else {
             selectedTemplate = nil
         }
@@ -1584,6 +1847,9 @@ struct ContentView: View {
         // Remember the template per session
         sessionSelectedTemplate[sessions.current] = t.id
         LOG("Template loaded", ctx: ["template": t.name, "phCount":"\(t.placeholders.count)"])
+        // NEW: hydrate working set from sidecar for the current session
+        _ = DBTablesStore.shared.loadSidecar(for: sessions.current, template: t)
+        LOG("DBTables sidecar hydrated", ctx: ["template": t.name, "session": "\(sessions.current.rawValue)"])
     }
     
     private func editTemplateInline(_ t: TemplateItem) {
