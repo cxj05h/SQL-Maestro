@@ -2,73 +2,6 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
-// Global, persistent placeholder store (singleton)
-final class PlaceholderStore: ObservableObject {
-    static let shared = PlaceholderStore()
-    @Published private(set) var names: [String] = []
-
-    private let fileURL: URL
-
-    private init() {
-        let fm = FileManager.default
-        let appSup = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        // Keep everything under an app-specific folder
-        let dir = appSup.appendingPathComponent("SQLMaestro", isDirectory: true)
-        try? fm.createDirectory(at: dir, withIntermediateDirectories: true)
-        self.fileURL = dir.appendingPathComponent("placeholders.json")
-        load()
-    }
-
-    func load() {
-        do {
-            let data = try Data(contentsOf: fileURL)
-            let list = try JSONDecoder().decode([String].self, from: data)
-            // Preserve order but de-dup
-            var seen = Set<String>()
-            self.names = list.filter { seen.insert($0).inserted }
-            LOG("Placeholders loaded", ctx: ["count": "\(self.names.count)", "file": fileURL.lastPathComponent])
-        } catch {
-            // Seed with a few common tokens on first run
-            self.names = ["Org-ID", "Acct-ID", "resourceID", "sig-id", "Date"]
-            save()
-            LOG("Placeholders seeded", ctx: ["count": "\(self.names.count)"])
-        }
-    }
-
-    func save() {
-        do {
-            let data = try JSONEncoder().encode(self.names)
-            try data.write(to: fileURL, options: [.atomic])
-            LOG("Placeholders saved", ctx: ["count": "\(self.names.count)"])
-        } catch {
-            LOG("Placeholders save failed", ctx: ["error": error.localizedDescription])
-        }
-    }
-
-    // Public mutators (auto-save)
-    func set(_ newNames: [String]) {
-        self.names = newNames
-        save()
-    }
-    func add(_ name: String) {
-        guard !name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        if !self.names.contains(name) {
-            self.names.append(name)
-            save()
-            LOG("Placeholder added", ctx: ["name": name])
-        }
-    }
-    func remove(_ name: String) {
-        let before = self.names.count
-        self.names.removeAll { $0 == name }
-        if self.names.count != before { save() }
-    }
-    func rename(_ old: String, to new: String) {
-        guard let idx = self.names.firstIndex(of: old) else { return }
-        self.names[idx] = new
-        save()
-    }
-}
 
 // MARK: - Temporary Shims (compile-time stand-ins)
 
@@ -330,6 +263,9 @@ struct ContentView: View {
     @State private var searchText: String = ""
     @State private var showShortcutsSheet: Bool = false
     @State private var showDatabaseSettings: Bool = false
+    @State private var showTemplateEditor: Bool = false // (no longer controls presentation)
+    @State private var editorTemplate: TemplateItem? = nil
+    @State private var editorText: String = ""
 
     
     @FocusState private var isSearchFocused: Bool
@@ -688,6 +624,21 @@ struct ContentView: View {
         .sheet(isPresented: $showDatabaseSettings) {
             DatabaseSettingsSheet(userConfig: userConfig)
         }
+        .sheet(item: $editorTemplate) { t in
+            TemplateInlineEditorSheet(
+                template: t,
+                text: $editorText,
+                fontSize: fontSize,
+                onSave: { updated in
+                    saveTemplateEdits(template: t, newText: updated)
+                    editorTemplate = nil
+                },
+                onCancel: {
+                    editorTemplate = nil
+                }
+            )
+            .frame(minWidth: 720, minHeight: 520)
+        }
      
         .onAppear {
             LOG("App started")
@@ -969,9 +920,14 @@ struct ContentView: View {
     }
     
     private func openTemplateJSON(_ item: TemplateItem) {
-        // Opens with user's default app for .json/.sql
-        NSWorkspace.shared.open(item.url)
-        LOG("Open JSON", ctx: ["file": item.url.lastPathComponent])
+        let ext = item.url.pathExtension.lowercased()
+        if ext == "json" {
+            NSWorkspace.shared.open(item.url)
+            LOG("Open JSON", ctx: ["file": item.url.lastPathComponent])
+        } else {
+            // For .sql files, prefer in-app editor
+            editTemplateInline(item)
+        }
     }
 
     private func revealTemplateInFinder(_ item: TemplateItem) {
@@ -1427,9 +1383,54 @@ struct ContentView: View {
     }
     
     private func editTemplateInline(_ t: TemplateItem) {
-        commitDraftsForCurrentSession() // commit on action
-        TemplateEditorWindow.present(for: t, manager: templates)
-        LOG("Inline edit open", ctx: ["template": t.name])
+        commitDraftsForCurrentSession()
+        do {
+            let contents = try String(contentsOf: t.url, encoding: .utf8)
+            DispatchQueue.main.async {
+                self.editorText = contents
+                self.editorTemplate = t
+                LOG("Inline editor opened", ctx: ["template": t.name, "bytes": "\(contents.utf8.count)"])
+            }
+        } catch {
+            NSSound.beep()
+            showAlert(title: "Open Failed", message: "Could not read the template file.\n\n\(error.localizedDescription)")
+            LOG("Inline editor open failed", ctx: ["template": t.name, "error": error.localizedDescription])
+        }
+    }
+
+    private func saveTemplateEdits(template: TemplateItem, newText: String) {
+        let fm = FileManager.default
+        let url = template.url
+        do {
+            // 1) Create a time-stamped backup BEFORE overwriting
+            let original = (try? Data(contentsOf: url)) ?? Data()
+            let appSupport = try fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
+            let backupsDir = appSupport
+                .appendingPathComponent("SQLMaestro", isDirectory: true)
+                .appendingPathComponent("backups", isDirectory: true)
+            try? fm.createDirectory(at: backupsDir, withIntermediateDirectories: true)
+
+            let ext = url.pathExtension.isEmpty ? "sql" : url.pathExtension
+            let df = DateFormatter()
+            df.locale = Locale(identifier: "en_US_POSIX")
+            df.dateFormat = "yyyyMMdd-HHmmss"
+            let stamp = df.string(from: Date())
+            let backupName = "\(template.name)-\(stamp).\(ext)"
+            let backupURL = backupsDir.appendingPathComponent(backupName)
+            try original.write(to: backupURL, options: .atomic)
+            LOG("Template backup created", ctx: ["file": backupName])
+
+            // 2) Save new contents
+            try newText.data(using: .utf8)?.write(to: url, options: .atomic)
+            LOG("Template saved", ctx: ["template": template.name, "bytes": "\(newText.utf8.count)"])
+
+            // 3) Reload templates so UI reflects latest
+            templates.loadTemplates()
+        } catch {
+            NSSound.beep()
+            showAlert(title: "Save Failed", message: "Could not save changes.\n\n\(error.localizedDescription)")
+            LOG("Template save failed", ctx: ["template": template.name, "error": error.localizedDescription])
+        }
     }
     
     private func openInVSCode(_ url: URL) {
@@ -1917,5 +1918,65 @@ struct DatabaseSettingsSheet: View {
             saveError = "Failed to save settings: \(error.localizedDescription)"
             LOG("Database settings save failed", ctx: ["error": error.localizedDescription])
         }
+    }
+}
+
+// Inline template editor sheet view
+struct TemplateInlineEditorSheet: View {
+    let template: TemplateItem
+    @Binding var text: String
+    var fontSize: CGFloat
+    var onSave: (String) -> Void
+    var onCancel: () -> Void
+
+    @State private var localText: String = ""
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Editing: \(template.name)")
+                        .font(.system(size: fontSize + 2, weight: .semibold))
+                        .foregroundStyle(Theme.purple)
+                    Text(template.url.lastPathComponent)
+                        .font(.system(size: fontSize - 2))
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button("Cancel") { onCancel() }
+                    .font(.system(size: fontSize))
+                Button("Save") {
+                    onSave(localText)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.pink)
+                .keyboardShortcut(.defaultAction)                 // Return to save
+                .keyboardShortcut("s", modifiers: [.command])     // ⌘S to save
+                .font(.system(size: fontSize))
+            }
+            Divider()
+
+            TextEditor(text: $localText)
+                .font(.system(size: fontSize, weight: .regular, design: .monospaced))
+                .frame(minWidth: 620, minHeight: 380)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Theme.purple.opacity(0.25))
+                )
+                .onAppear {
+                    self.localText = text
+                }
+                .onChange(of: localText) { _, newVal in
+                    // keep binding loosely in sync so external tools could read it if needed
+                    self.text = newVal
+                }
+
+            Text("Tip: ⌘S to save, ⎋ to cancel")
+                .font(.system(size: fontSize - 3))
+                .foregroundStyle(.secondary)
+        }
+        .padding(16)
+        .frame(minWidth: 720, minHeight: 520)
+        .onExitCommand { onCancel() }
     }
 }
