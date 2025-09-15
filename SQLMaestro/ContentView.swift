@@ -3755,32 +3755,22 @@ struct SessionNotesInline: View {
         text = updated
         tv.string = updated
     }
-
     private var preview: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                if let attributedText = try? AttributedString(markdown: localText) {
-                    Text(attributedText)
-                        .font(.system(size: fontSize))
-                        .textSelection(.enabled)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                } else {
-                    // Fallback: preserve line breaks manually
-                    let lines = localText.components(separatedBy: .newlines)
-                    ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
-                        if line.trimmingCharacters(in: .whitespaces).isEmpty {
-                            Text(" ")
-                                .font(.system(size: fontSize))
-                        } else {
-                            Text(line)
-                                .font(.system(size: fontSize))
-                                .textSelection(.enabled)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                        }
+            VStack(alignment: .leading, spacing: 4) {
+                let lines = localText.components(separatedBy: .newlines)
+                ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
+                    HStack {
+                        Text(line.isEmpty ? " " : line)
+                            .font(.system(size: fontSize))
+                            .textSelection(.enabled)
+                            .multilineTextAlignment(.leading)
+                        Spacer()
                     }
                 }
             }
             .padding(10)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
         .background(
             RoundedRectangle(cornerRadius: 8)
