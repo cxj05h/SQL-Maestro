@@ -452,8 +452,11 @@ struct ContentView: View {
     @State private var selectedTemplate: TemplateItem?
     @State private var currentSQL: String = ""
     @State private var populatedSQL: String = ""
+    // Toasts
     @State private var toastCopied: Bool = false
     @State private var toastOpenDB: Bool = false
+    @State private var toastReloaded: Bool = false
+
     @State private var fontSize: CGFloat = 13
     @State private var hoverRecentKey: String? = nil
     
@@ -513,10 +516,18 @@ struct ContentView: View {
                         .buttonStyle(.borderedProminent)
                         .tint(Theme.purple)
                         .font(.system(size: fontSize))
-                    Button("Reload") { templates.loadTemplates() }
-                        .buttonStyle(.borderedProminent)
-                        .tint(Theme.accent)
-                        .font(.system(size: fontSize))
+                    Button("Reload") {
+                        templates.loadTemplates()
+                        withAnimation { toastReloaded = true }
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+                            withAnimation { toastReloaded = false }
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.accent)
+                    .font(.system(size: fontSize))
+                    .keyboardShortcut("r", modifiers: [.command])
+                    .registerShortcut(name: "Reload Templates", keyLabel: "R", modifiers: [.command], scope: "Templates")
                 }
                 
                 // Search field
@@ -807,6 +818,14 @@ struct ContentView: View {
                         .font(.system(size: fontSize))
                         .padding(.horizontal, 12).padding(.vertical, 6)
                         .background(Theme.aqua.opacity(0.9)).foregroundStyle(.black)
+                        .clipShape(Capsule())
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+                if toastReloaded {
+                    Text("Templates reloaded")
+                        .font(.system(size: fontSize))
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(Theme.accent.opacity(0.9)).foregroundStyle(.black)
                         .clipShape(Capsule())
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
@@ -1838,6 +1857,7 @@ struct ContentView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(sessions.current == s ? Theme.purple : Theme.purple.opacity(0.3))
                 .keyboardShortcut(KeyEquivalent(Character("\(s.rawValue)")), modifiers: [.command])
+                .registerShortcut(name: "Switch to Session #\(s.rawValue)", keyLabel: "\(s.rawValue)", modifiers: [.command], scope: "Sessions")
                 .contextMenu {
                     Button("Rename…") { promptRename(for: s) }
                     if sessions.current == s {
@@ -1958,6 +1978,27 @@ struct ContentView: View {
             
             // 3) Reload templates so UI reflects latest
             templates.loadTemplates()
+            
+            // 4) STREAMLINED WORKFLOW: Auto re-select the saved template and populate query
+            DispatchQueue.main.async {
+                // Find the updated template in the reloaded list by matching URL
+                if let updatedTemplate = self.templates.templates.first(where: { $0.url == url }) {
+                    // Re-select the template
+                    self.selectTemplate(updatedTemplate)
+                    self.loadTemplate(updatedTemplate)
+                    
+                    // Auto-populate the query for convenience
+                    self.populateQuery()
+                    
+                    LOG("Template editing workflow completed", ctx: [
+                        "template": updatedTemplate.name,
+                        "auto_reselected": "true",
+                        "auto_populated": "true"
+                    ])
+                } else {
+                    LOG("Could not find updated template after reload", ctx: ["originalName": template.name])
+                }
+            }
         } catch {
             NSSound.beep()
             showAlert(title: "Save Failed", message: "Could not save changes.\n\n\(error.localizedDescription)")
