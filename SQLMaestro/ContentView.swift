@@ -743,14 +743,21 @@ struct ContentView: View {
                 staticFields
                     .padding(.bottom, 8)
                 Divider()
-                dynamicFields
-                
-                // DB Tables pane moved here - under the divider between static and dynamic fields
-                HStack {
+
+                // Field Names and DB Tables side by side
+                HStack(alignment: .top, spacing: 20) {
+                    // Left: Dynamic Fields (Field Names)
+                    dynamicFields
+                        .frame(maxWidth: 540, alignment: .leading)
+                    
+                    // Right: DB Tables pane
                     dbTablesPane
-                        .frame(width: 360)  // constrain to fixed width like before
-                    Spacer()  // push any remaining space to the right
+                        .frame(width: 360)
+                    
+                    // Push everything to the left
+                    Spacer()
                 }
+                .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.bottom, 12)
                 
                 ZStack {
@@ -1340,7 +1347,9 @@ struct ContentView: View {
     }
     
     @FocusState private var applyButtonFocused: Bool
+    
     // MARK: NEW — Date field row specialized UI for {{Date}} with inline "wheel" spinners (no popovers)
+
     private func dateFieldRow(_ placeholder: String) -> some View {
         let currentSession = sessions.current
         let valBinding = Binding<String>(
@@ -1364,161 +1373,155 @@ struct ContentView: View {
                 .font(.system(size: fontSize - 1))
                 .foregroundStyle(.secondary)
             
-            // Row: value field + inline "wheel" controls + Apply
-            HStack(spacing: 8) {
-                // The visible text field showing the formatted date string
-                TextField("YYYY-MM-DD HH:MM:SS", text: valBinding, onEditingChanged: { isEditing in
-                    if !isEditing {
-                        let finalVal = valBinding.wrappedValue
-                        if !finalVal.isEmpty {
-                            sessions.setValue(finalVal, for: placeholder)
-                            LOG("Date field commit", ctx: ["value": finalVal])
-                        }
-                    }
-                })
-                .textFieldStyle(PlainTextFieldStyle())
-                .padding(.vertical, 4)
-                .padding(.horizontal, 6)
-                .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color.secondary.opacity(0.4), lineWidth: 1)
-                )
-                .font(.system(size: fontSize, design: .monospaced))
-                .frame(minWidth: 420, maxWidth: 640)
-                .layoutPriority(2)
-                .onSubmit {
-                    performDateApply(for: placeholder, binding: valBinding)
-                }
-                
-                // Inline numeric "wheels": Year / Month / Day / Hour / Minute / Second
-                HStack(alignment: .center, spacing: 8) {
-                    VStack(spacing: 4) {
-                        Text("Year")
-                            .font(.system(size: fontSize - 2, weight: .medium))
-                            .foregroundStyle(Theme.gold)
-                            .lineLimit(1)
-                            .fixedSize(horizontal: true, vertical: false)
-                            .frame(width: 72, alignment: .center)
-                        WheelNumberField(value: $dpYear,   range: yearsRange(),    width: 72,  label: "YYYY", sensitivity: dateScrollSensitivity, onReturn: {
-                            performDateApply(for: placeholder, binding: valBinding)
-                        })
-                    }
-                    VStack(spacing: 4) {
-                        Text("Month")
-                            .font(.system(size: fontSize - 2, weight: .medium))
-                            .foregroundStyle(Theme.gold)
-                            .lineLimit(1)
-                            .fixedSize(horizontal: true, vertical: false)
-                            .frame(width: 54, alignment: .center)
-                        WheelNumberField(value: $dpMonth,  range: 1...12,          width: 54,  label: "MM",   sensitivity: dateScrollSensitivity, onReturn: {
-                            performDateApply(for: placeholder, binding: valBinding)
-                        })
-                    }
-                    VStack(spacing: 4) {
-                        Text("Day")
-                            .font(.system(size: fontSize - 2, weight: .medium))
-                            .foregroundStyle(Theme.gold)
-                            .lineLimit(1)
-                            .fixedSize(horizontal: true, vertical: false)
-                            .frame(width: 54, alignment: .center)
-                        WheelNumberField(value: $dpDay,    range: 1...daysInMonth(year: dpYear, month: dpMonth), width: 54,  label: "DD", sensitivity: dateScrollSensitivity, onReturn: {
-                            performDateApply(for: placeholder, binding: valBinding)
-                        })
-                    }
-                    Text("—")
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 2)
-                    VStack(spacing: 4) {
-                        Text("Hour")
-                            .font(.system(size: fontSize - 2, weight: .medium))
-                            .foregroundStyle(Theme.gold)
-                            .lineLimit(1)
-                            .fixedSize(horizontal: true, vertical: false)
-                            .frame(width: 54, alignment: .center)
-                        WheelNumberField(value: $dpHour,   range: 0...23,          width: 54,  label: "hh", sensitivity: dateScrollSensitivity, onReturn: {
-                            performDateApply(for: placeholder, binding: valBinding)
-                        })
-                    }
-                    VStack(spacing: 4) {
-                        Text("Minute")
-                            .font(.system(size: fontSize - 2, weight: .medium))
-                            .foregroundStyle(Theme.gold)
-                            .lineLimit(1)
-                            .fixedSize(horizontal: true, vertical: false)
-                            .frame(width: 54, alignment: .center)
-                        WheelNumberField(value: $dpMinute, range: 0...59,          width: 54,  label: "mm", sensitivity: dateScrollSensitivity, onReturn: {
-                            performDateApply(for: placeholder, binding: valBinding)
-                        })
-                    }
-                    VStack(spacing: 4) {
-                        Text("Second")
-                            .font(.system(size: fontSize - 2, weight: .medium))
-                            .foregroundStyle(Theme.gold)
-                            .lineLimit(1)
-                            .fixedSize(horizontal: true, vertical: false)
-                            .frame(width: 54, alignment: .center)
-                        WheelNumberField(
-                            value: $dpSecond,
-                            range: 0...59,
-                            width: 54,
-                            label: "ss",
-                            sensitivity: dateScrollSensitivity,
-                            onReturn: {
-                                performDateApply(for: placeholder, binding: valBinding)
-                            },
-                            onTabToApply: { applyButtonFocused = true }
-                        )
-                    }
-                    // Small settings button to tune scroll sensitivity
-                    Button {
-                        showScrollSettings.toggle()
-                    } label: {
-                        Image(systemName: "slider.horizontal.3")
-                            .font(.system(size: fontSize - 1, weight: .semibold))
-                    }
-                    .buttonStyle(.borderless)
-                    .popover(isPresented: $showScrollSettings) {
-                        VStack(alignment: .leading, spacing: 10) {
-                            Text("Scroll sensitivity")
-                                .font(.system(size: fontSize, weight: .semibold))
-                                .foregroundStyle(Theme.purple)
-                            HStack {
-                                Text("Slower")
-                                    .font(.system(size: fontSize - 2)).foregroundStyle(.secondary)
-                                Slider(value: $dateScrollSensitivity, in: 0.5...3.0, step: 0.1)
-                                Text("Faster")
-                                    .font(.system(size: fontSize - 2)).foregroundStyle(.secondary)
+            // Date selector components above the field - arranged compactly
+                    VStack(spacing: 6) {
+                        // Top row: Year, Month, Day
+                        HStack(alignment: .center, spacing: 6) {
+                            // ... keep all existing content exactly the same ...
+                            VStack(spacing: 2) {
+                                Text("Year")
+                                    .font(.system(size: fontSize - 3, weight: .medium))
+                                    .foregroundStyle(Theme.gold)
+                                    .lineLimit(1)
+                                WheelNumberField(value: $dpYear, range: yearsRange(), width: 60, label: "YYYY", sensitivity: dateScrollSensitivity, onReturn: {
+                                    performDateApply(for: placeholder, binding: valBinding)
+                                })
                             }
-                            Text("Controls how much wheel movement is needed for a 1-step change.")
-                                .font(.system(size: fontSize - 3)).foregroundStyle(.secondary)
+                            VStack(spacing: 2) {
+                                Text("Month")
+                                    .font(.system(size: fontSize - 3, weight: .medium))
+                                    .foregroundStyle(Theme.gold)
+                                    .lineLimit(1)
+                                WheelNumberField(value: $dpMonth, range: 1...12, width: 45, label: "MM", sensitivity: dateScrollSensitivity, onReturn: {
+                                    performDateApply(for: placeholder, binding: valBinding)
+                                })
+                            }
+                            VStack(spacing: 2) {
+                                Text("Day")
+                                    .font(.system(size: fontSize - 3, weight: .medium))
+                                    .foregroundStyle(Theme.gold)
+                                    .lineLimit(1)
+                                WheelNumberField(value: $dpDay, range: 1...daysInMonth(year: dpYear, month: dpMonth), width: 45, label: "DD", sensitivity: dateScrollSensitivity, onReturn: {
+                                    performDateApply(for: placeholder, binding: valBinding)
+                                })
+                            }
+                            
+                            // Small settings button
+                            Button {
+                                showScrollSettings.toggle()
+                            } label: {
+                                Image(systemName: "slider.horizontal.3")
+                                    .font(.system(size: fontSize - 2, weight: .semibold))
+                            }
+                            .buttonStyle(.borderless)
+                            .popover(isPresented: $showScrollSettings) {
+                                VStack(alignment: .leading, spacing: 10) {
+                                    Text("Scroll sensitivity")
+                                        .font(.system(size: fontSize, weight: .semibold))
+                                        .foregroundStyle(Theme.purple)
+                                    HStack {
+                                        Text("Slower")
+                                            .font(.system(size: fontSize - 2)).foregroundStyle(.secondary)
+                                        Slider(value: $dateScrollSensitivity, in: 0.5...3.0, step: 0.1)
+                                        Text("Faster")
+                                            .font(.system(size: fontSize - 2)).foregroundStyle(.secondary)
+                                    }
+                                    Text("Controls how much wheel movement is needed for a 1-step change.")
+                                        .font(.system(size: fontSize - 3)).foregroundStyle(.secondary)
+                                }
+                                .padding(12)
+                                .frame(width: 320)
+                                .onChange(of: dateScrollSensitivity) { oldVal, newVal in
+                                    LOG("Date scroll speed changed", ctx: ["from": String(format: "%.2f", oldVal), "to": String(format: "%.2f", newVal)])
+                                }
+                            }
+                            
+                            Spacer()
                         }
-                        .padding(12)
-                        .frame(width: 320)
-                        .onChange(of: dateScrollSensitivity) { oldVal, newVal in
-                            LOG("Date scroll speed changed", ctx: ["from": String(format: "%.2f", oldVal), "to": String(format: "%.2f", newVal)])
+                        
+                        // Bottom row: Hour, Minute, Second + Apply button
+                        HStack(alignment: .center, spacing: 6) {
+                            VStack(spacing: 2) {
+                                Text("Hour")
+                                    .font(.system(size: fontSize - 3, weight: .medium))
+                                    .foregroundStyle(Theme.gold)
+                                    .lineLimit(1)
+                                WheelNumberField(value: $dpHour, range: 0...23, width: 45, label: "hh", sensitivity: dateScrollSensitivity, onReturn: {
+                                    performDateApply(for: placeholder, binding: valBinding)
+                                })
+                            }
+                            VStack(spacing: 2) {
+                                Text("Minute")
+                                    .font(.system(size: fontSize - 3, weight: .medium))
+                                    .foregroundStyle(Theme.gold)
+                                    .lineLimit(1)
+                                WheelNumberField(value: $dpMinute, range: 0...59, width: 45, label: "mm", sensitivity: dateScrollSensitivity, onReturn: {
+                                    performDateApply(for: placeholder, binding: valBinding)
+                                })
+                            }
+                            VStack(spacing: 2) {
+                                Text("Second")
+                                    .font(.system(size: fontSize - 3, weight: .medium))
+                                    .foregroundStyle(Theme.gold)
+                                    .lineLimit(1)
+                                WheelNumberField(
+                                    value: $dpSecond,
+                                    range: 0...59,
+                                    width: 45,
+                                    label: "ss",
+                                    sensitivity: dateScrollSensitivity,
+                                    onReturn: {
+                                        performDateApply(for: placeholder, binding: valBinding)
+                                    },
+                                    onTabToApply: { applyButtonFocused = true }
+                                )
+                            }
+                            
+                            // Apply button
+                            Button("Apply") {
+                                performDateApply(for: placeholder, binding: valBinding)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(Theme.pink)
+                            .font(.system(size: fontSize - 1))
+                            .keyboardShortcut(.defaultAction)
+                            .keyboardShortcut(.return, modifiers: [.command])
+                            .focusable(true)
+                            .focused($applyButtonFocused)
+                            .fixedSize(horizontal: true, vertical: false)
+                            
+                            Spacer()
                         }
                     }
+                    .frame(maxWidth: 407, alignment: .leading)
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
+                    )
+            
+            // The visible text field showing the formatted date string
+            TextField("YYYY-MM-DD HH:MM:SS", text: valBinding, onEditingChanged: { isEditing in
+                if !isEditing {
+                    let finalVal = valBinding.wrappedValue
+                    if !finalVal.isEmpty {
+                        sessions.setValue(finalVal, for: placeholder)
+                        LOG("Date field commit", ctx: ["value": finalVal])
+                    }
                 }
-                .padding(.vertical, 6)
-                .padding(.horizontal, 6)
-                .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
-                )
-                .frame(minHeight: 48)
-                
-                Button("Apply") {
-                    performDateApply(for: placeholder, binding: valBinding)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.pink)
-                .font(.system(size: fontSize))
-                .keyboardShortcut(.defaultAction)               // allow Enter/Return to trigger Apply
-                .keyboardShortcut(.return, modifiers: [.command]) // Cmd+Enter also applies
-                .focusable(true)                                  // ensure it can be focused via Tab
-                .focused($applyButtonFocused)
-                .fixedSize(horizontal: true, vertical: false)   // <- keeps width to fit "Apply"
-                .layoutPriority(3)                               // <- resists compression
+            })
+            .textFieldStyle(PlainTextFieldStyle())
+            .padding(.vertical, 4)
+            .padding(.horizontal, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(Color.secondary.opacity(0.4), lineWidth: 1)
+            )
+            .font(.system(size: fontSize, design: .monospaced))
+            .frame(maxWidth: 420)
+            .onSubmit {
+                performDateApply(for: placeholder, binding: valBinding)
             }
             
             // Helper hint
@@ -1526,6 +1529,7 @@ struct ContentView: View {
                 .font(.system(size: fontSize - 3))
                 .foregroundStyle(.secondary)
         }
+        .frame(maxWidth: 540, alignment: .leading)
         .onKeyPress(.escape) {
             if dateFocusScrollMode {
                 dateFocusScrollMode = false
@@ -2181,8 +2185,8 @@ struct ContentView: View {
     }
     
     @State private var isNotesSheetOpen: Bool = false
-    @State private var notesIsEditing: Bool = false
-    @State private var showNotesToolbar: Bool = false
+    @State private var notesIsEditing: Bool = true
+    @State private var showNotesToolbar: Bool = true
     @State private var showNotesSidebar: Bool = true
 
     private func promptRename(for s: TicketSession) {
@@ -3754,11 +3758,29 @@ struct SessionNotesInline: View {
 
     private var preview: some View {
         ScrollView {
-            let rendered: Text = (try? Text(AttributedString(markdown: localText))) ?? Text(localText)
-            rendered
-                .font(.system(size: fontSize))
-                .textSelection(.enabled)
-                .padding(10)
+            VStack(alignment: .leading, spacing: 0) {
+                if let attributedText = try? AttributedString(markdown: localText) {
+                    Text(attributedText)
+                        .font(.system(size: fontSize))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                } else {
+                    // Fallback: preserve line breaks manually
+                    let lines = localText.components(separatedBy: .newlines)
+                    ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
+                        if line.trimmingCharacters(in: .whitespaces).isEmpty {
+                            Text(" ")
+                                .font(.system(size: fontSize))
+                        } else {
+                            Text(line)
+                                .font(.system(size: fontSize))
+                                .textSelection(.enabled)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                }
+            }
+            .padding(10)
         }
         .background(
             RoundedRectangle(cornerRadius: 8)
@@ -3770,6 +3792,7 @@ struct SessionNotesInline: View {
         )
         .frame(maxWidth: .infinity, minHeight: 160, alignment: .topLeading)
     }
+    
     private var editor: some View {
         VStack(alignment: .leading, spacing: 6) {
             if showToolbar {
