@@ -1847,8 +1847,8 @@ struct ContentView: View {
                                 textView.isAutomaticTextReplacementEnabled = false
                             }
                         }
-                        .frame(minWidth: 400)
-
+                        .frame(minWidth: 900, idealWidth: 1100)
+                    
                     // Right: Session Notes (inline)
                     SessionNotesInline(
                         fontSize: fontSize,
@@ -1859,7 +1859,7 @@ struct ContentView: View {
                         isEditing: $notesIsEditing,
                         showToolbar: $showNotesToolbar
                     )
-                    .frame(minWidth: 320)
+                    .frame(minWidth: 300, idealWidth: 360)
                     .layoutPriority(1)
                 }
                 .frame(minHeight: 160)
@@ -2229,17 +2229,45 @@ struct ContentView: View {
         let result = alert.runModal()
         guard result == .alertFirstButtonReturn else { return }
         let value = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        if value.isEmpty { sessions.sessionLinks.removeValue(forKey: s) }
-        else { sessions.sessionLinks[s] = value }
-    }
-
-    private func openCurrentSessionLink() {
-        guard let link = sessions.sessionLinks[sessions.current]?.trimmingCharacters(in: .whitespacesAndNewlines), !link.isEmpty else { return }
-        if let url = URL(string: link) {
-            NSWorkspace.shared.open(url)
-            LOG("Open session link", ctx: ["url": link])
+        if value.isEmpty {
+            sessions.sessionLinks.removeValue(forKey: s)
+        } else if let _ = normalizedURL(from: value) {
+            sessions.sessionLinks[s] = value
         } else {
             NSSound.beep()
+            showAlert(title: "Invalid Link",
+                      message: "Please enter a full web URL (e.g., https://example.com/ticket/123)")
+        }
+    }
+    
+    // Normalize raw user text into a browser-safe web URL (http/https only)
+    private func normalizedURL(from raw: String) -> URL? {
+        var s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !s.isEmpty else { return nil }
+        if !s.contains("://") {            // domain without scheme
+            s = "https://" + s
+        }
+        s = s.replacingOccurrences(of: " ", with: "%20") // minimal encoding
+        guard let url = URL(string: s) else { return nil }
+        if let scheme = url.scheme?.lowercased(), scheme == "http" || scheme == "https" {
+            return url
+        }
+        return nil
+    }
+    
+    private func openCurrentSessionLink() {
+        guard let raw = sessions.sessionLinks[sessions.current]?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+              !raw.isEmpty else { return }
+
+        if let url = normalizedURL(from: raw) {
+            NSWorkspace.shared.open(url)
+            LOG("Open session link", ctx: ["url": url.absoluteString])
+        } else {
+            NSSound.beep()
+            showAlert(title: "Invalid Link",
+                      message: "That doesn't look like a valid web URL.\nTry something like https://example.com/ticket/123.")
+            LOG("Open session link failed: invalid URL", ctx: ["raw": raw])
         }
     }
 
@@ -3659,6 +3687,41 @@ struct SessionNotesInline: View {
     private func toggleUnderline() { wrapSelection(prefix: "<u>", suffix: "</u>") }
     private func toggleCodeBlock() { wrapSelection(prefix: "\n```\n", suffix: "\n```\n") }
     private func insertHR() { wrapSelection(prefix: "\n---\n", suffix: "") }
+
+    private func applyHeading(_ level: Int) {
+        guard let tv = activeTextView() else { return }
+        var sel = tv.selectedRange()
+        let ns = localText as NSString
+        if sel.location == NSNotFound { sel = NSRange(location: ns.length, length: 0) }
+        let lineRange = ns.lineRange(for: sel)
+        let segment = ns.substring(with: lineRange)
+        let prefix = String(repeating: "#", count: max(1, min(6, level))) + " "
+        let updated = prefix + segment.trimmingCharacters(in: .whitespaces)
+        let newString = ns.replacingCharacters(in: lineRange, with: updated)
+        localText = newString
+        text = newString
+        tv.string = newString
+    }
+
+    private func applyList(prefix: String) {
+        guard let tv = activeTextView() else { return }
+        var sel = tv.selectedRange()
+        let ns = localText as NSString
+        if sel.location == NSNotFound { sel = NSRange(location: ns.length, length: 0) }
+        let lineRange = ns.lineRange(for: sel)
+        let segment = ns.substring(with: lineRange)
+        let lines = segment.split(separator: "\n", omittingEmptySubsequences: false)
+        let transformed = lines.map { l -> String in
+            let s = String(l)
+            if s.trimmingCharacters(in: .whitespaces).isEmpty { return s }
+            return prefix + s
+        }.joined(separator: "\n")
+        let newString = ns.replacingCharacters(in: lineRange, with: transformed)
+        localText = newString
+        text = newString
+        tv.string = newString
+    }
+
     private func insertLink() {
         guard let tv = activeTextView() else { return }
         var sel = tv.selectedRange()
@@ -3714,6 +3777,13 @@ struct SessionNotesInline: View {
                     Button { toggleInlineCode() } label: { Image(systemName: "chevron.left.forwardslash.chevron.right") }
                     Button { toggleCodeBlock() }  label: { Image(systemName: "square.grid.3x3") }
                     Button { insertHR() }         label: { Image(systemName: "scribble.variable") }
+                    Divider().frame(height: 16)
+                    Button { applyHeading(1) }    label: { Text("H1").font(.system(size: fontSize - 3, weight: .semibold)) }
+                    Button { applyHeading(2) }    label: { Text("H2").font(.system(size: fontSize - 3, weight: .semibold)) }
+                    Button { applyHeading(3) }    label: { Text("H3").font(.system(size: fontSize - 3, weight: .semibold)) }
+                    Divider().frame(height: 16)
+                    Button { applyList(prefix: "- ") }  label: { Image(systemName: "list.bullet") }
+                    Button { applyList(prefix: "1. ") } label: { Image(systemName: "list.number") }
                 }
                 .controlSize(.small)
                 .font(.system(size: fontSize - 2))
