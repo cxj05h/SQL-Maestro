@@ -1852,6 +1852,7 @@ struct ContentView: View {
                     // Right: Session Notes (inline)
                     SessionNotesInline(
                         fontSize: fontSize,
+                        session: sessions.current,
                         text: Binding(
                             get: { sessions.sessionNotes[sessions.current] ?? "" },
                             set: { sessions.sessionNotes[sessions.current] = $0 }
@@ -2471,6 +2472,7 @@ struct ContentView: View {
                 fallthrough
             case .alertSecondButtonReturn: // No, Don’t Save
                 sessions.clearAllFieldsForCurrentSession()
+                sessions.sessionNotes[sessions.current] = ""
                 sessionStaticFields[sessions.current] = ("", "", "", "")
                 LOG("Session cleared via prompt", ctx: ["session": "\(sessions.current.rawValue)"])
             default:
@@ -2480,11 +2482,13 @@ struct ContentView: View {
             switch response {
             case .alertFirstButtonReturn: // No, Don’t Save
                 sessions.clearAllFieldsForCurrentSession()
+                sessions.sessionNotes[sessions.current] = ""
                 sessionStaticFields[sessions.current] = ("", "", "", "")
                 LOG("Session cleared via prompt", ctx: ["session": "\(sessions.current.rawValue)"])
             case .alertSecondButtonReturn: // Yes, Save
                 saveTicketSessionFlow()
                 sessions.clearAllFieldsForCurrentSession()
+                sessions.sessionNotes[sessions.current] = ""
                 sessionStaticFields[sessions.current] = ("", "", "", "")
                 LOG("Session cleared after save via prompt", ctx: ["session": "\(sessions.current.rawValue)"])
             default:
@@ -3643,6 +3647,7 @@ struct SessionNotesSheet: View {
 // MARK: – Session Notes Inline (sidebar)
 struct SessionNotesInline: View {
     var fontSize: CGFloat
+    var session: TicketSession
     @Binding var text: String
     @Binding var isEditing: Bool
     @Binding var showToolbar: Bool
@@ -3852,6 +3857,14 @@ struct SessionNotesInline: View {
         }
         .onChange(of: localText) { _, newVal in
             self.text = newVal
+        }
+        .onChange(of: session) { _, _ in
+            // Active session switched – refresh the local editor buffer from the new bound text
+            self.localText = text
+        }
+        .onChange(of: text) { _, newVal in
+            // Underlying bound text changed externally (e.g., Clear Session) – mirror into local buffer
+            self.localText = newVal
         }
     }
 }
