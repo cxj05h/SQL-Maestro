@@ -734,6 +734,14 @@ struct ContentView: View {
                 Divider()
                 dynamicFields
                 
+                // DB Tables pane moved here - under the divider between static and dynamic fields
+                HStack {
+                    dbTablesPane
+                        .frame(width: 360)  // constrain to fixed width like before
+                    Spacer()  // push any remaining space to the right
+                }
+                .padding(.bottom, 12)
+                
                 ZStack {
                     // Left-aligned action buttons row
                     HStack {
@@ -757,7 +765,7 @@ struct ContentView: View {
                             LOG("All fields cleared (including static)", ctx: ["session": "\(sessions.current.rawValue)"])
                         }
                         .buttonStyle(.bordered)
-                        .tint(Theme.accent) // <- same green used for Company label
+                        .tint(Theme.accent)
                         .keyboardShortcut("k", modifiers: [.command])
                         .font(.system(size: fontSize))
                         .registerShortcut(name: "Clear Session", keyLabel: "K", modifiers: [.command], scope: "Global")
@@ -768,13 +776,6 @@ struct ContentView: View {
                     // Centered session buttons overlay
                     sessionButtons
                         .frame(maxWidth: .infinity, alignment: .center)
-                    
-                    // Right-aligned DB Tables pane
-                    HStack {
-                        Spacer()
-                        dbTablesPane
-                            .frame(width: 360)  // fixed width pane to the right of the session buttons
-                    }
                 }
                 
                 outputView
@@ -986,7 +987,7 @@ struct ContentView: View {
                     }
                 )
                 HStack(alignment: .top, spacing: 8) {
-                    // Left: fieldWithDropdown + centered Connect button under the field area
+                    // Left: fieldWithDropdown + left-aligned Connect button under the field area
                     VStack(alignment: .leading, spacing: 0) {
                         fieldWithDropdown(
                             label: "MySQL DB",
@@ -1005,7 +1006,6 @@ struct ContentView: View {
                             }
                         )
                         HStack {
-                            Spacer()
                             Button("Connect to Database") {
                                 connectToQuerious()
                             }
@@ -1015,8 +1015,7 @@ struct ContentView: View {
                             .disabled(orgId.trimmingCharacters(in: .whitespaces).isEmpty)
                             Spacer()
                         }
-                        // Match the text field visual width (420) so centering aligns under the field, not the Save button
-                        .frame(width: 420)
+                        .frame(width: 420, alignment: .leading)
                         .padding(.top, 4)
                     }
                     
