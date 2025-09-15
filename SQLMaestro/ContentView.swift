@@ -2642,6 +2642,38 @@ struct ContentView: View {
             ])
         }
         
+        // Insert visual divider at cursor position
+        private func insertVisualDivider() {
+            let dividerText = "---|-----------------**- xxxxxxx -**------------------------------|"
+            let current = self.localText
+            guard let tv = activeEditorTextView() else {
+                // Fallback: append to end if we can't resolve the text view yet.
+                self.localText.append("\n" + dividerText + "\n")
+                self.text = self.localText
+                LOG("Inserted visual divider (no TV)")
+                return
+            }
+            let ns = current as NSString
+            var sel = tv.selectedRange()
+            if sel.location == NSNotFound { sel = NSRange(location: ns.length, length: 0) }
+            let safeLoc = max(0, min(sel.location, ns.length))
+            let safeLen = max(0, min(sel.length, ns.length - safeLoc))
+            let safeRange = NSRange(location: safeLoc, length: safeLen)
+            
+            // Add newlines around the divider for better formatting
+            let insertText = "\n" + dividerText + "\n"
+            let updated = ns.replacingCharacters(in: safeRange, with: insertText)
+            self.localText = updated
+            self.text = updated
+            DispatchQueue.main.async {
+                tv.string = updated
+                let newCaret = NSRange(location: safeRange.location + (insertText as NSString).length, length: 0)
+                tv.setSelectedRange(newCaret)
+                tv.scrollRangeToVisible(newCaret)
+            }
+            LOG("Inserted visual divider", ctx: ["mode": safeLen > 0 ? "replace" : "insert"])
+        }
+        
         var body: some View {
             VStack(alignment: .leading, spacing: 0) {
                 HStack {
@@ -2664,6 +2696,21 @@ struct ContentView: View {
                     .font(.system(size: fontSize - 1))
                     .keyboardShortcut("/", modifiers: [.command]) // ⌘/
                     .help("Toggle '--' comments on selected lines (⌘/)")
+                    
+                    Button {
+                        insertVisualDivider()
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: "minus.rectangle")
+                            Text("Insert Divider")
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(Theme.pink)
+                    .font(.system(size: fontSize - 1))
+                    .keyboardShortcut("d", modifiers: [.command]) // ⌘D
+                    .help("Insert visual divider (⌘D)")
+                    
                     Button("Cancel", action: onCancel)
                         .buttonStyle(.bordered)
                     Button("Save") { onSave(localText) }
