@@ -2525,12 +2525,16 @@ struct ContentView: View {
                 }
                 cleaned.append(name)
             }
-            placeholderStore.set(cleaned)
-            LOG("Edit placeholders applied", ctx: ["count": "\(cleaned.count)"])
+            placeholderStore.reorder(cleaned) // Use reorder instead of set to preserve order
+            LOG("Edit placeholders applied with order", ctx: ["count": "\(cleaned.count)"])
             isEditingPlaceholders = false
             editError = nil
+            
+            // Force UI update
+            DispatchQueue.main.async {
+                // The @Published property should automatically trigger UI updates
+            }
         }
-        
         private func startDeletePlaceholders() {
             deleteSelection = []
             isDeletingPlaceholders = true
@@ -2729,7 +2733,7 @@ struct ContentView: View {
                                 .font(.system(size: fontSize - 2))
                                 .foregroundStyle(.secondary)
                                 .padding(.trailing, 4)
-                            ForEach(placeholderStore.names, id: \.self) { ph in
+                            ForEach(Array(placeholderStore.names.enumerated()), id: \.element) { index, ph in
                                 Button(ph) { insertPlaceholder(ph) }
                                     .buttonStyle(.bordered)
                                     .tint(Theme.pink)
@@ -2792,31 +2796,48 @@ struct ContentView: View {
                         .font(.system(size: fontSize + 2, weight: .semibold))
                         .foregroundStyle(Theme.purple)
                         .padding(.bottom, 4)
+                    
+                    Text("Drag to reorder • Click to edit names")
+                        .font(.system(size: fontSize - 2))
+                        .foregroundStyle(.secondary)
+                        
                     if let err = editError {
                         Text(err)
                             .font(.system(size: fontSize - 2))
                             .foregroundStyle(.red)
                     }
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 6) {
-                            ForEach(Array(editingNames.enumerated()), id: \.offset) { idx, _ in
-                                HStack(spacing: 8) {
-                                    Text("\(idx + 1).")
-                                        .frame(width: 24, alignment: .trailing)
-                                        .foregroundStyle(.secondary)
-                                        .font(.system(size: fontSize - 2))
-                                    TextField("Placeholder name", text: Binding(
-                                        get: { editingNames[idx] },
-                                        set: { editingNames[idx] = $0 }
-                                    ))
-                                    .textFieldStyle(.roundedBorder)
-                                    .font(.system(size: fontSize))
-                                }
+                    
+                    List {
+                        ForEach(Array(editingNames.enumerated()), id: \.offset) { idx, name in
+                            HStack(spacing: 8) {
+                                // Drag handle
+                                Image(systemName: "line.3.horizontal")
+                                    .foregroundStyle(.secondary)
+                                    .font(.system(size: fontSize - 1))
+                                
+                                Text("\(idx + 1).")
+                                    .frame(width: 24, alignment: .trailing)
+                                    .foregroundStyle(.secondary)
+                                    .font(.system(size: fontSize - 2))
+                                
+                                TextField("Placeholder name", text: Binding(
+                                    get: { editingNames[idx] },
+                                    set: { editingNames[idx] = $0 }
+                                ))
+                                .textFieldStyle(.plain)
+                                .font(.system(size: fontSize))
+                                .padding(.vertical, 2)
                             }
+                            .padding(.vertical, 2)
                         }
-                        .padding(.vertical, 4)
+                        .onMove(perform: { indices, newOffset in
+                            editingNames.move(fromOffsets: indices, toOffset: newOffset)
+                            LOG("Placeholders reordered in edit sheet", ctx: ["from": "\(indices)", "to": "\(newOffset)"])
+                        })
                     }
+                    .listStyle(.plain)
                     .frame(minHeight: 220)
+                    
                     HStack {
                         Button("Cancel") { cancelEditPlaceholders() }
                             .font(.system(size: fontSize))
