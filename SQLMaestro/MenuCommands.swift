@@ -50,6 +50,26 @@ struct AppMenuCommands: Commands {
                 NotificationCenter.default.post(name: .fontBump, object: -1)
             }.keyboardShortcut("-", modifiers: [.command])
         }
+
+        CommandGroup(after: .saveItem) {
+            Menu("Ticket Sessions") {
+                Button("Save Ticket Session…") {
+                    NotificationCenter.default.post(name: .saveTicketSession, object: nil)
+                }
+                .keyboardShortcut("s", modifiers: [.command])
+
+                Button("Load Ticket Session…") {
+                    NotificationCenter.default.post(name: .loadTicketSession, object: nil)
+                }
+                .keyboardShortcut("l", modifiers: [.command])
+
+                Divider()
+
+                Button("Open Sessions Folder") {
+                    NotificationCenter.default.post(name: .openSessionsFolder, object: nil)
+                }
+            }
+        }
     }
     
     // Helper function to open the mapping JSON file in VS Code
@@ -124,4 +144,7 @@ struct AppMenuCommands: Commands {
 extension Notification.Name {
     static let fontBump = Notification.Name("FontBump")
     static let showDatabaseSettings = Notification.Name("ShowDatabaseSettings")
+    static let saveTicketSession = Notification.Name("SaveTicketSession")
+    static let loadTicketSession = Notification.Name("LoadTicketSession")
+    static let openSessionsFolder = Notification.Name("OpenSessionsFolder")
 }

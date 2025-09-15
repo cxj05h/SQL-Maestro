@@ -11,6 +11,16 @@ final class SessionManager: ObservableObject {
     @Published var current: TicketSession = .one
     @Published var sessionNames: [TicketSession: String] = [.one:"#1", .two:"#2", .three:"#3"]
 
+    // per-session markdown notes (to be shown in the right-side notes panel)
+    @Published var sessionNotes: [TicketSession: String] = [
+        .one: "",
+        .two: "",
+        .three: ""
+    ]
+    
+    // optional per-session link (URL as string). Absence => no link
+    @Published var sessionLinks: [TicketSession: String] = [:]
+
     func setCurrent(_ s: TicketSession) {
         current = s
         LOG("Switch session", ctx: ["session":"\(s.rawValue)"])
@@ -44,6 +54,9 @@ final class SessionManager: ObservableObject {
     func clearAllFieldsForCurrentSession() {
         sessionValues[current] = [:]
         sessionNames[current] = "#\(current.rawValue)"
+        // also clear notes and any link for this session
+        sessionNotes[current] = ""
+        sessionLinks.removeValue(forKey: current)
         LOG("Cleared fields", ctx: ["session":"\(current.rawValue)"])
     }
 }

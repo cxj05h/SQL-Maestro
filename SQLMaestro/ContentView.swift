@@ -1862,9 +1862,7 @@ struct ContentView: View {
                     Button("Rename…") { promptRename(for: s) }
                     if sessions.current == s {
                         Button("Clear This Session") {
-                            sessions.clearAllFieldsForCurrentSession()
-                            sessionStaticFields[sessions.current] = ("", "", "", "")
-                            LOG("Session cleared from context menu", ctx: ["session": "\(s.rawValue)"])
+                            promptClearCurrentSession()
                         }
                     } else {
                         Button("Switch to This Session") {
@@ -1873,6 +1871,21 @@ struct ContentView: View {
                     }
                 }
             }
+            // Invisible bridge view to receive menu notifications and register KB shortcuts for Help sheet
+            Color.clear.frame(width: 0, height: 0)
+                .background(TicketSessionNotificationBridge(
+                    onSave: { saveTicketSessionFlow() },
+                    onLoad: { loadTicketSessionFlow() },
+                    onOpen: { openSessionsFolderFlow() }
+                ))
+                .background(
+                    Group {
+                        Color.clear
+                            .registerShortcut(name: "Save Ticket Session…", keyLabel: "S", modifiers: [.command], scope: "Ticket Sessions")
+                        Color.clear
+                            .registerShortcut(name: "Load Ticket Session…", keyLabel: "L", modifiers: [.command], scope: "Ticket Sessions")
+                    }
+                )
         }
     }
     
@@ -2131,6 +2144,241 @@ struct ContentView: View {
         alert.addButton(withTitle: "Cancel")
         let result = alert.runModal()
         return result == .alertFirstButtonReturn ? input.stringValue : nil
+    }
+
+    // MARK: – Ticket Session Save/Load/Open
+    private struct SavedTicketSession: Codable {
+        struct StaticFields: Codable {
+            let orgId: String
+            let acctId: String
+            let mysqlDb: String
+            let companyLabel: String
+        }
+        let version: Int
+        let sessionName: String
+        let sessionLink: String?
+        let templateId: String?
+        let templateName: String?
+        let staticFields: StaticFields
+        let placeholders: [String:String]
+        let dbTables: [String]
+        let notes: String
+    }
+
+    private func sanitizeFileName(_ name: String) -> String {
+        let invalid = CharacterSet(charactersIn: "/\\?%*|\"<>:")
+        return name.components(separatedBy: invalid).joined(separator: "_")
+    }
+
+    private func saveTicketSessionFlow() {
+        let fm = FileManager.default
+        try? fm.createDirectory(at: AppPaths.sessions, withIntermediateDirectories: true)
+
+        let defaultName = (sessions.sessionNames[sessions.current] ?? "session-\(sessions.current.rawValue)")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let suggested = defaultName.isEmpty ? "session-\(sessions.current.rawValue)" : defaultName
+        guard let rawName = promptForString(
+            title: "Save Ticket Session",
+            message: "Type a name for this ticket session file (no extension needed)",
+            defaultValue: suggested
+        )?.trimmingCharacters(in: .whitespacesAndNewlines), !rawName.isEmpty else { return }
+
+        let base = sanitizeFileName(rawName)
+        var url = AppPaths.sessions.appendingPathComponent(base, conformingTo: .json)
+        if url.pathExtension.lowercased() != "json" {
+            url = url.appendingPathExtension("json")
+        }
+
+        if fm.fileExists(atPath: url.path) {
+            let overwrite = NSAlert()
+            overwrite.messageText = "File Exists"
+            overwrite.informativeText = "A file named ‘\(url.lastPathComponent)’ already exists. Overwrite it?"
+            overwrite.alertStyle = .warning
+            overwrite.addButton(withTitle: "Overwrite")
+            overwrite.addButton(withTitle: "Cancel")
+            guard overwrite.runModal() == .alertFirstButtonReturn else { return }
+        }
+
+        // Snapshot current UI/session state
+        let staticData = sessionStaticFields[sessions.current] ?? (orgId, acctId, mysqlDb, companyLabel)
+        let sFields = SavedTicketSession.StaticFields(
+            orgId: staticData.orgId,
+            acctId: staticData.acctId,
+            mysqlDb: staticData.mysqlDb,
+            companyLabel: staticData.company
+        )
+
+        var placeholders: [String:String] = [:]
+        if let t = selectedTemplate {
+            for ph in t.placeholders { placeholders[ph] = sessions.value(for: ph) }
+        }
+
+        let dbSet: [String] = {
+            if let t = selectedTemplate { return dbTablesStore.workingSet(for: sessions.current, template: t) }
+            return []
+        }()
+
+        let saved = SavedTicketSession(
+            version: 1,
+            sessionName: sessions.sessionNames[sessions.current] ?? "#\(sessions.current.rawValue)",
+            sessionLink: sessions.sessionLinks[sessions.current],
+            templateId: selectedTemplate.map { "\($0.id)" },
+            templateName: selectedTemplate?.name,
+            staticFields: sFields,
+            placeholders: placeholders,
+            dbTables: dbSet,
+            notes: sessions.sessionNotes[sessions.current] ?? ""
+        )
+
+        do {
+            let enc = JSONEncoder()
+            if #available(macOS 10.13, *) { enc.outputFormatting = [.prettyPrinted, .sortedKeys] } else { enc.outputFormatting = [.prettyPrinted] }
+            let data = try enc.encode(saved)
+            try data.write(to: url, options: .atomic)
+            LOG("Ticket session saved", ctx: ["file": url.lastPathComponent])
+        } catch {
+            NSSound.beep()
+            showAlert(title: "Save Failed", message: error.localizedDescription)
+            LOG("Ticket session save failed", ctx: ["error": error.localizedDescription])
+        }
+    }
+
+    private func loadTicketSessionFlow() {
+        // Confirm overwrite of current UI state
+        let warn = NSAlert()
+        warn.messageText = "Load Ticket Session?"
+        warn.informativeText = "Loading will overwrite the current session’s values. Continue?"
+        warn.alertStyle = .warning
+        warn.addButton(withTitle: "Load")
+        warn.addButton(withTitle: "Cancel")
+        guard warn.runModal() == .alertFirstButtonReturn else { return }
+
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = [.json]
+        panel.directoryURL = AppPaths.sessions
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+
+        do {
+            let data = try Data(contentsOf: url)
+            let dec = JSONDecoder()
+            let loaded = try dec.decode(SavedTicketSession.self, from: data)
+
+            // Restore session name and optional link
+            sessions.renameCurrent(to: loaded.sessionName)
+            if let link = loaded.sessionLink, !link.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                sessions.sessionLinks[sessions.current] = link
+            } else {
+                sessions.sessionLinks.removeValue(forKey: sessions.current)
+            }
+
+            // Restore static fields
+            orgId = loaded.staticFields.orgId
+            acctId = loaded.staticFields.acctId
+            mysqlDb = loaded.staticFields.mysqlDb
+            companyLabel = loaded.staticFields.companyLabel
+            sessionStaticFields[sessions.current] = (orgId, acctId, mysqlDb, companyLabel)
+
+            // Restore placeholders
+            for (k, v) in loaded.placeholders { sessions.setValue(v, for: k) }
+
+            // Restore notes
+            sessions.sessionNotes[sessions.current] = loaded.notes
+
+            // Try to restore template
+            var matched: TemplateItem? = nil
+            if let tid = loaded.templateId {
+                matched = templates.templates.first(where: { "\($0.id)" == tid })
+            }
+            if matched == nil, let tname = loaded.templateName {
+                matched = templates.templates.first(where: { $0.name == tname })
+            }
+            if let t = matched {
+                loadTemplate(t)
+                if !loaded.dbTables.isEmpty {
+                    dbTablesStore.setWorkingSet(loaded.dbTables, for: sessions.current, template: t)
+                }
+            } else {
+                LOG("Saved session template not found; restored values only", ctx: ["templateName": loaded.templateName ?? "?"])
+            }
+
+            // Refresh populated SQL with the restored values
+            populateQuery()
+            LOG("Ticket session loaded", ctx: ["file": url.lastPathComponent])
+        } catch {
+            NSSound.beep()
+            showAlert(title: "Load Failed", message: error.localizedDescription)
+            LOG("Ticket session load failed", ctx: ["error": error.localizedDescription])
+        }
+    }
+
+    private func openSessionsFolderFlow() {
+        let fm = FileManager.default
+        try? fm.createDirectory(at: AppPaths.sessions, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(AppPaths.sessions)
+        LOG("Open sessions folder")
+    }
+
+    private func promptClearCurrentSession() {
+        let hasNotes = !(sessions.sessionNotes[sessions.current] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        let alert = NSAlert()
+        alert.messageText = "Save this session before clearing?"
+        alert.informativeText = "Session #\(sessions.current.rawValue) will be reset."
+        alert.alertStyle = .informational
+        if hasNotes {
+            // Default = Yes (Save) when notes exist
+            alert.addButton(withTitle: "Yes, Save")
+            alert.addButton(withTitle: "No, Don’t Save")
+            alert.addButton(withTitle: "Cancel")
+        } else {
+            // Default = No (Don’t Save) otherwise
+            alert.addButton(withTitle: "No, Don’t Save")
+            alert.addButton(withTitle: "Yes, Save")
+            alert.addButton(withTitle: "Cancel")
+        }
+        let response = alert.runModal()
+        if hasNotes {
+            switch response {
+            case .alertFirstButtonReturn: // Yes, Save
+                saveTicketSessionFlow()
+                fallthrough
+            case .alertSecondButtonReturn: // No, Don’t Save
+                sessions.clearAllFieldsForCurrentSession()
+                sessionStaticFields[sessions.current] = ("", "", "", "")
+                LOG("Session cleared via prompt", ctx: ["session": "\(sessions.current.rawValue)"])
+            default:
+                return
+            }
+        } else {
+            switch response {
+            case .alertFirstButtonReturn: // No, Don’t Save
+                sessions.clearAllFieldsForCurrentSession()
+                sessionStaticFields[sessions.current] = ("", "", "", "")
+                LOG("Session cleared via prompt", ctx: ["session": "\(sessions.current.rawValue)"])
+            case .alertSecondButtonReturn: // Yes, Save
+                saveTicketSessionFlow()
+                sessions.clearAllFieldsForCurrentSession()
+                sessionStaticFields[sessions.current] = ("", "", "", "")
+                LOG("Session cleared after save via prompt", ctx: ["session": "\(sessions.current.rawValue)"])
+            default:
+                return
+            }
+        }
+    }
+
+    // A tiny invisible view that listens for the menu notifications
+    private struct TicketSessionNotificationBridge: View {
+        var onSave: () -> Void
+        var onLoad: () -> Void
+        var onOpen: () -> Void
+        var body: some View {
+            Color.clear
+                .onReceive(NotificationCenter.default.publisher(for: .saveTicketSession)) { _ in onSave() }
+                .onReceive(NotificationCenter.default.publisher(for: .loadTicketSession)) { _ in onLoad() }
+                .onReceive(NotificationCenter.default.publisher(for: .openSessionsFolder)) { _ in onOpen() }
+        }
     }
     
     private func createNewTemplateFlow() {

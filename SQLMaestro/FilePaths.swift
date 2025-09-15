@@ -12,11 +12,14 @@ enum AppPaths {
     static let orgMysqlMap = mappings.appendingPathComponent("org_mysql_map.json", conformingTo: .json)
     static let mysqlHostsMap = mappings.appendingPathComponent("mysql_hosts_map.json", conformingTo: .json)
     static let userConfig = mappings.appendingPathComponent("user_config.json", conformingTo: .json)
-
+    static let sessions = appSupport.appendingPathComponent("sessions", isDirectory: true)
+    
     static func ensureAll() {
         [appSupport, templates, backups, backupZips, logs, mappings].forEach { url in
             try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         }
+        // Ensure sessions directory exists for saved ticket sessions
+        try? FileManager.default.createDirectory(at: sessions, withIntermediateDirectories: true)
         // Seed example template once
         let example = templates.appendingPathComponent("example.sql")
         if !FileManager.default.fileExists(atPath: example.path) {
