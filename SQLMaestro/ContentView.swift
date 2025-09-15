@@ -1941,6 +1941,22 @@ struct ContentView: View {
             }
             // Invisible bridge view to receive menu notifications and register KB shortcuts for Help sheet
             Color.clear.frame(width: 0, height: 0)
+                .onAppear {
+                    kbToggleNotesMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                        if event.modifierFlags.contains(.command),
+                           event.charactersIgnoringModifiers?.lowercased() == "e" {
+                            toggleSessionNotesEditMode()
+                            return nil // swallow the event
+                        }
+                        return event
+                    }
+                }
+                .onDisappear {
+                    if let mon = kbToggleNotesMonitor {
+                        NSEvent.removeMonitor(mon)
+                        kbToggleNotesMonitor = nil
+                    }
+                }
                 .background(TicketSessionNotificationBridge(
                     onSave: { saveTicketSessionFlow() },
                     onLoad: { loadTicketSessionFlow() },
@@ -1952,6 +1968,8 @@ struct ContentView: View {
                             .registerShortcut(name: "Save Ticket Session…", keyLabel: "S", modifiers: [.command], scope: "Ticket Sessions")
                         Color.clear
                             .registerShortcut(name: "Load Ticket Session…", keyLabel: "L", modifiers: [.command], scope: "Ticket Sessions")
+                        Color.clear
+                            .registerShortcut(name: "Toggle Session Notes Edit Mode", keyLabel: "E", modifiers: [.command], scope: "Session Notes")
                     }
                 )
         }
@@ -2188,7 +2206,14 @@ struct ContentView: View {
     @State private var notesIsEditing: Bool = true
     @State private var showNotesToolbar: Bool = true
     @State private var showNotesSidebar: Bool = true
+    @State private var kbToggleNotesMonitor: Any? = nil
+    
 
+    private func toggleSessionNotesEditMode() {
+        notesIsEditing.toggle()
+        LOG("KB: Toggle Session Notes Edit Mode", ctx: ["isEditing": "\(notesIsEditing)"])
+    }
+    
     private func promptRename(for s: TicketSession) {
         let alert = NSAlert()
         alert.messageText = "Rename Session #\(s.rawValue)"
@@ -3657,173 +3682,6 @@ struct SessionNotesInline: View {
     @Binding var showToolbar: Bool
 
     @State private var localText: String = ""
-    @State private var keyMonitor: Any? = nil
-
-    // Reuse minimal helpers to wrap the current selection
-    private func activeTextView() -> NSTextView? {
-        if let tv = NSApp.keyWindow?.firstResponder as? NSTextView { return tv }
-        guard let contentView = NSApp.keyWindow?.contentView else { return nil }
-        func find(_ v: NSView) -> NSTextView? {
-            if let tv = v as? NSTextView { return tv }
-            for sub in v.subviews { if let f = find(sub) { return f } }
-            return nil
-        }
-        return find(contentView)
-    }
-    private func wrapSelection(prefix: String, suffix: String? = nil) {
-        guard let tv = activeTextView() else { return }
-        var sel = tv.selectedRange()
-        let ns = localText as NSString
-        if sel.location == NSNotFound { sel = NSRange(location: ns.length, length: 0) }
-        let safeLoc = max(0, min(sel.location, ns.length))
-        let safeLen = max(0, min(sel.length, ns.length - safeLoc))
-        let range = NSRange(location: safeLoc, length: safeLen)
-        let suf = suffix ?? prefix
-        let selected = ns.substring(with: range)
-        let updated = ns.replacingCharacters(in: range, with: prefix + selected + suf)
-        localText = updated
-        text = updated
-        DispatchQueue.main.async {
-            tv.string = updated
-            let newCaret = NSRange(location: range.location + (prefix as NSString).length + (selected as NSString).length + (suf as NSString).length, length: 0)
-            tv.setSelectedRange(newCaret)
-            tv.scrollRangeToVisible(newCaret)
-        }
-    }
-    private func toggleInlineCode() { wrapSelection(prefix: "`") }
-    private func toggleBold() { wrapSelection(prefix: "**") }
-    private func toggleItalic() { wrapSelection(prefix: "*") }
-    private func toggleUnderline() { wrapSelection(prefix: "<u>", suffix: "</u>") }
-    private func toggleCodeBlock() { wrapSelection(prefix: "\n```\n", suffix: "\n```\n") }
-    private func insertHR() { wrapSelection(prefix: "\n---\n", suffix: "") }
-
-    private func applyHeading(_ level: Int) {
-        guard let tv = activeTextView() else { return }
-        var sel = tv.selectedRange()
-        let ns = localText as NSString
-        if sel.location == NSNotFound { sel = NSRange(location: ns.length, length: 0) }
-        let lineRange = ns.lineRange(for: sel)
-        let segment = ns.substring(with: lineRange)
-        let prefix = String(repeating: "#", count: max(1, min(6, level))) + " "
-        let updated = prefix + segment.trimmingCharacters(in: .whitespaces)
-        let newString = ns.replacingCharacters(in: lineRange, with: updated)
-        localText = newString
-        text = newString
-        tv.string = newString
-    }
-
-    private func applyList(prefix: String) {
-        guard let tv = activeTextView() else { return }
-        var sel = tv.selectedRange()
-        let ns = localText as NSString
-        if sel.location == NSNotFound { sel = NSRange(location: ns.length, length: 0) }
-        let lineRange = ns.lineRange(for: sel)
-        let segment = ns.substring(with: lineRange)
-        let lines = segment.split(separator: "\n", omittingEmptySubsequences: false)
-        let transformed = lines.map { l -> String in
-            let s = String(l)
-            if s.trimmingCharacters(in: .whitespaces).isEmpty { return s }
-            return prefix + s
-        }.joined(separator: "\n")
-        let newString = ns.replacingCharacters(in: lineRange, with: transformed)
-        localText = newString
-        text = newString
-        tv.string = newString
-    }
-
-    private func insertLink() {
-        guard let tv = activeTextView() else { return }
-        var sel = tv.selectedRange()
-        let ns = localText as NSString
-        if sel.location == NSNotFound { sel = NSRange(location: ns.length, length: 0) }
-        let selected = ns.substring(with: sel)
-        let textLabel = selected.isEmpty ? "link" : selected
-
-        let alert = NSAlert()
-        alert.messageText = "Insert Link"
-        alert.informativeText = "Enter a URL"
-        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 22))
-        input.placeholderString = "https://…"
-        alert.accessoryView = input
-        alert.addButton(withTitle: "Insert")
-        alert.addButton(withTitle: "Cancel")
-        guard alert.runModal() == .alertFirstButtonReturn else { return }
-        let url = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        let replacement = "[\(textLabel)](\(url))"
-        let updated = ns.replacingCharacters(in: sel, with: replacement)
-        localText = updated
-        text = updated
-        tv.string = updated
-    }
-    private var preview: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 4) {
-                let lines = localText.components(separatedBy: .newlines)
-                ForEach(Array(lines.enumerated()), id: \.offset) { index, line in
-                    HStack {
-                        Text(line.isEmpty ? " " : line)
-                            .font(.system(size: fontSize))
-                            .textSelection(.enabled)
-                            .multilineTextAlignment(.leading)
-                        Spacer()
-                    }
-                }
-            }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .topLeading)
-        }
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Theme.grayBG.opacity(0.25))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
-                )
-        )
-        .frame(maxWidth: .infinity, minHeight: 160, alignment: .topLeading)
-    }
-    
-    private var editor: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            if showToolbar {
-                HStack(alignment: .center, spacing: 8) {
-                    Button { toggleBold() }       label: { Image(systemName: "bold") }
-                    Button { toggleItalic() }     label: { Image(systemName: "italic") }
-                    Button { toggleUnderline() }  label: { Image(systemName: "underline") }
-                    Button { insertLink() }       label: { Image(systemName: "link") }
-                    Divider().frame(height: 16)
-                    Button { toggleInlineCode() } label: { Image(systemName: "chevron.left.forwardslash.chevron.right") }
-                    Button { toggleCodeBlock() }  label: { Image(systemName: "square.grid.3x3") }
-                    Button { insertHR() }         label: { Image(systemName: "scribble.variable") }
-                    Divider().frame(height: 16)
-                    Button { applyHeading(1) }    label: { Text("H1").font(.system(size: fontSize - 3, weight: .semibold)) }
-                    Button { applyHeading(2) }    label: { Text("H2").font(.system(size: fontSize - 3, weight: .semibold)) }
-                    Button { applyHeading(3) }    label: { Text("H3").font(.system(size: fontSize - 3, weight: .semibold)) }
-                    Divider().frame(height: 16)
-                    Button { applyList(prefix: "- ") }  label: { Image(systemName: "list.bullet") }
-                    Button { applyList(prefix: "1. ") } label: { Image(systemName: "list.number") }
-                }
-                .controlSize(.small)
-                .font(.system(size: fontSize - 2))
-                .padding(.vertical, 6)
-                .padding(.horizontal, 8)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Theme.grayBG.opacity(0.55))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
-                )
-                .fixedSize(horizontal: false, vertical: true)
-            }
-            TextEditor(text: $localText)
-                .font(.system(size: fontSize))
-                .frame(maxWidth: .infinity, minHeight: 160)
-                .padding(4)
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.aqua.opacity(0.25)))
-        }
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -3838,47 +3696,48 @@ struct SessionNotesInline: View {
                 }
                 .pickerStyle(.segmented)
                 .frame(width: 160)
-                Button { showToolbar.toggle() } label: { Image(systemName: "textformat") }
-                    .buttonStyle(.bordered)
-                    .help("Show/Hide formatting toolbar")
             }
-            if isEditing { editor } else { preview }
+            
+            if isEditing {
+                // Simple, reliable text editor
+                TextEditor(text: $localText)
+                    .font(.system(size: fontSize))
+                    .frame(maxWidth: .infinity, minHeight: 160)
+                    .padding(4)
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.aqua.opacity(0.25)))
+            } else {
+                // Simple preview that preserves line breaks
+                ScrollView {
+                    Text(localText.isEmpty ? "No notes yet..." : localText)
+                        .font(.system(size: fontSize))
+                        .textSelection(.enabled)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                        .padding(10)
+                }
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Theme.grayBG.opacity(0.25))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
+                        )
+                )
+                .frame(maxWidth: .infinity, minHeight: 160, alignment: .topLeading)
+            }
         }
         .padding(6)
         .frame(maxWidth: .infinity)
         .onAppear {
             self.localText = text
-            // Install local key monitor so ⌘B/⌘I/⌘U/⌘K work even when the TextEditor is focused
-            self.keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-                // Only when editing notes and the first responder is a text view
-                guard isEditing, NSApp.keyWindow?.firstResponder is NSTextView else { return event }
-                let mods = event.modifierFlags
-                // We want plain Command shortcuts (no Option or Control)
-                guard mods.contains(.command), !mods.contains(.option), !mods.contains(.control) else { return event }
-                guard let chars = event.charactersIgnoringModifiers?.lowercased() else { return event }
-                switch chars {
-                case "b": toggleBold();      return nil
-                case "i": toggleItalic();    return nil
-                case "u": toggleUnderline(); return nil
-                case "k": insertLink();      return nil
-                default:  return event
-                }
-            }
-        }
-        .onDisappear {
-            if let m = keyMonitor { NSEvent.removeMonitor(m); keyMonitor = nil }
         }
         .onChange(of: localText) { _, newVal in
             self.text = newVal
         }
         .onChange(of: session) { _, _ in
-            // Active session switched – refresh the local editor buffer from the new bound text
             self.localText = text
         }
         .onChange(of: text) { _, newVal in
-            // Underlying bound text changed externally (e.g., Clear Session) – mirror into local buffer
             self.localText = newVal
         }
     }
 }
-
