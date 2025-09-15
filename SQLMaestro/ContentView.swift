@@ -1816,23 +1816,70 @@ struct ContentView: View {
     // MARK: – Output area
     private var outputView: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Output SQL")
-                .font(.system(size: fontSize + 4, weight: .semibold))
-                .foregroundStyle(Theme.aqua)
-            TextEditor(text: $populatedSQL)
-                .font(.system(size: fontSize, weight: .regular, design: .monospaced))
-                .frame(minHeight: 160)
-                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.aqua.opacity(0.3)))
-                .disableAutocorrection(true)
-                .autocorrectionDisabled(true)
-                .onReceive(NotificationCenter.default.publisher(for: NSText.didBeginEditingNotification)) { _ in
-                    if let textView = NSApp.keyWindow?.firstResponder as? NSTextView {
-                        textView.isAutomaticQuoteSubstitutionEnabled = false
-                        textView.isAutomaticDashSubstitutionEnabled = false
-                        textView.isAutomaticTextReplacementEnabled = false
-                    }
+            HStack(alignment: .firstTextBaseline) {
+                Text("Output SQL")
+                    .font(.system(size: fontSize + 4, weight: .semibold))
+                    .foregroundStyle(Theme.aqua)
+                Spacer()
+                Button {
+                    withAnimation { showNotesSidebar.toggle() }
+                } label: {
+                    Label(showNotesSidebar ? "Hide Notes" : "Show Notes", systemImage: "note.text")
                 }
+                .buttonStyle(.bordered)
+                .tint(Theme.purple)
+                .font(.system(size: fontSize - 1))
+                .help("Toggle Session Notes sidebar")
+            }
+            if showNotesSidebar {
+                HSplitView {
+                    // Left: Output SQL
+                    TextEditor(text: $populatedSQL)
+                        .font(.system(size: fontSize, weight: .regular, design: .monospaced))
+                        .frame(minHeight: 160)
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.aqua.opacity(0.3)))
+                        .disableAutocorrection(true)
+                        .autocorrectionDisabled(true)
+                        .onReceive(NotificationCenter.default.publisher(for: NSText.didBeginEditingNotification)) { _ in
+                            if let textView = NSApp.keyWindow?.firstResponder as? NSTextView {
+                                textView.isAutomaticQuoteSubstitutionEnabled = false
+                                textView.isAutomaticDashSubstitutionEnabled = false
+                                textView.isAutomaticTextReplacementEnabled = false
+                            }
+                        }
+                        .frame(minWidth: 400)
+
+                    // Right: Session Notes (inline)
+                    SessionNotesInline(
+                        fontSize: fontSize,
+                        text: Binding(
+                            get: { sessions.sessionNotes[sessions.current] ?? "" },
+                            set: { sessions.sessionNotes[sessions.current] = $0 }
+                        ),
+                        isEditing: $notesIsEditing,
+                        showToolbar: $showNotesToolbar
+                    )
+                    .frame(minWidth: 320)
+                    .layoutPriority(1)
+                }
+                .frame(minHeight: 160)
+            } else {
+                TextEditor(text: $populatedSQL)
+                    .font(.system(size: fontSize, weight: .regular, design: .monospaced))
+                    .frame(minHeight: 160)
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.aqua.opacity(0.3)))
+                    .disableAutocorrection(true)
+                    .autocorrectionDisabled(true)
+                    .onReceive(NotificationCenter.default.publisher(for: NSText.didBeginEditingNotification)) { _ in
+                        if let textView = NSApp.keyWindow?.firstResponder as? NSTextView {
+                            textView.isAutomaticQuoteSubstitutionEnabled = false
+                            textView.isAutomaticDashSubstitutionEnabled = false
+                            textView.isAutomaticTextReplacementEnabled = false
+                        }
+                    }
+            }
         }
+
     }
     
     // Session buttons with proper functionality
@@ -1844,6 +1891,17 @@ struct ContentView: View {
                 .lineLimit(1)
                 .fixedSize(horizontal: true, vertical: false)
                 .frame(minWidth: 70, alignment: .leading)
+            if let link = sessions.sessionLinks[sessions.current], !link.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Button {
+                    openCurrentSessionLink()
+                } label: {
+                    Image(systemName: "link")
+                        .font(.system(size: fontSize - 1, weight: .medium))
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(Theme.aqua)
+                .help("Open linked ticket: \(link)")
+            }
             ForEach(TicketSession.allCases, id: \.self) { s in
                 Button(action: {
                     switchToSession(s)
@@ -1860,6 +1918,11 @@ struct ContentView: View {
                 .registerShortcut(name: "Switch to Session #\(s.rawValue)", keyLabel: "\(s.rawValue)", modifiers: [.command], scope: "Sessions")
                 .contextMenu {
                     Button("Rename…") { promptRename(for: s) }
+                    Button("Link to Ticket…") { promptLink(for: s) }
+                    if let existing = sessions.sessionLinks[s], !existing.isEmpty {
+                        Button("Clear Link") { sessions.sessionLinks.removeValue(forKey: s) }
+                    }
+                    Divider()
                     if sessions.current == s {
                         Button("Clear This Session") {
                             promptClearCurrentSession()
@@ -2116,6 +2179,11 @@ struct ContentView: View {
         }
     }
     
+    @State private var isNotesSheetOpen: Bool = false
+    @State private var notesIsEditing: Bool = false
+    @State private var showNotesToolbar: Bool = false
+    @State private var showNotesSidebar: Bool = true
+
     private func promptRename(for s: TicketSession) {
         let alert = NSAlert()
         alert.messageText = "Rename Session #\(s.rawValue)"
@@ -2144,6 +2212,35 @@ struct ContentView: View {
         alert.addButton(withTitle: "Cancel")
         let result = alert.runModal()
         return result == .alertFirstButtonReturn ? input.stringValue : nil
+    }
+
+    private func promptLink(for s: TicketSession) {
+        let current = sessions.sessionLinks[s] ?? ""
+        let alert = NSAlert()
+        alert.messageText = "Link to Ticket"
+        alert.informativeText = "Paste a URL to associate with Session #\(s.rawValue). Leave empty to clear."
+        alert.alertStyle = .informational
+        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 320, height: 24))
+        input.placeholderString = "https://…"
+        input.stringValue = current
+        alert.accessoryView = input
+        alert.addButton(withTitle: "Save Link")
+        alert.addButton(withTitle: "Cancel")
+        let result = alert.runModal()
+        guard result == .alertFirstButtonReturn else { return }
+        let value = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.isEmpty { sessions.sessionLinks.removeValue(forKey: s) }
+        else { sessions.sessionLinks[s] = value }
+    }
+
+    private func openCurrentSessionLink() {
+        guard let link = sessions.sessionLinks[sessions.current]?.trimmingCharacters(in: .whitespacesAndNewlines), !link.isEmpty else { return }
+        if let url = URL(string: link) {
+            NSWorkspace.shared.open(url)
+            LOG("Open session link", ctx: ["url": link])
+        } else {
+            NSSound.beep()
+        }
     }
 
     // MARK: – Ticket Session Save/Load/Open
@@ -3299,6 +3396,392 @@ struct ContentView: View {
                 saveError = "Failed to save settings: \(error.localizedDescription)"
                 LOG("Database settings save failed", ctx: ["error": error.localizedDescription])
             }
+        }
+    }
+}
+
+
+// MARK: – Session Notes Sheet (Markdown editor + preview)
+struct SessionNotesSheet: View {
+    var fontSize: CGFloat
+    @Binding var text: String
+    @Binding var isEditing: Bool
+    @Binding var showToolbar: Bool
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var localText: String = ""
+
+    // Find the NSTextView backing the TextEditor so we can wrap selection.
+    private func activeTextView() -> NSTextView? {
+        if let tv = NSApp.keyWindow?.firstResponder as? NSTextView { return tv }
+        guard let contentView = NSApp.keyWindow?.contentView else { return nil }
+        func find(_ v: NSView) -> NSTextView? {
+            if let tv = v as? NSTextView { return tv }
+            for sub in v.subviews { if let f = find(sub) { return f } }
+            return nil
+        }
+        return find(contentView)
+    }
+
+    private func wrapSelection(prefix: String, suffix: String? = nil) {
+        guard let tv = activeTextView() else { return }
+        var sel = tv.selectedRange()
+        let ns = localText as NSString
+        if sel.location == NSNotFound { sel = NSRange(location: ns.length, length: 0) }
+        let safeLoc = max(0, min(sel.location, ns.length))
+        let safeLen = max(0, min(sel.length, ns.length - safeLoc))
+        let range = NSRange(location: safeLoc, length: safeLen)
+        let suf = suffix ?? prefix
+        let selected = ns.substring(with: range)
+        let updated = ns.replacingCharacters(in: range, with: prefix + selected + suf)
+        localText = updated
+        text = updated
+        DispatchQueue.main.async {
+            tv.string = updated
+            let newCaret = NSRange(location: range.location + (prefix as NSString).length + (selected as NSString).length + (suf as NSString).length, length: 0)
+            tv.setSelectedRange(newCaret)
+            tv.scrollRangeToVisible(newCaret)
+        }
+    }
+
+    private func toggleInlineCode() { wrapSelection(prefix: "`") }
+    private func toggleBold() { wrapSelection(prefix: "**") }
+    private func toggleItalic() { wrapSelection(prefix: "*") }
+    private func toggleUnderline() { wrapSelection(prefix: "<u>", suffix: "</u>") }
+    private func toggleCodeBlock() { wrapSelection(prefix: "\n```\n", suffix: "\n```\n") }
+    private func insertHR() { wrapSelection(prefix: "\n---\n", suffix: "") }
+
+    private func applyHeading(_ level: Int) {
+        guard let tv = activeTextView() else { return }
+        var sel = tv.selectedRange()
+        let ns = localText as NSString
+        if sel.location == NSNotFound { sel = NSRange(location: ns.length, length: 0) }
+        let lineRange = ns.lineRange(for: sel)
+        let segment = ns.substring(with: lineRange)
+        let prefix = String(repeating: "#", count: max(1, min(6, level))) + " "
+        let updated = prefix + segment.trimmingCharacters(in: .whitespaces)
+        let newString = ns.replacingCharacters(in: lineRange, with: updated)
+        localText = newString
+        text = newString
+        tv.string = newString
+    }
+
+    private func applyList(prefix: String) {
+        guard let tv = activeTextView() else { return }
+        var sel = tv.selectedRange()
+        let ns = localText as NSString
+        if sel.location == NSNotFound { sel = NSRange(location: ns.length, length: 0) }
+        let lineRange = ns.lineRange(for: sel)
+        let segment = ns.substring(with: lineRange)
+        let lines = segment.split(separator: "\n", omittingEmptySubsequences: false)
+        let transformed = lines.map { l -> String in
+            let s = String(l)
+            if s.trimmingCharacters(in: .whitespaces).isEmpty { return s }
+            return prefix + s
+        }.joined(separator: "\n")
+        let newString = ns.replacingCharacters(in: lineRange, with: transformed)
+        localText = newString
+        text = newString
+        tv.string = newString
+    }
+
+    private func insertLink() {
+        guard let tv = activeTextView() else { return }
+        var sel = tv.selectedRange()
+        let ns = localText as NSString
+        if sel.location == NSNotFound { sel = NSRange(location: ns.length, length: 0) }
+        let selected = ns.substring(with: sel)
+        let textLabel = selected.isEmpty ? "link" : selected
+
+        let alert = NSAlert()
+        alert.messageText = "Insert Link"
+        alert.informativeText = "Enter a URL"
+        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
+        input.placeholderString = "https://…"
+        alert.accessoryView = input
+        alert.addButton(withTitle: "Insert")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let url = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let replacement = "[\(textLabel)](\(url))"
+        let updated = ns.replacingCharacters(in: sel, with: replacement)
+        localText = updated
+        text = updated
+        tv.string = updated
+    }
+
+    private var previewView: some View {
+        ScrollView {
+            let rendered: Text = {
+                if let attr = try? AttributedString(markdown: localText) {
+                    return Text(attr)
+                } else {
+                    return Text(localText)
+                }
+            }()
+            rendered
+                .font(.system(size: fontSize))
+                .textSelection(.enabled)
+                .padding(14)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Theme.grayBG.opacity(0.25))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
+                )
+        )
+    }
+
+    private var editorView: some View {
+        VStack(spacing: 8) {
+            if showToolbar {
+                HStack(spacing: 8) {
+                    Button { toggleBold() } label: { Image(systemName: "bold") }.keyboardShortcut("b", modifiers: [.command])
+                    Button { toggleItalic() } label: { Image(systemName: "italic") }.keyboardShortcut("i", modifiers: [.command])
+                    Button { toggleUnderline() } label: { Image(systemName: "underline") }.keyboardShortcut("u", modifiers: [.command])
+                    Button { insertLink() } label: { Image(systemName: "link") }.keyboardShortcut("k", modifiers: [.command])
+                    Divider()
+                    Button { toggleInlineCode() } label: { Image(systemName: "chevron.left.forwardslash.chevron.right") }
+                    Button { toggleCodeBlock() } label: { Image(systemName: "square.grid.3x3") }
+                    Button { insertHR() } label: { Image(systemName: "scribble.variable") }
+                    Divider()
+                    Button { applyHeading(1) } label: { Text("H1") }
+                    Button { applyHeading(2) } label: { Text("H2") }
+                    Button { applyHeading(3) } label: { Text("H3") }
+                    Divider()
+                    Button { applyList(prefix: "- ") } label: { Image(systemName: "list.bullet") }
+                    Button { applyList(prefix: "1. ") } label: { Image(systemName: "list.number") }
+                }
+                .font(.system(size: fontSize - 1))
+                .padding(6)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Theme.grayBG.opacity(0.6))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
+                        )
+                )
+            }
+            TextEditor(text: $localText)
+                .font(.system(size: fontSize))
+                .frame(minHeight: 360)
+                .padding(6)
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.aqua.opacity(0.25)))
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
+                Text("Session Notes")
+                    .font(.system(size: fontSize + 4, weight: .semibold))
+                    .foregroundStyle(Theme.aqua)
+                Spacer()
+                Picker("Mode", selection: $isEditing) {
+                    Text("Preview").tag(false)
+                    Text("Edit").tag(true)
+                }
+                .pickerStyle(.segmented)
+                Toggle(isOn: $showToolbar) {
+                    Image(systemName: "textformat")
+                }
+                .toggleStyle(.switch)
+                .help("Show/Hide formatting toolbar")
+                Button("Close") { dismiss() }
+                    .buttonStyle(.bordered)
+            }
+
+            if isEditing { editorView } else { previewView }
+
+            HStack {
+                Spacer()
+                Text("Shortcuts: ⌘B Bold • ⌘I Italic • ⌘U Underline • ⌘K Link")
+                    .font(.system(size: fontSize - 2))
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(14)
+        .onAppear {
+            self.localText = text
+        }
+        .onChange(of: localText) { _, newVal in
+            self.text = newVal
+        }
+    }
+}
+// MARK: – Session Notes Inline (sidebar)
+struct SessionNotesInline: View {
+    var fontSize: CGFloat
+    @Binding var text: String
+    @Binding var isEditing: Bool
+    @Binding var showToolbar: Bool
+
+    @State private var localText: String = ""
+    @State private var keyMonitor: Any? = nil
+
+    // Reuse minimal helpers to wrap the current selection
+    private func activeTextView() -> NSTextView? {
+        if let tv = NSApp.keyWindow?.firstResponder as? NSTextView { return tv }
+        guard let contentView = NSApp.keyWindow?.contentView else { return nil }
+        func find(_ v: NSView) -> NSTextView? {
+            if let tv = v as? NSTextView { return tv }
+            for sub in v.subviews { if let f = find(sub) { return f } }
+            return nil
+        }
+        return find(contentView)
+    }
+    private func wrapSelection(prefix: String, suffix: String? = nil) {
+        guard let tv = activeTextView() else { return }
+        var sel = tv.selectedRange()
+        let ns = localText as NSString
+        if sel.location == NSNotFound { sel = NSRange(location: ns.length, length: 0) }
+        let safeLoc = max(0, min(sel.location, ns.length))
+        let safeLen = max(0, min(sel.length, ns.length - safeLoc))
+        let range = NSRange(location: safeLoc, length: safeLen)
+        let suf = suffix ?? prefix
+        let selected = ns.substring(with: range)
+        let updated = ns.replacingCharacters(in: range, with: prefix + selected + suf)
+        localText = updated
+        text = updated
+        DispatchQueue.main.async {
+            tv.string = updated
+            let newCaret = NSRange(location: range.location + (prefix as NSString).length + (selected as NSString).length + (suf as NSString).length, length: 0)
+            tv.setSelectedRange(newCaret)
+            tv.scrollRangeToVisible(newCaret)
+        }
+    }
+    private func toggleInlineCode() { wrapSelection(prefix: "`") }
+    private func toggleBold() { wrapSelection(prefix: "**") }
+    private func toggleItalic() { wrapSelection(prefix: "*") }
+    private func toggleUnderline() { wrapSelection(prefix: "<u>", suffix: "</u>") }
+    private func toggleCodeBlock() { wrapSelection(prefix: "\n```\n", suffix: "\n```\n") }
+    private func insertHR() { wrapSelection(prefix: "\n---\n", suffix: "") }
+    private func insertLink() {
+        guard let tv = activeTextView() else { return }
+        var sel = tv.selectedRange()
+        let ns = localText as NSString
+        if sel.location == NSNotFound { sel = NSRange(location: ns.length, length: 0) }
+        let selected = ns.substring(with: sel)
+        let textLabel = selected.isEmpty ? "link" : selected
+
+        let alert = NSAlert()
+        alert.messageText = "Insert Link"
+        alert.informativeText = "Enter a URL"
+        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 280, height: 22))
+        input.placeholderString = "https://…"
+        alert.accessoryView = input
+        alert.addButton(withTitle: "Insert")
+        alert.addButton(withTitle: "Cancel")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        let url = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let replacement = "[\(textLabel)](\(url))"
+        let updated = ns.replacingCharacters(in: sel, with: replacement)
+        localText = updated
+        text = updated
+        tv.string = updated
+    }
+
+    private var preview: some View {
+        ScrollView {
+            let rendered: Text = (try? Text(AttributedString(markdown: localText))) ?? Text(localText)
+            rendered
+                .font(.system(size: fontSize))
+                .textSelection(.enabled)
+                .padding(10)
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Theme.grayBG.opacity(0.25))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
+                )
+        )
+        .frame(maxWidth: .infinity, minHeight: 160, alignment: .topLeading)
+    }
+    private var editor: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if showToolbar {
+                HStack(alignment: .center, spacing: 8) {
+                    Button { toggleBold() }       label: { Image(systemName: "bold") }
+                    Button { toggleItalic() }     label: { Image(systemName: "italic") }
+                    Button { toggleUnderline() }  label: { Image(systemName: "underline") }
+                    Button { insertLink() }       label: { Image(systemName: "link") }
+                    Divider().frame(height: 16)
+                    Button { toggleInlineCode() } label: { Image(systemName: "chevron.left.forwardslash.chevron.right") }
+                    Button { toggleCodeBlock() }  label: { Image(systemName: "square.grid.3x3") }
+                    Button { insertHR() }         label: { Image(systemName: "scribble.variable") }
+                }
+                .controlSize(.small)
+                .font(.system(size: fontSize - 2))
+                .padding(.vertical, 6)
+                .padding(.horizontal, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Theme.grayBG.opacity(0.55))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
+                )
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            TextEditor(text: $localText)
+                .font(.system(size: fontSize))
+                .frame(maxWidth: .infinity, minHeight: 160)
+                .padding(4)
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.aqua.opacity(0.25)))
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("Session Notes")
+                    .font(.system(size: fontSize - 1, weight: .semibold))
+                    .foregroundStyle(Theme.aqua)
+                Spacer()
+                Picker("Mode", selection: $isEditing) {
+                    Text("Preview").tag(false)
+                    Text("Edit").tag(true)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 160)
+                Button { showToolbar.toggle() } label: { Image(systemName: "textformat") }
+                    .buttonStyle(.bordered)
+                    .help("Show/Hide formatting toolbar")
+            }
+            if isEditing { editor } else { preview }
+        }
+        .padding(6)
+        .frame(maxWidth: .infinity)
+        .onAppear {
+            self.localText = text
+            // Install local key monitor so ⌘B/⌘I/⌘U/⌘K work even when the TextEditor is focused
+            self.keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                // Only when editing notes and the first responder is a text view
+                guard isEditing, NSApp.keyWindow?.firstResponder is NSTextView else { return event }
+                let mods = event.modifierFlags
+                // We want plain Command shortcuts (no Option or Control)
+                guard mods.contains(.command), !mods.contains(.option), !mods.contains(.control) else { return event }
+                guard let chars = event.charactersIgnoringModifiers?.lowercased() else { return event }
+                switch chars {
+                case "b": toggleBold();      return nil
+                case "i": toggleItalic();    return nil
+                case "u": toggleUnderline(); return nil
+                case "k": insertLink();      return nil
+                default:  return event
+                }
+            }
+        }
+        .onDisappear {
+            if let m = keyMonitor { NSEvent.removeMonitor(m); keyMonitor = nil }
+        }
+        .onChange(of: localText) { _, newVal in
+            self.text = newVal
         }
     }
 }
