@@ -1852,9 +1852,11 @@ struct ContentView: View {
             }
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 6) {
                     ForEach(sessions.sessionAlternateFields[sessions.current] ?? [], id: \.id) { field in
-                        AlternateFieldRow(session: sessions.current, field: field, locked: $alternateFieldsLocked)
+                        AlternateFieldRow(session: sessions.current,
+                                          field: field,
+                                          locked: $alternateFieldsLocked)
                     }
 
                     if !alternateFieldsLocked {
@@ -1874,10 +1876,15 @@ struct ContentView: View {
                         .buttonStyle(.plain)
                         .padding(.top, 4)
                     } else {
-                        Text("Unlock to add or edit fields")
-                            .font(.system(size: fontSize - 3))
-                            .foregroundStyle(.secondary)
-                            .padding(.top, 4)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Unlock to add or edit fields")
+                                .font(.system(size: fontSize - 3))
+                                .foregroundStyle(.secondary)
+                            Text("💡 Double-click a value to use it in a dynamic field")
+                                .font(.system(size: fontSize - 3))
+                                .foregroundStyle(.secondary)
+                        }
+                        .padding(.top, 4)
                     }
                 }
                 .padding(6)
@@ -1903,7 +1910,6 @@ struct ContentView: View {
 
         @State private var editingName: String
         @State private var editingValue: String
-        @State private var flash = false
 
         init(session: TicketSession, field: AlternateField, locked: Binding<Bool>) {
             self.session = session
@@ -1914,38 +1920,36 @@ struct ContentView: View {
         }
 
         var body: some View {
-            HStack(spacing: 6) {
-                if locked {
-                    // 🔒 Locked mode
-                    Text(editingName.isEmpty ? "empty" : editingName)
-                        .font(.system(size: 13))
-                        .foregroundStyle(editingName.isEmpty ? .secondary : .primary)
-                        .textSelection(.enabled)
-                        .padding(.vertical, 6)
-                        .padding(.horizontal, 8)
-                        .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.1)))
+            if locked {
+                // 🔒 Locked mode: like dynamic fields (label above, value inside field)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(editingName.isEmpty ? "unnamed" : editingName)
+                        .font(.system(size: 11))
+                        .foregroundStyle(.secondary)
 
-                    Text(editingValue.isEmpty ? "empty" : editingValue)
-                        .font(.system(size: 13))
-                        .foregroundStyle(editingValue.isEmpty ? .secondary : .primary)
-                        .textSelection(.enabled)
-                        .padding(.vertical, 6)
-                        .padding(.horizontal, 8)
-                        .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.1)))
-                } else {
-                    // ✏️ Editable mode
+                    TextField("", text: .constant(editingValue))
+                        .textFieldStyle(.roundedBorder)
+                        .disabled(true)
+                        .onTapGesture(count: 2) {
+                            promptReplaceDynamicField()
+                        }
+                }
+                .padding(.vertical, 4)
+            } else {
+                // ✏️ Editable mode: name + value side by side
+                HStack(spacing: 6) {
                     TextField("Name", text: $editingName)
                         .textFieldStyle(.roundedBorder)
-                        .onSubmit { flashCommit() }
+                        .onSubmit { commitChanges() }
                         .onChange(of: editingName) { _, newVal in
-                            flashCommit(newName: newVal, newValue: editingValue)
+                            commitChanges(newName: newVal, newValue: editingValue)
                         }
 
                     TextField("Value", text: $editingValue)
                         .textFieldStyle(.roundedBorder)
-                        .onSubmit { flashCommit() }
+                        .onSubmit { commitChanges() }
                         .onChange(of: editingValue) { _, newVal in
-                            flashCommit(newName: editingName, newValue: newVal)
+                            commitChanges(newName: editingName, newValue: newVal)
                         }
 
                     Button {
@@ -1962,11 +1966,8 @@ struct ContentView: View {
                     }
                     .buttonStyle(.plain)
                 }
+                .padding(.vertical, 4)
             }
-            .padding(4)
-            .background(flash ? Theme.aqua.opacity(0.2) : Color.clear)
-            .cornerRadius(6)
-            .onDisappear { commitChanges() }
         }
 
         private func commitChanges(newName: String? = nil, newValue: String? = nil) {
@@ -1981,16 +1982,40 @@ struct ContentView: View {
             ])
         }
 
-        private func flashCommit(newName: String? = nil, newValue: String? = nil) {
-            commitChanges(newName: newName, newValue: newValue)
-            withAnimation(.easeInOut(duration: 0.2)) { flash = true }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
-                withAnimation(.easeInOut(duration: 0.2)) { flash = false }
+        /// Show prompt with dynamic placeholders, replace chosen one with this alternate’s value
+        private func promptReplaceDynamicField() {
+            guard let window = NSApp.keyWindow else { return }
+            let alert = NSAlert()
+            alert.messageText = "Replace Dynamic Field"
+            alert.informativeText = "Choose which dynamic field should be replaced by '\(editingValue)'."
+            alert.alertStyle = .informational
+
+            if let template = (window.contentView as? NSHostingView<ContentView>)?.rootView.selectedTemplate {
+                let staticKeys = ["Org-ID", "Acct-ID", "mysqlDb"]
+                let dynamicPlaceholders = template.placeholders.filter { !staticKeys.contains($0) }
+                for ph in dynamicPlaceholders {
+                    alert.addButton(withTitle: ph)
+                }
+            }
+            alert.addButton(withTitle: "Cancel")
+
+            let result = alert.runModal()
+            if result == .alertFirstButtonReturn {
+                if let chosen = alert.buttons.first?.title {
+                    var bucket = (window.contentView as? NSHostingView<ContentView>)?.rootView.draftDynamicValues[session] ?? [:]
+                    bucket[chosen] = editingValue
+                    (window.contentView as? NSHostingView<ContentView>)?.rootView.draftDynamicValues[session] = bucket
+                    LOG("Alternate field applied to dynamic", ctx: [
+                        "session": "\(session.rawValue)",
+                        "dynamicField": chosen,
+                        "value": editingValue
+                    ])
+                }
             }
         }
     }
     
-
+    
     
     // MARK: – Output area
     private var outputView: some View {
