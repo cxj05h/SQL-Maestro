@@ -2004,7 +2004,8 @@ struct ContentView: View {
         values.append(acctId)
         values.append(mysqlDb)
         var blockLines: [String] = []
-        blockLines.append("Ticket Session #\(sessions.current.rawValue)")
+        let sessionName = sessions.sessionNames[sessions.current] ?? "Session #\(sessions.current.rawValue)"
+        blockLines.append(sessionName)
         blockLines.append("Org-ID: \(orgId)")
         blockLines.append("Acct-ID: \(acctId)")
         blockLines.append("mysqlDb: \(mysqlDb)")
@@ -2425,9 +2426,10 @@ struct ContentView: View {
         let fm = FileManager.default
         try? fm.createDirectory(at: AppPaths.sessions, withIntermediateDirectories: true)
 
-        let defaultName = (sessions.sessionNames[sessions.current] ?? "session-\(sessions.current.rawValue)")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-        let suggested = defaultName.isEmpty ? "session-\(sessions.current.rawValue)" : defaultName
+        let defaultName = sessions.sessionNames[sessions.current]?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let suggested = (defaultName?.isEmpty == false)
+            ? defaultName!
+            : "Session #\(sessions.current.rawValue)"
         guard let rawName = promptForString(
             title: "Save Ticket Session",
             message: "Type a name for this ticket session file (no extension needed)",
