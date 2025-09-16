@@ -1820,6 +1820,78 @@ struct ContentView: View {
         )
     }
     
+    // MARK: – Alternate Fields pane (per-session, per-ticket)
+    private var alternateFieldsPane: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("Alternate Fields (per session)")
+                .font(.system(size: fontSize - 1, weight: .semibold))
+                .foregroundStyle(Theme.purple)
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(Array((sessions.sessionAlternateFields[sessions.current] ?? [:]).keys.sorted()), id: \.self) { key in
+                        HStack(spacing: 6) {
+                            TextField("Name",
+                                      text: Binding(
+                                        get: { key },
+                                        set: { newKey in
+                                            if var dict = sessions.sessionAlternateFields[sessions.current] {
+                                                let val = dict.removeValue(forKey: key) ?? ""
+                                                dict[newKey] = val
+                                                sessions.sessionAlternateFields[sessions.current] = dict
+                                            }
+                                        }
+                                      ))
+                                .textFieldStyle(.roundedBorder)
+
+                            TextField("Value",
+                                      text: Binding(
+                                        get: { sessions.sessionAlternateFields[sessions.current]?[key] ?? "" },
+                                        set: { newVal in
+                                            sessions.sessionAlternateFields[sessions.current]?[key] = newVal
+                                        }
+                                      ))
+                                .textFieldStyle(.roundedBorder)
+
+                            Button {
+                                sessions.sessionAlternateFields[sessions.current]?.removeValue(forKey: key)
+                            } label: {
+                                Image(systemName: "minus.circle")
+                                    .foregroundStyle(.red)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+
+                    Button {
+                        let newKey = "altField\(UUID().uuidString.prefix(4))"
+                        if sessions.sessionAlternateFields[sessions.current] == nil {
+                            sessions.sessionAlternateFields[sessions.current] = [:]
+                        }
+                        sessions.sessionAlternateFields[sessions.current]?[newKey] = ""
+                    } label: {
+                        HStack {
+                            Image(systemName: "plus.circle")
+                            Text("Add Alternate Field")
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 4)
+                }
+                .padding(6)
+            }
+            .frame(minHeight: 120, maxHeight: 180)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Theme.grayBG.opacity(0.25))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
+                    )
+            )
+        }
+    }
+    
     // MARK: – Output area
     private var outputView: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -2415,6 +2487,7 @@ struct ContentView: View {
         let placeholders: [String:String]
         let dbTables: [String]
         let notes: String
+        let alternateFields: [String: String]
     }
 
     private func sanitizeFileName(_ name: String) -> String {
@@ -2480,7 +2553,8 @@ struct ContentView: View {
             staticFields: sFields,
             placeholders: placeholders,
             dbTables: dbSet,
-            notes: sessions.sessionNotes[sessions.current] ?? ""
+            notes: sessions.sessionNotes[sessions.current] ?? "",
+            alternateFields: sessions.sessionAlternateFields[sessions.current] ?? [:]
         )
 
         do {
@@ -2539,6 +2613,8 @@ struct ContentView: View {
 
             // Restore notes
             sessions.sessionNotes[sessions.current] = loaded.notes
+            // Restore alternate fields
+            sessions.sessionAlternateFields[sessions.current] = loaded.alternateFields
 
             // Try to restore template
             var matched: TemplateItem? = nil

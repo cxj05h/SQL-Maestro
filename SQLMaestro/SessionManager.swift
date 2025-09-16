@@ -10,6 +10,8 @@ final class SessionManager: ObservableObject {
 
     @Published var current: TicketSession = .one
     @Published var sessionNames: [TicketSession: String] = [.one:"#1", .two:"#2", .three:"#3"]
+    // Per-session alternate fields (key-value pairs, stored per TicketSession)
+    @Published var sessionAlternateFields: [TicketSession:[String:String]] = [:]
 
     // per-session markdown notes (to be shown in the right-side notes panel)
     @Published var sessionNotes: [TicketSession: String] = [
