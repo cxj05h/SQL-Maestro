@@ -2572,11 +2572,26 @@ struct ContentView: View {
     }
     
     private func renameTemplateFlow(_ item: TemplateItem) {
-        guard let newName = promptForString(title: "Rename Template",
-                                            message: "Enter a new name for '\(item.name)'",
-                                            defaultValue: item.name)?
-            .trimmingCharacters(in: .whitespacesAndNewlines),
-              !newName.isEmpty else { return }
+        // 🔔 Warning before rename
+        let alert = NSAlert()
+        alert.messageText = "Renaming this template will reset its DB Tables."
+        alert.informativeText = "You will need to manually copy the saved values from the old JSON into the new template if needed."
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Continue")
+        alert.addButton(withTitle: "Cancel")
+        
+        let choice = alert.runModal()
+        if choice != .alertFirstButtonReturn {
+            return // User cancelled
+        }
+        
+        // Proceed with the rename
+        guard let newName = promptForString(
+            title: "Rename Template",
+            message: "Enter a new name for '\(item.name)'",
+            defaultValue: item.name
+        )?.trimmingCharacters(in: .whitespacesAndNewlines),
+        !newName.isEmpty else { return }
         
         do {
             let renamed = try templates.renameTemplate(item, to: newName)
@@ -2587,7 +2602,6 @@ struct ContentView: View {
             NSSound.beep()
         }
     }
-
 
     
     private func saveMapping() {
