@@ -1942,6 +1942,16 @@ struct ContentView: View {
                     }
                 }
             }
+            // New: Copy All Values button
+            Button {
+                copyAllValuesToClipboard()
+            } label: {
+                Label("Copy All Values", systemImage: "doc.on.clipboard")
+            }
+            .buttonStyle(.bordered)
+            .tint(Theme.aqua)
+            .font(.system(size: fontSize - 1))
+            .help("Copy Org-ID, Acct-ID, mysqlDb, and all template values to clipboard")
             // Invisible bridge view to receive menu notifications and register KB shortcuts for Help sheet
             Color.clear.frame(width: 0, height: 0)
                 .onAppear {
@@ -1975,6 +1985,40 @@ struct ContentView: View {
                             .registerShortcut(name: "Toggle Session Notes Edit Mode", keyLabel: "E", modifiers: [.command], scope: "Session Notes")
                     }
                 )
+        }
+    }
+
+    // Helper to copy all static and template values to clipboard
+    private func copyAllValuesToClipboard() {
+        var values: [String] = []
+        values.append(orgId)
+        values.append(acctId)
+        values.append(mysqlDb)
+        var blockLines: [String] = []
+        blockLines.append("Ticket Session #\(sessions.current.rawValue)")
+        blockLines.append("Org-ID: \(orgId)")
+        blockLines.append("Acct-ID: \(acctId)")
+        blockLines.append("mysqlDb: \(mysqlDb)")
+        if let t = selectedTemplate {
+            for ph in t.placeholders {
+                let val = sessions.value(for: ph) ?? ""
+                values.append(val)
+                blockLines.append("\(ph): \(val)")
+            }
+        }
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        // Add each value as a separate clipboard entry
+        for v in values {
+            pb.setString(v, forType: .string)
+        }
+        // Add the block string as a single clipboard entry
+        let block = blockLines.joined(separator: "\n")
+        pb.setString(block, forType: .string)
+        LOG("Copied all values to clipboard", ctx: ["count": "\(values.count)"])
+        withAnimation { toastCopied = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+            withAnimation { toastCopied = false }
         }
     }
     
