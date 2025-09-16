@@ -1254,12 +1254,15 @@ struct ContentView: View {
     
     
     private func openTemplateJSON(_ item: TemplateItem) {
-        let ext = item.url.pathExtension.lowercased()
-        if ext == "json" {
-            NSWorkspace.shared.open(item.url)
-            LOG("Open JSON", ctx: ["file": item.url.lastPathComponent])
+        // Sidecar file naming convention: "<base>.tables.json"
+        let jsonURL = item.url.deletingPathExtension()
+            .appendingPathExtension("tables.json")
+        
+        if FileManager.default.fileExists(atPath: jsonURL.path) {
+            openInVSCode(jsonURL)
+            LOG("Open JSON", ctx: ["file": jsonURL.lastPathComponent])
         } else {
-            // For .sql files, prefer in-app editor
+            LOG("JSON sidecar missing", ctx: ["file": jsonURL.lastPathComponent])
             editTemplateInline(item)
         }
     }
@@ -2584,6 +2587,8 @@ struct ContentView: View {
             NSSound.beep()
         }
     }
+
+
     
     private func saveMapping() {
         LOG("Save button clicked", ctx: ["orgId": orgId, "mysqlDb": mysqlDb])
