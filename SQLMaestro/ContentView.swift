@@ -1942,16 +1942,25 @@ struct ContentView: View {
                     }
                 }
             }
-            // New: Copy All Values button
+            // New: Copy Block Values and Copy All Individual buttons
             Button {
-                copyAllValuesToClipboard()
+                copyBlockValuesToClipboard()
             } label: {
-                Label("Copy All Values", systemImage: "doc.on.clipboard")
+                Label("Copy Block Values", systemImage: "doc.on.clipboard")
             }
             .buttonStyle(.bordered)
             .tint(Theme.aqua)
             .font(.system(size: fontSize - 1))
-            .help("Copy Org-ID, Acct-ID, mysqlDb, and all template values to clipboard")
+            .help("Copy Org-ID, Acct-ID, mysqlDb, and all template values as a single block to clipboard")
+            Button {
+                copyIndividualValuesToClipboard()
+            } label: {
+                Label("Copy All Individual", systemImage: "list.clipboard")
+            }
+            .buttonStyle(.bordered)
+            .tint(Theme.aqua)
+            .font(.system(size: fontSize - 1))
+            .help("Copy Org-ID, Acct-ID, mysqlDb, and all template values as individual clipboard items")
             // Invisible bridge view to receive menu notifications and register KB shortcuts for Help sheet
             Color.clear.frame(width: 0, height: 0)
                 .onAppear {
@@ -1988,8 +1997,8 @@ struct ContentView: View {
         }
     }
 
-    // Helper to copy all static and template values to clipboard
-    private func copyAllValuesToClipboard() {
+    // Helper to copy all static and template values as a single block to clipboard
+    private func copyBlockValuesToClipboard() {
         var values: [String] = []
         values.append(orgId)
         values.append(acctId)
@@ -2000,7 +2009,8 @@ struct ContentView: View {
         blockLines.append("Acct-ID: \(acctId)")
         blockLines.append("mysqlDb: \(mysqlDb)")
         if let t = selectedTemplate {
-            for ph in t.placeholders {
+            let staticKeys = ["Org-ID", "Acct-ID", "mysqlDb"]
+            for ph in t.placeholders where !staticKeys.contains(ph) {
                 let val = sessions.value(for: ph) ?? ""
                 values.append(val)
                 blockLines.append("\(ph): \(val)")
@@ -2016,6 +2026,45 @@ struct ContentView: View {
         let block = blockLines.joined(separator: "\n")
         pb.setString(block, forType: .string)
         LOG("Copied all values to clipboard", ctx: ["count": "\(values.count)"])
+        withAnimation { toastCopied = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+            withAnimation { toastCopied = false }
+        }
+    }
+
+    private func copyIndividualValuesToClipboard() {
+        var values: [String] = []
+
+        // Always include static fields first (ensures orgId isn’t dropped)
+        if !orgId.isEmpty { values.append(orgId) }
+        if !acctId.isEmpty { values.append(acctId) }
+        if !mysqlDb.isEmpty { values.append(mysqlDb) }
+
+        if let t = selectedTemplate {
+            let staticKeys = ["Org-ID", "Acct-ID", "mysqlDb"]
+            for ph in t.placeholders {
+                if staticKeys.contains(where: { $0.caseInsensitiveCompare(ph) == .orderedSame }) {
+                    continue // skip duplicates
+                }
+                let val = sessions.value(for: ph)
+                if !val.isEmpty {
+                    values.append(val)
+                }
+            }
+        }
+
+        let count = values.count
+        let pb = NSPasteboard.general
+
+        for (idx, v) in values.enumerated() {
+            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(idx * 800)) {
+                pb.clearContents()
+                pb.setString(v, forType: .string)
+                LOG("Copied value \(idx + 1)/\(count): \(v)")
+            }
+        }
+
+        LOG("Scheduled copy of all values individually", ctx: ["count": "\(count)"])
         withAnimation { toastCopied = true }
         DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
             withAnimation { toastCopied = false }
