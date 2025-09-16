@@ -457,6 +457,8 @@ struct ContentView: View {
     @State private var toastOpenDB: Bool = false
     @State private var toastReloaded: Bool = false
 
+    @State private var alternateFieldsLocked: Bool = false
+    
     @State private var fontSize: CGFloat = 13
     @State private var hoverRecentKey: String? = nil
     
@@ -746,14 +748,18 @@ struct ContentView: View {
 
                 // Field Names and DB Tables side by side
                 HStack(alignment: .top, spacing: 20) {
-                    // Left: Dynamic Fields (Field Names)
+                    // Left: Dynamic Fields
                     dynamicFields
                         .frame(maxWidth: 540, alignment: .leading)
-                    
-                    // Right: DB Tables pane
+
+                    // Middle: DB Tables pane
                     dbTablesPane
                         .frame(width: 360)
-                    
+
+                    // Right: Alternate Fields pane
+                    alternateFieldsPane
+                        .frame(width: 320)
+
                     // Push everything to the left
                     Spacer()
                 }
@@ -1819,64 +1825,60 @@ struct ContentView: View {
                 )
         )
     }
-    
-    // MARK: – Alternate Fields pane (per-session, per-ticket)
+       
+    // MARK: – Alternate Fields pane (per-session)
+
     private var alternateFieldsPane: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text("Alternate Fields (per session)")
-                .font(.system(size: fontSize - 1, weight: .semibold))
-                .foregroundStyle(Theme.purple)
+            HStack {
+                Text("Alternate Fields (per session)")
+                    .font(.system(size: fontSize + 1, weight: .semibold))
+                    .foregroundStyle(Theme.purple)
+
+                Spacer()
+
+                Toggle(isOn: $alternateFieldsLocked) {
+                    HStack(spacing: 4) {
+                        Image(systemName: alternateFieldsLocked ? "lock.fill" : "lock.open.fill")
+                            .font(.system(size: fontSize - 2))
+                        Text(alternateFieldsLocked ? "Locked" : "Unlocked")
+                            .font(.system(size: fontSize - 2))
+                    }
+                }
+                .toggleStyle(.checkbox)
+                .help(alternateFieldsLocked
+                    ? "Alternate fields are locked for copying. Uncheck to edit."
+                    : "Alternate fields are editable. Check to lock for easy copying.")
+            }
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {
-                    ForEach(Array((sessions.sessionAlternateFields[sessions.current] ?? [:]).keys.sorted()), id: \.self) { key in
-                        HStack(spacing: 6) {
-                            TextField("Name",
-                                      text: Binding(
-                                        get: { key },
-                                        set: { newKey in
-                                            if var dict = sessions.sessionAlternateFields[sessions.current] {
-                                                let val = dict.removeValue(forKey: key) ?? ""
-                                                dict[newKey] = val
-                                                sessions.sessionAlternateFields[sessions.current] = dict
-                                            }
-                                        }
-                                      ))
-                                .textFieldStyle(.roundedBorder)
+                    ForEach(sessions.sessionAlternateFields[sessions.current] ?? [], id: \.id) { field in
+                        AlternateFieldRow(session: sessions.current, field: field, locked: $alternateFieldsLocked)
+                    }
 
-                            TextField("Value",
-                                      text: Binding(
-                                        get: { sessions.sessionAlternateFields[sessions.current]?[key] ?? "" },
-                                        set: { newVal in
-                                            sessions.sessionAlternateFields[sessions.current]?[key] = newVal
-                                        }
-                                      ))
-                                .textFieldStyle(.roundedBorder)
-
-                            Button {
-                                sessions.sessionAlternateFields[sessions.current]?.removeValue(forKey: key)
-                            } label: {
-                                Image(systemName: "minus.circle")
-                                    .foregroundStyle(.red)
+                    if !alternateFieldsLocked {
+                        Button {
+                            let newField = AlternateField(name: "", value: "")
+                            if sessions.sessionAlternateFields[sessions.current] == nil {
+                                sessions.sessionAlternateFields[sessions.current] = []
                             }
-                            .buttonStyle(.plain)
+                            sessions.sessionAlternateFields[sessions.current]?.append(newField)
+                            LOG("Alternate field added", ctx: ["id": "\(newField.id)"])
+                        } label: {
+                            HStack {
+                                Image(systemName: "plus.circle")
+                                Text("Add Alternate Field")
+                            }
                         }
+                        .buttonStyle(.plain)
+                        .padding(.top, 4)
+                    } else {
+                        Text("Unlock to add or edit fields")
+                            .font(.system(size: fontSize - 3))
+                            .foregroundStyle(.secondary)
+                            .padding(.top, 4)
                     }
-
-                    Button {
-                        let newKey = "altField\(UUID().uuidString.prefix(4))"
-                        if sessions.sessionAlternateFields[sessions.current] == nil {
-                            sessions.sessionAlternateFields[sessions.current] = [:]
-                        }
-                        sessions.sessionAlternateFields[sessions.current]?[newKey] = ""
-                    } label: {
-                        HStack {
-                            Image(systemName: "plus.circle")
-                            Text("Add Alternate Field")
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .padding(.top, 4)
                 }
                 .padding(6)
             }
@@ -1891,6 +1893,104 @@ struct ContentView: View {
             )
         }
     }
+
+    // Alternate Fields Row
+    private struct AlternateFieldRow: View {
+        @EnvironmentObject var sessions: SessionManager
+        let session: TicketSession
+        let field: AlternateField
+        @Binding var locked: Bool
+
+        @State private var editingName: String
+        @State private var editingValue: String
+        @State private var flash = false
+
+        init(session: TicketSession, field: AlternateField, locked: Binding<Bool>) {
+            self.session = session
+            self.field = field
+            self._locked = locked
+            _editingName = State(initialValue: field.name)
+            _editingValue = State(initialValue: field.value)
+        }
+
+        var body: some View {
+            HStack(spacing: 6) {
+                if locked {
+                    // 🔒 Locked mode
+                    Text(editingName.isEmpty ? "empty" : editingName)
+                        .font(.system(size: 13))
+                        .foregroundStyle(editingName.isEmpty ? .secondary : .primary)
+                        .textSelection(.enabled)
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 8)
+                        .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.1)))
+
+                    Text(editingValue.isEmpty ? "empty" : editingValue)
+                        .font(.system(size: 13))
+                        .foregroundStyle(editingValue.isEmpty ? .secondary : .primary)
+                        .textSelection(.enabled)
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 8)
+                        .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.1)))
+                } else {
+                    // ✏️ Editable mode
+                    TextField("Name", text: $editingName)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit { flashCommit() }
+                        .onChange(of: editingName) { _, newVal in
+                            flashCommit(newName: newVal, newValue: editingValue)
+                        }
+
+                    TextField("Value", text: $editingValue)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit { flashCommit() }
+                        .onChange(of: editingValue) { _, newVal in
+                            flashCommit(newName: editingName, newValue: newVal)
+                        }
+
+                    Button {
+                        if let idx = sessions.sessionAlternateFields[session]?.firstIndex(where: { $0.id == field.id }) {
+                            sessions.sessionAlternateFields[session]?.remove(at: idx)
+                            LOG("Alternate field removed", ctx: [
+                                "session": "\(session.rawValue)",
+                                "id": "\(field.id)"
+                            ])
+                        }
+                    } label: {
+                        Image(systemName: "minus.circle")
+                            .foregroundStyle(.red)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(4)
+            .background(flash ? Theme.aqua.opacity(0.2) : Color.clear)
+            .cornerRadius(6)
+            .onDisappear { commitChanges() }
+        }
+
+        private func commitChanges(newName: String? = nil, newValue: String? = nil) {
+            guard let idx = sessions.sessionAlternateFields[session]?.firstIndex(where: { $0.id == field.id }) else { return }
+            sessions.sessionAlternateFields[session]?[idx].name = newName ?? editingName
+            sessions.sessionAlternateFields[session]?[idx].value = newValue ?? editingValue
+            LOG("Alternate field committed", ctx: [
+                "session": "\(session.rawValue)",
+                "id": "\(field.id)",
+                "name": sessions.sessionAlternateFields[session]?[idx].name ?? "",
+                "value": sessions.sessionAlternateFields[session]?[idx].value ?? ""
+            ])
+        }
+
+        private func flashCommit(newName: String? = nil, newValue: String? = nil) {
+            commitChanges(newName: newName, newValue: newValue)
+            withAnimation(.easeInOut(duration: 0.2)) { flash = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                withAnimation(.easeInOut(duration: 0.2)) { flash = false }
+            }
+        }
+    }
+    
+
     
     // MARK: – Output area
     private var outputView: some View {
@@ -2554,8 +2654,10 @@ struct ContentView: View {
             placeholders: placeholders,
             dbTables: dbSet,
             notes: sessions.sessionNotes[sessions.current] ?? "",
-            alternateFields: sessions.sessionAlternateFields[sessions.current] ?? [:]
-        )
+            alternateFields: sessions.sessionAlternateFields[sessions.current]?
+                .reduce(into: [String:String]()) { dict, field in
+                    dict[field.name] = field.value
+                } ?? [:]        )
 
         do {
             let enc = JSONEncoder()
@@ -2614,8 +2716,9 @@ struct ContentView: View {
             // Restore notes
             sessions.sessionNotes[sessions.current] = loaded.notes
             // Restore alternate fields
-            sessions.sessionAlternateFields[sessions.current] = loaded.alternateFields
-
+            sessions.sessionAlternateFields[sessions.current] =
+                loaded.alternateFields.map { AlternateField(name: $0.key, value: $0.value) }
+            
             // Try to restore template
             var matched: TemplateItem? = nil
             if let tid = loaded.templateId {
