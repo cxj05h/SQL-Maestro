@@ -2243,7 +2243,7 @@ struct ContentView: View {
         }
     }
 
-    // Helper to copy all static and template values as a single block to clipboard
+    // Helper to copy all static, template, and alternate field values as a single block to clipboard
     private func copyBlockValuesToClipboard() {
         var values: [String] = []
         values.append(orgId)
@@ -2261,6 +2261,13 @@ struct ContentView: View {
                 let val = sessions.value(for: ph) ?? ""
                 values.append(val)
                 blockLines.append("\(ph): \(val)")
+            }
+        }
+        // Also include alternate fields for this session
+        if let alternates = sessions.sessionAlternateFields[sessions.current] {
+            for alt in alternates {
+                values.append(alt.value)
+                blockLines.append("\(alt.name): \(alt.value)")
             }
         }
         let pb = NSPasteboard.general
@@ -2296,6 +2303,14 @@ struct ContentView: View {
                 let val = sessions.value(for: ph)
                 if !val.isEmpty {
                     values.append(val)
+                }
+            }
+        }
+        // Include non-empty alternate field values for this session
+        if let alternates = sessions.sessionAlternateFields[sessions.current] {
+            for alt in alternates {
+                if !alt.value.isEmpty {
+                    values.append(alt.value)
                 }
             }
         }
