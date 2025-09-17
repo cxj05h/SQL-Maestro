@@ -1801,6 +1801,13 @@ struct ContentView: View {
                         .buttonStyle(.bordered)
                         .tint(Theme.pink)
                         .disabled(!isDirty)
+                       
+                        Button("Copy Tables") {
+                            copyTablesToClipboard()
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(Theme.aqua)
+                        .help("Copy all DB table names for this session/template to clipboard")
                     } else {
                         Text("Unlock to save changes")
                             .font(.system(size: fontSize - 2))
@@ -1826,6 +1833,24 @@ struct ContentView: View {
                         .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
                 )
         )
+    }
+    // ✅ Copy db tables to clipboard:
+    private func copyTablesToClipboard() {
+        guard let t = selectedTemplate else { return }
+        let tables = dbTablesStore.workingSet(for: sessions.current, template: t)
+        let nonEmpty = tables.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        guard !nonEmpty.isEmpty else { return }
+
+        let joined = nonEmpty.joined(separator: "\n")
+        let pb = NSPasteboard.general
+        pb.clearContents()
+        pb.setString(joined, forType: .string)
+
+        LOG("Copied DB tables to clipboard", ctx: ["count": "\(nonEmpty.count)"])
+        withAnimation { toastCopied = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+            withAnimation { toastCopied = false }
+        }
     }
        
     // MARK: — Alternate Fields pane (per-session)
