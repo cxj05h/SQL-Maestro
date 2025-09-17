@@ -974,7 +974,7 @@ struct ContentView: View {
     }
 #endif
     
-    // MARK: – Static fields (now with dropdown history)
+    // MARK: — Static fields (now with dropdown history)
     private var staticFields: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Static Info")
@@ -1064,7 +1064,7 @@ struct ContentView: View {
         .padding(.bottom, 16)
     }
     
-    // MARK: – Dynamic fields from template placeholders
+    // MARK: — Dynamic fields from template placeholders
     private var dynamicFields: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("Field Names")
@@ -1611,7 +1611,7 @@ struct ContentView: View {
         }
     }
     
-    // MARK: – DB Tables pane (per-template, per-session working set)
+    // MARK: — DB Tables pane (per-template, per-session working set)
     private var dbTablesPane: some View {
 
         VStack(alignment: .leading, spacing: 8) {
@@ -1826,7 +1826,7 @@ struct ContentView: View {
         )
     }
        
-    // MARK: – Alternate Fields pane (per-session)
+    // MARK: — Alternate Fields pane (per-session)
 
     private var alternateFieldsPane: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -1856,7 +1856,10 @@ struct ContentView: View {
                     ForEach(sessions.sessionAlternateFields[sessions.current] ?? [], id: \.id) { field in
                         AlternateFieldRow(session: sessions.current,
                                           field: field,
-                                          locked: $alternateFieldsLocked)
+                                          locked: $alternateFieldsLocked,
+                                          fontSize: fontSize,
+                                          selectedTemplate: selectedTemplate,
+                                          draftDynamicValues: $draftDynamicValues) // ✅ pass it in
                     }
 
                     if !alternateFieldsLocked {
@@ -1907,34 +1910,58 @@ struct ContentView: View {
         let session: TicketSession
         let field: AlternateField
         @Binding var locked: Bool
+        let fontSize: CGFloat
+        let selectedTemplate: TemplateItem?
+        @Binding var draftDynamicValues: [TicketSession: [String: String]]
 
         @State private var editingName: String
         @State private var editingValue: String
 
-        init(session: TicketSession, field: AlternateField, locked: Binding<Bool>) {
+        init(session: TicketSession,
+             field: AlternateField,
+             locked: Binding<Bool>,
+             fontSize: CGFloat,
+             selectedTemplate: TemplateItem?,
+             draftDynamicValues: Binding<[TicketSession: [String: String]]>) {
             self.session = session
             self.field = field
             self._locked = locked
+            self.fontSize = fontSize
+            self.selectedTemplate = selectedTemplate
+            self._draftDynamicValues = draftDynamicValues
             _editingName = State(initialValue: field.name)
             _editingValue = State(initialValue: field.value)
         }
 
         var body: some View {
             if locked {
-                // 🔒 Locked mode: like dynamic fields (label above, value inside field)
+                // 🔒 Locked mode: styled like dynamic fields (label above, value inside field look)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(editingName.isEmpty ? "unnamed" : editingName)
                         .font(.system(size: 11))
                         .foregroundStyle(.secondary)
 
-                    TextField("", text: .constant(editingValue))
-                        .textFieldStyle(.roundedBorder)
-                        .disabled(true)
-                        .onTapGesture(count: 2) {
-                            promptReplaceDynamicField()
-                        }
+                    Text(editingValue.isEmpty ? "empty" : editingValue)
+                        .font(.system(size: fontSize))
+                        .foregroundStyle(editingValue.isEmpty ? .secondary : .primary)
+                        .textSelection(.enabled)
+                        .padding(.vertical, 6)
+                        .padding(.horizontal, 8)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(Color.secondary.opacity(0.1))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+                                )
+                        )
                 }
                 .padding(.vertical, 4)
+                .contentShape(Rectangle()) // ✅ makes the whole row tappable
+                .onTapGesture(count: 2) {
+                    promptReplaceDynamicField()
+                }
             } else {
                 // ✏️ Editable mode: name + value side by side
                 HStack(spacing: 6) {
@@ -1982,42 +2009,62 @@ struct ContentView: View {
             ])
         }
 
-        /// Show prompt with dynamic placeholders, replace chosen one with this alternate’s value
         private func promptReplaceDynamicField() {
-            guard let window = NSApp.keyWindow else { return }
             let alert = NSAlert()
             alert.messageText = "Replace Dynamic Field"
             alert.informativeText = "Choose which dynamic field should be replaced by '\(editingValue)'."
             alert.alertStyle = .informational
 
-            if let template = (window.contentView as? NSHostingView<ContentView>)?.rootView.selectedTemplate {
-                let staticKeys = ["Org-ID", "Acct-ID", "mysqlDb"]
-                let dynamicPlaceholders = template.placeholders.filter { !staticKeys.contains($0) }
-                for ph in dynamicPlaceholders {
-                    alert.addButton(withTitle: ph)
+            var availableDynamicFields: [String] = []
+            
+            if let template = selectedTemplate {
+                // Filter out static fields (case-insensitive comparison)
+                let staticFields = ["Org-ID", "Acct-ID", "mysqlDb"]
+                availableDynamicFields = template.placeholders.filter { ph in
+                    !staticFields.contains { $0.caseInsensitiveCompare(ph) == .orderedSame }
                 }
+
+                LOG("Dynamic placeholders available", ctx: ["placeholders": availableDynamicFields.joined(separator: ", ")])
+
+                if availableDynamicFields.isEmpty {
+                    alert.informativeText = "⚠️ No dynamic fields available to replace."
+                } else {
+                    // Add a button for each dynamic field
+                    for ph in availableDynamicFields {
+                        alert.addButton(withTitle: ph)
+                    }
+                }
+            } else {
+                alert.informativeText = "⚠️ No template is currently loaded."
             }
+
             alert.addButton(withTitle: "Cancel")
 
+            // Show the modal and get the result
             let result = alert.runModal()
-            if result == .alertFirstButtonReturn {
-                if let chosen = alert.buttons.first?.title {
-                    var bucket = (window.contentView as? NSHostingView<ContentView>)?.rootView.draftDynamicValues[session] ?? [:]
-                    bucket[chosen] = editingValue
-                    (window.contentView as? NSHostingView<ContentView>)?.rootView.draftDynamicValues[session] = bucket
-                    LOG("Alternate field applied to dynamic", ctx: [
-                        "session": "\(session.rawValue)",
-                        "dynamicField": chosen,
-                        "value": editingValue
-                    ])
-                }
+            
+            // Calculate which button was clicked based on the modal response
+            let clickedIndex = Int(result.rawValue) - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
+            
+            // Check if a valid dynamic field button was clicked (not Cancel)
+            if clickedIndex >= 0 && clickedIndex < availableDynamicFields.count {
+                let chosen = availableDynamicFields[clickedIndex]
+                
+                // Apply the alternate field value to the chosen dynamic field
+                var bucket = draftDynamicValues[session] ?? [:]
+                bucket[chosen] = editingValue
+                draftDynamicValues[session] = bucket
+                
+                LOG("Alternate field applied to dynamic", ctx: [
+                    "session": "\(session.rawValue)",
+                    "dynamicField": chosen,
+                    "value": editingValue
+                ])
             }
         }
     }
     
-    
-    
-    // MARK: – Output area
+    // MARK: — Output area
     private var outputView: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline) {
@@ -2279,7 +2326,6 @@ struct ContentView: View {
             LOG("DBTables sidecar hydrated", ctx: ["template": t.name, "session": "\(sessions.current.rawValue)"])
         }
     }
-    
     // MARK: – Actions
     // Function to handle session switching
     private func switchToSession(_ newSession: TicketSession) {
