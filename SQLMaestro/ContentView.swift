@@ -507,6 +507,7 @@ struct ContentView: View {
     var body: some View {
         NavigationSplitView {
             // Query Templates Pane
+            // Query Templates Pane
             VStack(spacing: 8) {
                 // Header with buttons
                 HStack(spacing: 8) {
@@ -678,6 +679,7 @@ struct ContentView: View {
             }
             .padding()
             .background(Theme.grayBG)
+            .frame(minWidth: 300, idealWidth: 320) // expanded by ~50px
         } detail: {
             // Right side: Fields + Output
             VStack(spacing: 12) {
