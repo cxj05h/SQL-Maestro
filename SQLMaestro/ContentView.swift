@@ -761,12 +761,16 @@ struct ContentView: View {
                     dynamicFields
                         .frame(maxWidth: 540, alignment: .leading)
 
-                    // Middle: DB Tables pane
+                    // Middle-Left: DB Tables pane
                     dbTablesPane
                         .frame(width: 360)
 
-                    // Right: NEW Tabbed Pane (Session Images + Template Links)
+                    // Middle-Right: Session & Template Tabbed Pane (Images + Links)
                     sessionAndTemplatePane
+                        .frame(width: 320)
+
+                    // Right: Alternate Fields pane
+                    alternateFieldsPane
                         .frame(width: 320)
 
                     // Push everything to the left
@@ -2119,6 +2123,82 @@ struct ContentView: View {
             .frame(minHeight: 200, maxHeight: 300)
         }
     }
+//    // MARK: — Alternate Fields pane (per-session)
+//    private var alternateFieldsPane: some View {
+//        VStack(alignment: .leading, spacing: 6) {
+//            HStack {
+//                Text("Alternate Fields (per session)")
+//                    .font(.system(size: fontSize + 1, weight: .semibold))
+//                    .foregroundStyle(Theme.purple)
+//
+//                Spacer()
+//
+//                Toggle(isOn: $alternateFieldsLocked) {
+//                    HStack(spacing: 4) {
+//                        Image(systemName: alternateFieldsLocked ? "lock.fill" : "lock.open.fill")
+//                            .font(.system(size: fontSize - 2))
+//                        Text(alternateFieldsLocked ? "Locked" : "Unlocked")
+//                            .font(.system(size: fontSize - 2))
+//                    }
+//                }
+//                .toggleStyle(.checkbox)
+//                .help(alternateFieldsLocked
+//                    ? "Alternate fields are locked for copying. Uncheck to edit."
+//                    : "Alternate fields are editable. Check to lock for easy copying.")
+//            }
+//
+//            ScrollView {
+//                VStack(alignment: .leading, spacing: 6) {
+//                    ForEach(sessions.sessionAlternateFields[sessions.current] ?? [], id: \.id) { field in
+//                        AlternateFieldRow(session: sessions.current,
+//                                          field: field,
+//                                          locked: $alternateFieldsLocked,
+//                                          fontSize: fontSize,
+//                                          selectedTemplate: selectedTemplate,
+//                                          draftDynamicValues: $draftDynamicValues)
+//                    }
+//
+//                    if !alternateFieldsLocked {
+//                        Button {
+//                            let newField = AlternateField(name: "", value: "")
+//                            if sessions.sessionAlternateFields[sessions.current] == nil {
+//                                sessions.sessionAlternateFields[sessions.current] = []
+//                            }
+//                            sessions.sessionAlternateFields[sessions.current]?.append(newField)
+//                            LOG("Alternate field added", ctx: ["id": "\(newField.id)"])
+//                        } label: {
+//                            HStack {
+//                                Image(systemName: "plus.circle")
+//                                Text("Add Alternate Field")
+//                            }
+//                        }
+//                        .buttonStyle(.plain)
+//                        .padding(.top, 4)
+//                    } else {
+//                        VStack(alignment: .leading, spacing: 2) {
+//                            Text("Unlock to add or edit fields")
+//                                .font(.system(size: fontSize - 3))
+//                                .foregroundStyle(.secondary)
+//                            Text("Double-click a value to use it in a dynamic field")
+//                                .font(.system(size: fontSize - 3))
+//                                .foregroundStyle(.secondary)
+//                        }
+//                        .padding(.top, 4)
+//                    }
+//                }
+//                .padding(6)
+//            }
+//            .frame(minHeight: 120, maxHeight: 180)
+//            .background(
+//                RoundedRectangle(cornerRadius: 8)
+//                    .fill(Theme.grayBG.opacity(0.25))
+//                    .overlay(
+//                        RoundedRectangle(cornerRadius: 8)
+//                            .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
+//                    )
+//            )
+//        }
+//    }
 
     // MARK: - Tab Content Builders
     private func buildSessionImagesView() -> some View {
