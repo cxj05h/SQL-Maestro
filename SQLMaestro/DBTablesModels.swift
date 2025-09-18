@@ -31,3 +31,12 @@ extension URL {
         return dir.appendingPathComponent("\(base).tables.json")
     }
 }
+extension URL {
+    /// Returns the expected sidecar URL for template links
+    /// Example: ".../templates/MyQuery.sql" -> ".../templates/MyQuery.links.json"
+    func templateLinksSidecarURL() -> URL {
+        let base = self.deletingPathExtension().lastPathComponent
+        let dir = self.deletingLastPathComponent()
+        return dir.appendingPathComponent("\(base).links.json")
+    }
+}

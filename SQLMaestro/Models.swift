@@ -39,3 +39,27 @@ struct UserConfig: Codable {
 enum TicketSession: Int, CaseIterable {
     case one = 1, two = 2, three = 3
 }
+struct TemplateLinks: Codable {
+    var templateId: UUID
+    var links: [TemplateLink]
+    var updatedAt: String
+
+    init(templateId: UUID, links: [TemplateLink], updatedAt: Date = Date()) {
+        self.templateId = templateId
+        self.links = links
+        let iso = ISO8601DateFormatter()
+        iso.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        self.updatedAt = iso.string(from: updatedAt)
+    }
+}
+
+struct TemplateLink: Identifiable, Codable {
+    let id = UUID()
+    var title: String
+    var url: String
+    
+    init(title: String, url: String) {
+        self.title = title
+        self.url = url
+    }
+}
