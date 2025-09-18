@@ -1,0 +1,94 @@
+{
+  "mysql01-aws": {
+    "hostname": "mysql01-replica.internal.spotinst.io",
+    "port": 3306
+  },
+   "mysql1-aws": {
+    "hostname": "mysql01-replica.internal.spotinst.io",
+    "port": 3306
+  },
+    "aurora01-aws": {
+    "hostname": "aurora01-reader.internal.spotinst.io",
+    "port": 3306
+  },
+    "aurora02-aws": {
+    "hostname": "aurora02-reader.internal.spotinst.io",
+    "port": 3306
+  },
+    "aurora03-aws": {
+    "hostname": "aurora03-reader.internal.spotinst.io",
+    "port": 3306
+  },
+    "aurora04-aws": {
+    "hostname": "aurora04-reader.internal.spotinst.io",
+    "port": 3306
+  },
+    "aurora05-aws": {
+    "hostname": "aurora05-reader.internal.spotinst.io",
+    "port": 3306
+  },
+    "aurora06-aws": {
+    "hostname": "aurora06-reader.internal.spotinst.io",
+    "port": 3306
+  },
+  "mysql0-aws": {
+    "hostname": "mysql0-test-replica.internal.spotinst.io",
+    "port": 3306
+  },
+    "mysql0-test-aws": {
+    "hostname": "mysql0-test-replica.internal.spotinst.io",
+    "port": 3306
+  },
+  "mysql2-aws": {
+    "hostname": "mysql02-replica.internal.spotinst.io",
+    "port": 3306
+  },
+  "mysql3-aws": {
+    "hostname": "mysql03-replica.internal.spotinst.io",
+    "port": 3306
+  },
+  "mysql4-aws": {
+    "hostname": "mysql04-replica.internal.spotinst.io",
+    "port": 3306
+  },
+  "mysql5-aws": {
+    "hostname": "mysql05-replica.internal.spotinst.io",
+    "port": 3306
+  },
+  "mysql6-aws": {
+    "hostname": "mysql06-replica.internal.spotinst.io",
+    "port": 3306
+  },
+  "mysql7-aws": {
+    "hostname": "mysql07-replica.internal.spotinst.io",
+    "port": 3306
+  },
+  "mysql8-aws": {
+    "hostname": "mysql08-replica.internal.spotinst.io",
+    "port": 3306
+  },
+  "mysql9-aws": {
+    "hostname": "mysql09-replica.internal.spotinst.io",
+    "port": 3306
+  },
+  "mysql10-aws": {
+    "hostname": "mysql10-replica.internal.spotinst.io",
+    "port": 3306
+  },
+  "mysql11-aws": {
+    "hostname": "mysql11-replica.internal.spotinst.io",
+    "port": 3306
+  },
+  "mysql12-aws": {
+    "hostname": "mysql12-replica.internal.spotinst.io",
+    "port": 3306
+  },
+  "mysql13-aws": {
+    "hostname": "mysql13-replica.internal.spotinst.io",
+    "port": 3306
+  },
+  "mysql14-aws": {
+    "hostname": "mysql14-replica.internal.spotinst.io",
+    "port": 3306
+  }
+}

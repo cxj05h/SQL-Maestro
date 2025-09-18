@@ -17,6 +17,22 @@ debug:
 run: debug
 	@echo "Opening $(APPDBG)..."
 	open "$(APPDBG)"
+	
+update-assets:
+	@echo "Updating ReleaseAssets with current data..."
+	./update_release_assets.sh
+
+release: update-assets
+	@echo "Building Release to $(DERIVED)..."
+	xcodebuild -scheme $(SCHEME) -configuration Release \
+	  -destination 'platform=macOS,arch=$(ARCH)' \
+	  -derivedDataPath $(DERIVED) \
+	  build
+
+dist: release
+	@echo "Zipping to dist/SQLMaestro-$(VERSION).zip..."
+	mkdir -p dist
+	cd $(DERIVED)/Build/Products/Release && zip -r ../../../../dist/SQLMaestro-$(VERSION).zip SQLMaestro.app
 
 release:
 	@echo "Building Release to $(DERIVED)..."

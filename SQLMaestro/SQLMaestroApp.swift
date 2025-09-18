@@ -5,6 +5,7 @@ struct SQLMaestroApp: App {
     @StateObject private var sessions = SessionManager()
     init() {
         AppPaths.ensureAll()
+            AppPaths.copyBundledAssets() // Add this line
         _ = AppLogger.shared
     }
 

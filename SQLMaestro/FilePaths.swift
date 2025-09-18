@@ -66,4 +66,64 @@ enum AppPaths {
             try? emptyConfig.write(to: userConfig, atomically: true, encoding: .utf8)
         }
     }
+
+    static func copyBundledAssets() {
+        let bundle = Bundle.main
+        let fm = FileManager.default
+        
+        // Define the files we want to copy from bundle
+        let bundledFiles = [
+            "demo.sql",
+            "sumo demo.sql",
+            "db_tables_catalog.json",
+            "placeholders.json",
+            "placeholder_order.json"
+        ]
+        
+        let bundledMappings = [
+            "mysql_hosts_map.json",
+            "org_mysql_map.json",
+            "user_config.json"
+        ]
+        
+        // Copy templates if templates folder doesn't exist
+        if !fm.fileExists(atPath: templates.path) {
+            try? fm.createDirectory(at: templates, withIntermediateDirectories: true)
+            for templateFile in bundledFiles.filter({ $0.hasSuffix(".sql") }) {
+                if let bundlePath = bundle.path(forResource: templateFile.replacingOccurrences(of: ".sql", with: ""), ofType: "sql") {
+                    let dest = templates.appendingPathComponent(templateFile)
+                    try? fm.copyItem(at: URL(fileURLWithPath: bundlePath), to: dest)
+                    LOG("Bundled template copied", ctx: ["file": templateFile])
+                }
+            }
+        }
+        
+        // Copy mappings if mappings folder doesn't exist
+        if !fm.fileExists(atPath: mappings.path) {
+            try? fm.createDirectory(at: mappings, withIntermediateDirectories: true)
+            for mappingFile in bundledMappings {
+                if let bundlePath = bundle.path(forResource: mappingFile.replacingOccurrences(of: ".json", with: ""), ofType: "json") {
+                    let dest = mappings.appendingPathComponent(mappingFile)
+                    try? fm.copyItem(at: URL(fileURLWithPath: bundlePath), to: dest)
+                    LOG("Bundled mapping copied", ctx: ["file": mappingFile])
+                }
+            }
+        }
+        
+        // Copy root JSON files
+        let rootFiles = ["db_tables_catalog.json", "placeholders.json", "placeholder_order.json"]
+        for file in rootFiles {
+            let dest = appSupport.appendingPathComponent(file)
+            if !fm.fileExists(atPath: dest.path) {
+                if let bundlePath = bundle.path(forResource: file.replacingOccurrences(of: ".json", with: ""), ofType: "json") {
+                    try? fm.copyItem(at: URL(fileURLWithPath: bundlePath), to: dest)
+                    LOG("Bundled root asset copied", ctx: ["file": file])
+                }
+            }
+        }
+        
+        LOG("First launch asset check complete")
+    }
+    
+    
 }
