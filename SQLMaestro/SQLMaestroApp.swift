@@ -3,7 +3,6 @@ import SwiftUI
 struct SQLMaestroApp: App {
     @StateObject private var templates = TemplateManager()
     @StateObject private var sessions = SessionManager()
-
     init() {
         AppPaths.ensureAll()
         _ = AppLogger.shared

@@ -3116,21 +3116,32 @@ struct ContentView: View {
             LOG("KB: Toggle Session Notes Edit Mode", ctx: ["isEditing": "\(notesIsEditing)"])
         }
         
-        private func promptRename(for s: TicketSession) {
-            let alert = NSAlert()
-            alert.messageText = "Rename Session #\(s.rawValue)"
-            alert.informativeText = "Enter a new name"
-            alert.alertStyle = .informational
-            let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
-            input.stringValue = sessions.sessionNames[s] ?? "#\(s.rawValue)"
-            alert.accessoryView = input
-            alert.addButton(withTitle: "OK")
-            alert.addButton(withTitle: "Cancel")
-            if alert.runModal() == .alertFirstButtonReturn {
-                sessions.setCurrent(s)
-                sessions.renameCurrent(to: input.stringValue)
-            }
+    private func promptRename(for s: TicketSession) {
+        let alert = NSAlert()
+        alert.messageText = "Rename Session #\(s.rawValue)"
+        alert.informativeText = "Enter a new name"
+        alert.alertStyle = .informational
+        
+        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 240, height: 24))
+        input.stringValue = sessions.sessionNames[s] ?? "#\(s.rawValue)"
+        alert.accessoryView = input
+        
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Cancel")
+        
+        if alert.runModal() == .alertFirstButtonReturn {
+            let newName = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !newName.isEmpty else { return }
+            
+            sessions.setCurrent(s)
+            sessions.renameCurrent(to: newName)
+            
+            LOG("Session renamed manually", ctx: [
+                "session": "\(s.rawValue)",
+                "name": newName
+            ])
         }
+    }
         
         private func promptForString(title: String, message: String, defaultValue: String = "") -> String? {
             let alert = NSAlert()
@@ -3309,97 +3320,101 @@ struct ContentView: View {
             }
         }
         
-        private func loadTicketSessionFlow() {
-            // Confirm overwrite of current UI state
-            let warn = NSAlert()
-            warn.messageText = "Load Ticket Session?"
-            warn.informativeText = "Loading will overwrite the current session’s values. Continue?"
-            warn.alertStyle = .warning
-            warn.addButton(withTitle: "Load")
-            warn.addButton(withTitle: "Cancel")
-            guard warn.runModal() == .alertFirstButtonReturn else { return }
+    private func loadTicketSessionFlow() {
+        // Confirm overwrite of current UI state
+        let warn = NSAlert()
+        warn.messageText = "Load Ticket Session?"
+        warn.informativeText = "Loading will overwrite the current session’s values. Continue?"
+        warn.alertStyle = .warning
+        warn.addButton(withTitle: "Load")
+        warn.addButton(withTitle: "Cancel")
+        guard warn.runModal() == .alertFirstButtonReturn else { return }
+        
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        panel.allowedContentTypes = [.json]
+        panel.directoryURL = AppPaths.sessions
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        
+        do {
+            let data = try Data(contentsOf: url)
+            let dec = JSONDecoder()
+            let loaded = try dec.decode(SavedTicketSession.self, from: data)
             
-            let panel = NSOpenPanel()
-            panel.allowsMultipleSelection = false
-            panel.canChooseDirectories = false
-            panel.canChooseFiles = true
-            panel.allowedContentTypes = [.json]
-            panel.directoryURL = AppPaths.sessions
-            guard panel.runModal() == .OK, let url = panel.url else { return }
+            // ⬅️ Key change: derive session name from file name
+            let inferredName = url.deletingPathExtension().lastPathComponent
+            sessions.renameCurrent(to: inferredName)
             
-            do {
-                let data = try Data(contentsOf: url)
-                let dec = JSONDecoder()
-                let loaded = try dec.decode(SavedTicketSession.self, from: data)
-                
-                // Restore session name and optional link
-                sessions.renameCurrent(to: loaded.sessionName)
-                if let link = loaded.sessionLink, !link.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    sessions.sessionLinks[sessions.current] = link
-                } else {
-                    sessions.sessionLinks.removeValue(forKey: sessions.current)
-                }
-                
-                // Restore static fields
-                orgId = loaded.staticFields.orgId
-                acctId = loaded.staticFields.acctId
-                mysqlDb = loaded.staticFields.mysqlDb
-                companyLabel = loaded.staticFields.companyLabel
-                sessionStaticFields[sessions.current] = (orgId, acctId, mysqlDb, companyLabel)
-                
-                // Restore placeholders
-                for (k, v) in loaded.placeholders {
-                    sessions.setValue(v, for: k)
-                }
-
-                // Try to resolve template match first
-                var matched: TemplateItem? = nil
-                if let tid = loaded.templateId {
-                    matched = templates.templates.first(where: { "\($0.id)" == tid })
-                }
-                if matched == nil, let tname = loaded.templateName {
-                    matched = templates.templates.first(where: { $0.name == tname })
-                }
-
-                // Mark template as used if it has any values
-                if let t = matched ?? selectedTemplate {
-                    let hasValues = loaded.placeholders.values.contains { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-                    if hasValues {
-                        UsedTemplatesStore.shared.markTemplateUsed(session: sessions.current, templateId: t.id)
-                        UsedTemplatesStore.shared.setAllValues(loaded.placeholders,
-                                                               session: sessions.current,
-                                                               templateId: t.id)
-                        LOG("UsedTemplates rehydrated from loaded session",
-                            ctx: ["template": t.name, "count": "\(loaded.placeholders.count)"])
-                    }
-                }
-                // Restore notes
-                sessions.sessionNotes[sessions.current] = loaded.notes
-                // Restore alternate fields
-                sessions.sessionAlternateFields[sessions.current] =
-                loaded.alternateFields.map { AlternateField(name: $0.key, value: $0.value) }
-                sessions.sessionImages[sessions.current] = loaded.sessionImages
-                
-                
-                // Try to restore template
-                if let t = matched {
-                    loadTemplate(t)
-                    if !loaded.dbTables.isEmpty {
-                        dbTablesStore.setWorkingSet(loaded.dbTables, for: sessions.current, template: t)
-                    }
-                } else {
-                    LOG("Saved session template not found; restored values only", ctx: ["templateName": loaded.templateName ?? "?"])
-                }
-                
-                // Refresh populated SQL with the restored values
-                populateQuery()
-                LOG("Ticket session loaded", ctx: ["file": url.lastPathComponent])
-            } catch {
-                NSSound.beep()
-                showAlert(title: "Load Failed", message: error.localizedDescription)
-                LOG("Ticket session load failed", ctx: ["error": error.localizedDescription])
+            // Restore optional link
+            if let link = loaded.sessionLink, !link.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                sessions.sessionLinks[sessions.current] = link
+            } else {
+                sessions.sessionLinks.removeValue(forKey: sessions.current)
             }
+            
+            // Restore static fields
+            orgId = loaded.staticFields.orgId
+            acctId = loaded.staticFields.acctId
+            mysqlDb = loaded.staticFields.mysqlDb
+            companyLabel = loaded.staticFields.companyLabel
+            sessionStaticFields[sessions.current] = (orgId, acctId, mysqlDb, companyLabel)
+            
+            // Restore placeholders
+            for (k, v) in loaded.placeholders {
+                sessions.setValue(v, for: k)
+            }
+
+            // Try to resolve template
+            var matched: TemplateItem? = nil
+            if let tid = loaded.templateId {
+                matched = templates.templates.first(where: { "\($0.id)" == tid })
+            }
+            if matched == nil, let tname = loaded.templateName {
+                matched = templates.templates.first(where: { $0.name == tname })
+            }
+
+            // Rehydrate template usage
+            if let t = matched ?? selectedTemplate {
+                let hasValues = loaded.placeholders.values.contains { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+                if hasValues {
+                    UsedTemplatesStore.shared.markTemplateUsed(session: sessions.current, templateId: t.id)
+                    UsedTemplatesStore.shared.setAllValues(
+                        loaded.placeholders,
+                        session: sessions.current,
+                        templateId: t.id
+                    )
+                    LOG("UsedTemplates rehydrated from loaded session",
+                        ctx: ["template": t.name, "count": "\(loaded.placeholders.count)"])
+                }
+            }
+
+            // Restore notes, alternates, images
+            sessions.sessionNotes[sessions.current] = loaded.notes
+            sessions.sessionAlternateFields[sessions.current] =
+                loaded.alternateFields.map { AlternateField(name: $0.key, value: $0.value) }
+            sessions.sessionImages[sessions.current] = loaded.sessionImages
+            
+            // Restore template if matched
+            if let t = matched {
+                loadTemplate(t)
+                if !loaded.dbTables.isEmpty {
+                    dbTablesStore.setWorkingSet(loaded.dbTables, for: sessions.current, template: t)
+                }
+            } else {
+                LOG("Saved session template not found; restored values only", ctx: ["templateName": loaded.templateName ?? "?"])
+            }
+            
+            // Refresh populated SQL
+            populateQuery()
+            LOG("Ticket session loaded", ctx: ["file": url.lastPathComponent])
+        } catch {
+            NSSound.beep()
+            showAlert(title: "Load Failed", message: error.localizedDescription)
+            LOG("Ticket session load failed", ctx: ["error": error.localizedDescription])
         }
+    }
         
         private func openSessionsFolderFlow() {
             let fm = FileManager.default
