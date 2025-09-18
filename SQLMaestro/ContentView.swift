@@ -998,8 +998,44 @@ struct ContentView: View {
     }
 
     private func editTemplateLink(_ link: TemplateLink) {
-        // Similar to addNewLink but pre-filled with existing values
-        // Implementation similar to addNewLink...
+        guard let template = selectedTemplate else { return }
+        
+        let alert = NSAlert()
+        alert.messageText = "Edit Link"
+        alert.informativeText = "Update the title and URL for this link:"
+        
+        let inputContainer = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 60))
+        
+        let titleField = NSTextField(frame: NSRect(x: 0, y: 30, width: 300, height: 24))
+        titleField.stringValue = link.title
+        titleField.placeholderString = "Link title"
+        
+        let urlField = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
+        urlField.stringValue = link.url
+        urlField.placeholderString = "https://..."
+        
+        inputContainer.addSubview(titleField)
+        inputContainer.addSubview(urlField)
+        
+        alert.accessoryView = inputContainer
+        alert.addButton(withTitle: "Update")
+        alert.addButton(withTitle: "Cancel")
+        
+        if alert.runModal() == .alertFirstButtonReturn {
+            let newTitle = titleField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            let newUrl = urlField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            
+            guard !newTitle.isEmpty, !newUrl.isEmpty else { return }
+            
+            // Update the link in the store
+            var links = templateLinksStore.links(for: template)
+            if let index = links.firstIndex(where: { $0.id == link.id }) {
+                links[index] = TemplateLink(title: newTitle, url: newUrl)
+                // Manually set the ID to preserve it
+                links[index] = TemplateLink(title: newTitle, url: newUrl)
+                templateLinksStore.setLinks(links, for: template)
+            }
+        }
     }
 
     private func deleteTemplateLink(_ link: TemplateLink) {
@@ -2650,11 +2686,16 @@ struct ContentView: View {
         selectedTemplate = t
         if let t = t {
             sessionSelectedTemplate[sessions.current] = t.id
-            // NEW: hydrate this session's working set from sidecar
+            // Hydrate DB tables working set from sidecar
             _ = DBTablesStore.shared.loadSidecar(for: sessions.current, template: t)
             LOG("DBTables sidecar hydrated", ctx: ["template": t.name, "session": "\(sessions.current.rawValue)"])
+            
+            // Hydrate template links from sidecar
+            _ = templateLinksStore.loadSidecar(for: t)
+            LOG("Template links hydrated", ctx: ["template": t.name])
         }
     }
+    
     // MARK: – Actions
     // Function to handle session switching
     private func switchToSession(_ newSession: TicketSession) {
@@ -2700,6 +2741,9 @@ struct ContentView: View {
         // NEW: hydrate working set from sidecar for the current session
         _ = DBTablesStore.shared.loadSidecar(for: sessions.current, template: t)
         LOG("DBTables sidecar hydrated", ctx: ["template": t.name, "session": "\(sessions.current.rawValue)"])
+        // Hydrate template links from sidecar
+        _ = templateLinksStore.loadSidecar(for: t)
+        LOG("Template links hydrated", ctx: ["template": t.name])
     }
     
     private func editTemplateInline(_ t: TemplateItem) {
