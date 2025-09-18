@@ -594,13 +594,35 @@ struct ContentView: View {
                 // Template List
                 List(filteredTemplates, selection: $selectedTemplate) { template in
                     HStack {
+                        // Check if this template is "used" for the current session
+                        let isUsed = UsedTemplatesStore.shared.isTemplateUsed(in: sessions.current, templateId: template.id)
+
                         Image(systemName: "doc.text.fill")
-                            .foregroundStyle(selectedTemplate?.id == template.id ? .white : Theme.gold.opacity(0.6))
+                            .foregroundStyle(
+                                selectedTemplate?.id == template.id
+                                    ? .white
+                                    : (isUsed ? Theme.pink.opacity(0.8) : Theme.gold.opacity(0.6))
+                            )
                             .font(.system(size: fontSize + 1))
-                        
-                        Text(template.name)
-                            .font(.system(size: fontSize, weight: selectedTemplate?.id == template.id ? .medium : .regular))
-                            .foregroundStyle(selectedTemplate?.id == template.id ? .white : .primary)
+
+                        …
+
+                        Text("\(template.placeholders.count)")
+                            .font(.system(size: fontSize - 3))
+                            .fontWeight(.medium)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(
+                                selectedTemplate?.id == template.id
+                                    ? .white.opacity(0.3)
+                                    : (isUsed ? Theme.pink.opacity(0.15) : Theme.gold.opacity(0.15))
+                            )
+                            .foregroundStyle(
+                                selectedTemplate?.id == template.id
+                                    ? .white
+                                    : (isUsed ? Theme.pink : Theme.gold)
+                            )
+                            .clipShape(Capsule())
                         
                         Spacer()
                         
@@ -1113,16 +1135,28 @@ struct ContentView: View {
     }
     
     private var filteredTemplates: [TemplateItem] {
+        let baseList: [TemplateItem]
         if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            return templates.templates
+            baseList = templates.templates
         } else {
             let query = searchText.lowercased()
-            return templates.templates.filter { template in
+            baseList = templates.templates.filter { template in
                 template.name.lowercased().contains(query)
             }
         }
+
+        // Promote "used" templates for the current session to the top
+        let usedIds = Set(UsedTemplatesStore.shared.records(for: sessions.current).map { $0.templateId })
+        return baseList.sorted { a, b in
+            let aUsed = usedIds.contains(a.id)
+            let bUsed = usedIds.contains(b.id)
+            if aUsed != bUsed {
+                return aUsed && !bUsed
+            } else {
+                return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
+            }
+        }
     }
-    
 #if os(macOS)
     @discardableResult
     private func ensureAccessibilityPermission() -> Bool {
@@ -1511,9 +1545,22 @@ struct ContentView: View {
                 // Write-through to global cache ONLY when the user leaves the field
                 sessions.setValue(finalVal, for: placeholder)
                 LOG("Dynamic field committed", ctx: ["ph": placeholder, "value": finalVal])
+
+                // NEW: Record usage in UsedTemplatesStore for (session + template)
+                if let t = selectedTemplate {
+                    UsedTemplatesStore.shared.markTemplateUsed(session: sessions.current, templateId: t.id)
+                    UsedTemplatesStore.shared.setValue(finalVal, for: placeholder, session: sessions.current, templateId: t.id)
+                    LOG("UsedTemplates updated", ctx: [
+                        "session": "\(sessions.current.rawValue)",
+                        "templateId": t.id.uuidString,
+                        "ph": placeholder,
+                        "value": finalVal
+                    ])
+                }
             }
         )
     }
+    
     
     @FocusState private var applyButtonFocused: Bool
     
@@ -1720,7 +1767,19 @@ struct ContentView: View {
         )
         valBinding.wrappedValue = str
         sessions.setValue(str, for: placeholder)
-        LOG("Date inline apply (Enter/Apply)", ctx: ["value": str])
+        LOG("Date inline apply (Enter/Apply)", ctx: ["value": str, "ph": placeholder])
+
+        // Record usage in UsedTemplatesStore for (session + template)
+        if let t = selectedTemplate {
+            UsedTemplatesStore.shared.markTemplateUsed(session: sessions.current, templateId: t.id)
+            UsedTemplatesStore.shared.setValue(str, for: placeholder, session: sessions.current, templateId: t.id)
+            LOG("UsedTemplates updated (date apply)", ctx: [
+                "session": "\(sessions.current.rawValue)",
+                "templateId": t.id.uuidString,
+                "ph": placeholder,
+                "value": str
+            ])
+        }
     }
     
     // Helpers for date math/format/parse
