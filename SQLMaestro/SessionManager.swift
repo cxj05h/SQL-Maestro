@@ -1,5 +1,16 @@
 
 import Foundation
+struct SessionImage: Identifiable, Codable {
+    let id = UUID()
+    let fileName: String
+    let originalPath: String?
+    let savedAt: Date
+    
+    var displayName: String {
+        let number = fileName.components(separatedBy: "_").last?.components(separatedBy: ".").first ?? "0"
+        return "Image \(number)"
+    }
+}
 
 // MARK: – Model for alternate fields
 struct AlternateField: Identifiable, Codable, Equatable {
@@ -38,6 +49,11 @@ final class SessionManager: ObservableObject {
 
     // Optional per-session link (URL as string)
     @Published var sessionLinks: [TicketSession: String] = [:]
+    
+    // Session images tracking
+    @Published var sessionImages: [TicketSession: [SessionImage]] = [
+        .one: [], .two: [], .three: []
+    ]
 
     // MARK: – Session controls
     func setCurrent(_ s: TicketSession) {
@@ -109,7 +125,20 @@ final class SessionManager: ObservableObject {
         sessionNames[current] = "#\(current.rawValue)"
         sessionNotes[current] = ""
         sessionLinks.removeValue(forKey: current)
+        clearSessionImages(for: current) 
         sessionAlternateFields[current] = []
         LOG("Cleared fields", ctx: ["session":"\(current.rawValue)"])
+    }
+    
+    func addSessionImage(_ image: SessionImage, for session: TicketSession) {
+        var images = sessionImages[session] ?? []
+        images.append(image)
+        sessionImages[session] = images
+        LOG("Session image added", ctx: ["session": "\(session.rawValue)", "fileName": image.fileName])
+    }
+
+    func clearSessionImages(for session: TicketSession) {
+        sessionImages[session] = []
+        LOG("Session images cleared", ctx: ["session": "\(session.rawValue)"])
     }
 }
