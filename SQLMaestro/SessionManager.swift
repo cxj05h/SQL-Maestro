@@ -124,13 +124,24 @@ final class SessionManager: ObservableObject {
         }
     }
 
+
     // MARK: – Clear session
+    func clearAllFields(for session: TicketSession) {
+        sessionValues[session] = [:]
+        sessionNames[session] = "#\(session.rawValue)"
+        sessionNotes[session] = ""
+        sessionLinks.removeValue(forKey: session)
+        clearSessionImages(for: session)
+        sessionAlternateFields[session] = []
+        LOG("Cleared fields", ctx: ["session":"\(session.rawValue)"])
+    }
+    
     func clearAllFieldsForCurrentSession() {
         sessionValues[current] = [:]
         sessionNames[current] = "#\(current.rawValue)"
         sessionNotes[current] = ""
         sessionLinks.removeValue(forKey: current)
-        clearSessionImages(for: current) 
+        clearSessionImages(for: current)
         sessionAlternateFields[current] = []
         LOG("Cleared fields", ctx: ["session":"\(current.rawValue)"])
     }
