@@ -2,7 +2,10 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
-
+enum SessionTemplateTab {
+    case sessionImages
+    case templateLinks
+}
 
 // MARK: - Temporary Shims (compile-time stand-ins)
 
@@ -504,6 +507,8 @@ struct ContentView: View {
     @State private var dpMinute: Int = Calendar.current.component(.minute, from: Date())
     @State private var dpSecond: Int = Calendar.current.component(.second, from: Date())
     
+  
+    
     var body: some View {
         NavigationSplitView {
             // Query Templates Pane
@@ -758,8 +763,8 @@ struct ContentView: View {
                     dbTablesPane
                         .frame(width: 360)
 
-                    // Right: Alternate Fields pane
-                    alternateFieldsPane
+                    // Right: NEW Tabbed Pane (Session Images + Template Links)
+                    sessionAndTemplatePane
                         .frame(width: 320)
 
                     // Push everything to the left
@@ -1930,7 +1935,80 @@ struct ContentView: View {
             )
         }
     }
+    
+    // MARK: — Session & Template Tabbed Pane
+    private var sessionAndTemplatePane: some View {
+        @State var selectedTab: SessionTemplateTab = .sessionImages
+        
+        return VStack(alignment: .leading, spacing: 6) {
+            // Tab selector
+            HStack {
+                Text("Session & Template")
+                    .font(.system(size: fontSize + 1, weight: .semibold))
+                    .foregroundStyle(Theme.purple)
+                
+                Spacer()
+                
+                Picker("Tab", selection: $selectedTab) {
+                    Text("Images").tag(SessionTemplateTab.sessionImages)
+                    Text("Links").tag(SessionTemplateTab.templateLinks)
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 140)
+            }
+            
+            // Tab content - simple conditional view
+            Group {
+                if selectedTab == .sessionImages {
+                    buildSessionImagesView()
+                } else {
+                    buildTemplateLinksView()
+                }
+            }
+            .frame(minHeight: 200, maxHeight: 300)
+        }
+    }
 
+    // MARK: - Tab Content Builders
+    private func buildSessionImagesView() -> some View {
+        VStack {
+            Text("Session \(sessions.current.rawValue) Images")
+                .font(.system(size: fontSize))
+                .foregroundStyle(.secondary)
+            Text("Images will appear here...")
+                .font(.system(size: fontSize - 2))
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Theme.grayBG.opacity(0.25))
+        )
+    }
+
+    private func buildTemplateLinksView() -> some View {
+        VStack {
+            if let template = selectedTemplate {
+                Text("\(template.name) Links")
+                    .font(.system(size: fontSize))
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("No Template Selected")
+                    .font(.system(size: fontSize))
+                    .foregroundStyle(.secondary)
+            }
+            Text("Template links will appear here...")
+                .font(.system(size: fontSize - 2))
+                .foregroundStyle(.secondary)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Theme.grayBG.opacity(0.25))
+        )
+    }
     // Alternate Fields Row
     private struct AlternateFieldRow: View {
         @EnvironmentObject var sessions: SessionManager
