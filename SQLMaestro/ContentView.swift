@@ -1139,12 +1139,14 @@ struct ContentView: View {
     }
 #endif
     
+  
     // MARK: — Static fields (now with dropdown history)
     private var staticFields: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Static Info")
                 .font(.system(size: fontSize + 4, weight: .semibold))
                 .foregroundStyle(Theme.purple)
+
             HStack(alignment: .top) {
                 fieldWithDropdown(
                     label: "Org-ID",
@@ -1152,16 +1154,11 @@ struct ContentView: View {
                     value: $orgId,
                     historyKey: "Org-ID",
                     onCommit: { newVal in
-                        // Remove all whitespace from Org-ID before saving/using it
                         let cleaned = newVal.replacingOccurrences(of: "\\s+", with: "", options: .regularExpression)
                         if cleaned != newVal { orgId = cleaned }
-                        // Force-save the cleaned value to global cache/history
                         sessions.setValue(cleaned, for: "Org-ID")
-                        
-                        // Update session cache
                         sessionStaticFields[sessions.current] = (cleaned, acctId, mysqlDb, companyLabel)
-                        
-                        // Lookup mapping only on commit
+
                         if let m = mapping.lookup(orgId: cleaned) {
                             mysqlDb = m.mysqlDb
                             companyLabel = m.companyName ?? ""
@@ -1173,6 +1170,7 @@ struct ContentView: View {
                         LOG("OrgID committed", ctx: ["value": cleaned])
                     }
                 )
+
                 fieldWithDropdown(
                     label: "Acct-ID",
                     placeholder: "e.g., 123456",
@@ -1183,46 +1181,43 @@ struct ContentView: View {
                         LOG("AcctID committed", ctx: ["value": newVal])
                     }
                 )
-                HStack(alignment: .top, spacing: 8) {
-                    // Left: fieldWithDropdown + left-aligned Connect button under the field area
-                    VStack(alignment: .leading, spacing: 0) {
+
+                // MySQL DB + Save button row
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 8) {
                         fieldWithDropdown(
                             label: "MySQL DB",
                             placeholder: "e.g., mySQL04",
                             value: $mysqlDb,
                             historyKey: "MySQL-DB",
                             onCommit: { newVal in
-                                // Remove all whitespace from MySQL DB before saving/using it
                                 let cleaned = newVal.replacingOccurrences(of: "\\s+", with: "", options: .regularExpression)
                                 if cleaned != newVal { mysqlDb = cleaned }
-                                // Force-save the cleaned value to global cache/history
                                 sessions.setValue(cleaned, for: "MySQL-DB")
-                                
                                 sessionStaticFields[sessions.current] = (orgId, acctId, cleaned, companyLabel)
                                 LOG("MySQL DB committed", ctx: ["value": cleaned])
                             }
                         )
-                        HStack {
-                            Button("Connect to Database") {
-                                connectToQuerious()
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(Theme.accent)
-                            .font(.system(size: fontSize))
-                            .disabled(orgId.trimmingCharacters(in: .whitespaces).isEmpty)
-                            Spacer()
+
+                        Button("Save") {
+                            saveMapping()
                         }
-                        .frame(width: 420, alignment: .leading)
-                        .padding(.top, 4)
+                        .buttonStyle(.borderedProminent)
+                        .tint(Theme.pink)
+                        .font(.system(size: fontSize))
                     }
-                    
-                    // Right: Save button remains beside the field
-                    Button("Save") {
-                        saveMapping()
+
+                    HStack {
+                        Button("Connect to Database") {
+                            connectToQuerious()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Theme.accent)
+                        .font(.system(size: fontSize))
+                        .disabled(orgId.trimmingCharacters(in: .whitespaces).isEmpty)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Theme.pink)
-                    .font(.system(size: fontSize))
+                    .frame(width: 420, alignment: .leading)
+                    .padding(.top, 4)
                 }
             }
         }
