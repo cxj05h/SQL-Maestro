@@ -449,9 +449,11 @@ struct ContentView: View {
     @StateObject private var mapping = MappingStore()
     @StateObject private var mysqlHosts = MysqlHostStore()
     @StateObject private var userConfig = UserConfigStore()
+    @State private var selectedSessionTemplateTab: SessionTemplateTab = .sessionImages
     @EnvironmentObject var sessions: SessionManager
     @ObservedObject private var dbTablesStore = DBTablesStore.shared
     @ObservedObject private var dbTablesCatalog = DBTablesCatalog.shared
+    @ObservedObject private var templateLinksStore = TemplateLinksStore.shared
     @State private var selectedTemplate: TemplateItem?
     @State private var currentSQL: String = ""
     @State private var populatedSQL: String = ""
@@ -939,6 +941,56 @@ struct ContentView: View {
                 scrollMonitor = nil
                 LOG("Scroll monitor removed")
             }
+        }
+    }
+    
+    // MARK: - Template Links Functions
+
+    private func addNewLink() {
+        guard let template = selectedTemplate else { return }
+        
+        let alert = NSAlert()
+        alert.messageText = "Add New Link"
+        alert.informativeText = "Enter a title and URL for this link:"
+        
+        let inputContainer = NSView(frame: NSRect(x: 0, y: 0, width: 300, height: 60))
+        
+        let titleField = NSTextField(frame: NSRect(x: 0, y: 30, width: 300, height: 24))
+        titleField.placeholderString = "Link title (e.g., 'Documentation')"
+        
+        let urlField = NSTextField(frame: NSRect(x: 0, y: 0, width: 300, height: 24))
+        urlField.placeholderString = "https://..."
+        
+        inputContainer.addSubview(titleField)
+        inputContainer.addSubview(urlField)
+        
+        alert.accessoryView = inputContainer
+        alert.addButton(withTitle: "Add")
+        alert.addButton(withTitle: "Cancel")
+        
+        if alert.runModal() == .alertFirstButtonReturn {
+            let title = titleField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            let url = urlField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            
+            guard !title.isEmpty, !url.isEmpty else { return }
+            
+            templateLinksStore.addLink(title: title, url: url, for: template)
+        }
+    }
+
+    private func editTemplateLink(_ link: TemplateLink) {
+        // Similar to addNewLink but pre-filled with existing values
+        // Implementation similar to addNewLink...
+    }
+
+    private func deleteTemplateLink(_ link: TemplateLink) {
+        templateLinksStore.removeLink(withId: link.id, for: selectedTemplate)
+    }
+
+    private func openTemplateLink(_ link: TemplateLink) {
+        if let url = URL(string: link.url) {
+            NSWorkspace.shared.open(url)
+            LOG("Opened template link", ctx: ["title": link.title, "url": link.url])
         }
     }
     private func deleteSessionImage(_ image: SessionImage) {
@@ -1949,9 +2001,7 @@ struct ContentView: View {
     
     // MARK: — Session & Template Tabbed Pane
     private var sessionAndTemplatePane: some View {
-        @State var selectedTab: SessionTemplateTab = .sessionImages
-        
-        return VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 6) {
             // Tab selector
             HStack {
                 Text("Session & Template")
@@ -1960,8 +2010,7 @@ struct ContentView: View {
                 
                 Spacer()
                 
-                Picker("Tab", selection: $selectedTab) {
-                    Text("Images").tag(SessionTemplateTab.sessionImages)
+                Picker("Tab", selection: $selectedSessionTemplateTab) {                    Text("Images").tag(SessionTemplateTab.sessionImages)
                     Text("Links").tag(SessionTemplateTab.templateLinks)
                 }
                 .pickerStyle(.segmented)
@@ -1970,7 +2019,7 @@ struct ContentView: View {
             
             // Tab content - simple conditional view
             Group {
-                if selectedTab == .sessionImages {
+                if selectedSessionTemplateTab == .sessionImages {
                     buildSessionImagesView()
                 } else {
                     buildTemplateLinksView()
@@ -2041,25 +2090,105 @@ struct ContentView: View {
     }
 
     private func buildTemplateLinksView() -> some View {
-        VStack {
-            if let template = selectedTemplate {
-                Text("\(template.name) Links")
-                    .font(.system(size: fontSize))
-                    .foregroundStyle(.secondary)
-            } else {
-                Text("No Template Selected")
-                    .font(.system(size: fontSize))
-                    .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 8) {
+            // Header
+            HStack {
+                if let template = selectedTemplate {
+                    Text("\(template.name) Links")
+                        .font(.system(size: fontSize, weight: .medium))
+                        .foregroundStyle(Theme.purple)
+                } else {
+                    Text("No Template Selected")
+                        .font(.system(size: fontSize, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+                
+                Spacer()
+                
+                if selectedTemplate != nil {
+                    Button("Add Link") {
+                        addNewLink()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.pink)
+                    .font(.system(size: fontSize - 2))
+                }
             }
-            Text("Template links will appear here...")
-                .font(.system(size: fontSize - 2))
-                .foregroundStyle(.secondary)
+            
+            // Links list
+            if let template = selectedTemplate {
+                let templateLinks = templateLinksStore.links(for: template)
+                
+                if templateLinks.isEmpty {
+                    VStack {
+                        Image(systemName: "link.badge.plus")
+                            .font(.system(size: 32))
+                            .foregroundStyle(.secondary.opacity(0.5))
+                        Text("No links yet")
+                            .font(.system(size: fontSize - 1))
+                            .foregroundStyle(.secondary)
+                        Text("Click 'Add Link' to associate URLs with this template")
+                            .font(.system(size: fontSize - 3))
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 6) {
+                            ForEach(templateLinks) { link in
+                                TemplateLinkRow(
+                                    link: link,
+                                    fontSize: fontSize,
+                                    onOpen: { openTemplateLink(link) },
+                                    onEdit: { editTemplateLink(link) },
+                                    onDelete: { deleteTemplateLink(link) }
+                                )
+                            }
+                        }
+                        .padding(4)
+                    }
+                    
+                    // Save/Revert buttons
+                    let isDirty = templateLinksStore.isDirty(for: template)
+                    if isDirty {
+                        HStack {
+                            Button("Save Links") {
+                                _ = templateLinksStore.saveSidecar(for: template)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(Theme.purple)
+                            
+                            Button("Revert") {
+                                _ = templateLinksStore.loadSidecar(for: template)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(Theme.pink)
+                            
+                            Spacer()
+                        }
+                        .padding(.top, 4)
+                    }
+                }
+            } else {
+                VStack {
+                    Text("Select a template to manage its links")
+                        .font(.system(size: fontSize - 1))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+            
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 8)
                 .fill(Theme.grayBG.opacity(0.25))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
+                )
         )
     }
     // Alternate Fields Row
@@ -4383,5 +4512,56 @@ struct SessionNotesInline: View {
         .onChange(of: text) { _, newVal in
             self.localText = newVal
         }
+    }
+}
+
+// MARK: - Template Link Row
+struct TemplateLinkRow: View {
+    let link: TemplateLink
+    let fontSize: CGFloat
+    let onOpen: () -> Void
+    let onEdit: () -> Void
+    let onDelete: () -> Void
+    
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "link")
+                .foregroundStyle(Theme.aqua)
+                .frame(width: 20)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(link.title)
+                    .font(.system(size: fontSize - 1, weight: .medium))
+                    .lineLimit(1)
+                
+                Text(link.url)
+                    .font(.system(size: fontSize - 3))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            
+            Spacer()
+            
+            HStack(spacing: 4) {
+                Button("Open") { onOpen() }
+                    .buttonStyle(.bordered)
+                    .font(.system(size: fontSize - 3))
+                
+                Button("Edit") { onEdit() }
+                    .buttonStyle(.bordered)
+                    .font(.system(size: fontSize - 3))
+                
+                Button("Delete") { onDelete() }
+                    .buttonStyle(.bordered)
+                    .tint(.red)
+                    .font(.system(size: fontSize - 3))
+            }
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color.secondary.opacity(0.1))
+        )
     }
 }
