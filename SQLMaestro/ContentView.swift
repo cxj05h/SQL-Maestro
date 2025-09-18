@@ -3348,8 +3348,31 @@ struct ContentView: View {
                 sessionStaticFields[sessions.current] = (orgId, acctId, mysqlDb, companyLabel)
                 
                 // Restore placeholders
-                for (k, v) in loaded.placeholders { sessions.setValue(v, for: k) }
-                
+                for (k, v) in loaded.placeholders {
+                    sessions.setValue(v, for: k)
+                }
+
+                // Try to resolve template match first
+                var matched: TemplateItem? = nil
+                if let tid = loaded.templateId {
+                    matched = templates.templates.first(where: { "\($0.id)" == tid })
+                }
+                if matched == nil, let tname = loaded.templateName {
+                    matched = templates.templates.first(where: { $0.name == tname })
+                }
+
+                // Mark template as used if it has any values
+                if let t = matched ?? selectedTemplate {
+                    let hasValues = loaded.placeholders.values.contains { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+                    if hasValues {
+                        UsedTemplatesStore.shared.markTemplateUsed(session: sessions.current, templateId: t.id)
+                        UsedTemplatesStore.shared.setAllValues(loaded.placeholders,
+                                                               session: sessions.current,
+                                                               templateId: t.id)
+                        LOG("UsedTemplates rehydrated from loaded session",
+                            ctx: ["template": t.name, "count": "\(loaded.placeholders.count)"])
+                    }
+                }
                 // Restore notes
                 sessions.sessionNotes[sessions.current] = loaded.notes
                 // Restore alternate fields
@@ -3359,13 +3382,6 @@ struct ContentView: View {
                 
                 
                 // Try to restore template
-                var matched: TemplateItem? = nil
-                if let tid = loaded.templateId {
-                    matched = templates.templates.first(where: { "\($0.id)" == tid })
-                }
-                if matched == nil, let tname = loaded.templateName {
-                    matched = templates.templates.first(where: { $0.name == tname })
-                }
                 if let t = matched {
                     loadTemplate(t)
                     if !loaded.dbTables.isEmpty {
