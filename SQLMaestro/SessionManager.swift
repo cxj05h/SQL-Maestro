@@ -5,8 +5,13 @@ struct SessionImage: Identifiable, Codable {
     let fileName: String
     let originalPath: String?
     let savedAt: Date
+    var customName: String? // New: custom user-defined name
     
     var displayName: String {
+        if let custom = customName, !custom.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return custom
+        }
+        // Fallback to auto-generated name
         let number = fileName.components(separatedBy: "_").last?.components(separatedBy: ".").first ?? "0"
         return "Image \(number)"
     }
@@ -140,5 +145,18 @@ final class SessionManager: ObservableObject {
     func clearSessionImages(for session: TicketSession) {
         sessionImages[session] = []
         LOG("Session images cleared", ctx: ["session": "\(session.rawValue)"])
+    }
+    func renameSessionImage(imageId: UUID, newName: String, for session: TicketSession) {
+        guard var images = sessionImages[session] else { return }
+        
+        if let index = images.firstIndex(where: { $0.id == imageId }) {
+            images[index].customName = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+            sessionImages[session] = images
+            LOG("Session image renamed", ctx: [
+                "session": "\(session.rawValue)",
+                "imageId": imageId.uuidString,
+                "newName": newName
+            ])
+        }
     }
 }

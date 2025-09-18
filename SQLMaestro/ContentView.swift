@@ -943,7 +943,26 @@ struct ContentView: View {
             }
         }
     }
-    
+    private func renameSessionImage(_ image: SessionImage) {
+        let alert = NSAlert()
+        alert.messageText = "Rename Image"
+        alert.informativeText = "Enter a new name for this image:"
+        
+        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        input.stringValue = image.displayName
+        input.placeholderString = "Enter image name..."
+        
+        alert.accessoryView = input
+        alert.addButton(withTitle: "Rename")
+        alert.addButton(withTitle: "Cancel")
+        
+        if alert.runModal() == .alertFirstButtonReturn {
+            let newName = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !newName.isEmpty {
+                sessions.renameSessionImage(imageId: image.id, newName: newName, for: sessions.current)
+            }
+        }
+    }
     // MARK: - Template Links Functions
 
     private func addNewLink() {
@@ -2068,9 +2087,17 @@ struct ContentView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 6) {
                         ForEach(sessionImages) { image in
-                            SessionImageRow(image: image, fontSize: fontSize) { imageToDelete in
-                                deleteSessionImage(imageToDelete)
-                            }                        }
+                            SessionImageRow(
+                                image: image,
+                                fontSize: fontSize,
+                                onDelete: { imageToDelete in
+                                    deleteSessionImage(imageToDelete)
+                                },
+                                onRename: { imageToRename in
+                                    renameSessionImage(imageToRename)
+                                }
+                            )
+                        }
                     }
                     .padding(4)
                 }
@@ -4130,6 +4157,7 @@ struct ContentView: View {
         let image: SessionImage
         let fontSize: CGFloat
         let onDelete: (SessionImage) -> Void
+        let onRename: (SessionImage) -> Void
         
         var body: some View {
             HStack(spacing: 8) {
@@ -4148,19 +4176,26 @@ struct ContentView: View {
                 
                 Spacer()
                 
-                HStack(spacing: 6) {
+                HStack(spacing: 4) {
                     Button("Open") {
                         openSessionImage(image)
                     }
                     .buttonStyle(.bordered)
-                    .font(.system(size: fontSize - 2))
+                    .font(.system(size: fontSize - 3))
+                    
+                    Button("Rename") {
+                        onRename(image)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(Theme.aqua)
+                    .font(.system(size: fontSize - 3))
                     
                     Button("Delete") {
                         onDelete(image)
                     }
                     .buttonStyle(.bordered)
                     .tint(.red)
-                    .font(.system(size: fontSize - 2))
+                    .font(.system(size: fontSize - 3))
                 }
             }
             .padding(.horizontal, 8)
