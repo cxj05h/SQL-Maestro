@@ -941,7 +941,18 @@ struct ContentView: View {
             }
         }
     }
-    
+    private func deleteSessionImage(_ image: SessionImage) {
+        // Remove from file system
+        let imageURL = AppPaths.sessionImages.appendingPathComponent(image.fileName)
+        try? FileManager.default.removeItem(at: imageURL)
+        
+        // Remove from session manager
+        var images = sessions.sessionImages[sessions.current] ?? []
+        images.removeAll { $0.id == image.id }
+        sessions.sessionImages[sessions.current] = images
+        
+        LOG("Session image deleted", ctx: ["fileName": image.fileName])
+    }
     // Commit any non-empty draft values for the CURRENT session to global history
     private func commitDraftsForCurrentSession() {
         let cur = sessions.current
@@ -2008,8 +2019,9 @@ struct ContentView: View {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 6) {
                         ForEach(sessionImages) { image in
-                            SessionImageRow(image: image, fontSize: fontSize)
-                        }
+                            SessionImageRow(image: image, fontSize: fontSize) { imageToDelete in
+                                deleteSessionImage(imageToDelete)
+                            }                        }
                     }
                     .padding(4)
                 }
@@ -3988,6 +4000,7 @@ struct ContentView: View {
     struct SessionImageRow: View {
         let image: SessionImage
         let fontSize: CGFloat
+        let onDelete: (SessionImage) -> Void
         
         var body: some View {
             HStack(spacing: 8) {
@@ -4006,11 +4019,20 @@ struct ContentView: View {
                 
                 Spacer()
                 
-                Button("Open") {
-                    openSessionImage(image)
+                HStack(spacing: 6) {
+                    Button("Open") {
+                        openSessionImage(image)
+                    }
+                    .buttonStyle(.bordered)
+                    .font(.system(size: fontSize - 2))
+                    
+                    Button("Delete") {
+                        onDelete(image)
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(.red)
+                    .font(.system(size: fontSize - 2))
                 }
-                .buttonStyle(.bordered)
-                .font(.system(size: fontSize - 2))
             }
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
