@@ -1971,19 +1971,60 @@ struct ContentView: View {
 
     // MARK: - Tab Content Builders
     private func buildSessionImagesView() -> some View {
-        VStack {
-            Text("Session \(sessions.current.rawValue) Images")
-                .font(.system(size: fontSize))
-                .foregroundStyle(.secondary)
-            Text("Images will appear here...")
+        VStack(alignment: .leading, spacing: 8) {
+            // Header with paste button
+            HStack {
+                Text("Session \(sessions.current.rawValue) Images")
+                    .font(.system(size: fontSize, weight: .medium))
+                    .foregroundStyle(Theme.purple)
+                
+                Spacer()
+                
+                Button("Paste Screenshot") {
+                    handleImagePaste()
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.pink)
                 .font(.system(size: fontSize - 2))
-                .foregroundStyle(.secondary)
+            }
+            
+            // Images list
+            let sessionImages = sessions.sessionImages[sessions.current] ?? []
+            
+            if sessionImages.isEmpty {
+                VStack {
+                    Image(systemName: "photo.badge.plus")
+                        .font(.system(size: 32))
+                        .foregroundStyle(.secondary.opacity(0.5))
+                    Text("No images yet")
+                        .font(.system(size: fontSize - 1))
+                        .foregroundStyle(.secondary)
+                    Text("Click 'Paste Screenshot' to add images")
+                        .font(.system(size: fontSize - 3))
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else {
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 6) {
+                        ForEach(sessionImages) { image in
+                            SessionImageRow(image: image, fontSize: fontSize)
+                        }
+                    }
+                    .padding(4)
+                }
+            }
+            
             Spacer()
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 8)
                 .fill(Theme.grayBG.opacity(0.25))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
+                )
         )
     }
 
@@ -3941,6 +3982,103 @@ struct ContentView: View {
                 saveError = "Failed to save settings: \(error.localizedDescription)"
                 LOG("Database settings save failed", ctx: ["error": error.localizedDescription])
             }
+        }
+    }
+    // MARK: - Session Image Row
+    struct SessionImageRow: View {
+        let image: SessionImage
+        let fontSize: CGFloat
+        
+        var body: some View {
+            HStack(spacing: 8) {
+                Image(systemName: "photo")
+                    .foregroundStyle(Theme.aqua)
+                    .frame(width: 20)
+                
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(image.displayName)
+                        .font(.system(size: fontSize - 1, weight: .medium))
+                    
+                    Text(formatDate(image.savedAt))
+                        .font(.system(size: fontSize - 3))
+                        .foregroundStyle(.secondary)
+                }
+                
+                Spacer()
+                
+                Button("Open") {
+                    openSessionImage(image)
+                }
+                .buttonStyle(.bordered)
+                .font(.system(size: fontSize - 2))
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.secondary.opacity(0.1))
+            )
+        }
+        
+        private func formatDate(_ date: Date) -> String {
+            let formatter = DateFormatter()
+            formatter.dateStyle = .none
+            formatter.timeStyle = .short
+            return formatter.string(from: date)
+        }
+        
+        private func openSessionImage(_ image: SessionImage) {
+            let imageURL = AppPaths.sessionImages.appendingPathComponent(image.fileName)
+            if FileManager.default.fileExists(atPath: imageURL.path) {
+                NSWorkspace.shared.open(imageURL)
+                LOG("Opened session image", ctx: ["fileName": image.fileName])
+            } else {
+                LOG("Session image file not found", ctx: ["fileName": image.fileName])
+            }
+        }
+    }
+    private func handleImagePaste() {
+        let pasteboard = NSPasteboard.general
+        
+        guard pasteboard.canReadItem(withDataConformingToTypes: [NSPasteboard.PasteboardType.png.rawValue]) else {
+            LOG("No PNG image found in clipboard")
+            return
+        }
+        
+        guard let imageData = pasteboard.data(forType: .png) else {
+            LOG("Failed to get image data from clipboard")
+            return
+        }
+        
+        // Generate filename
+        let sessionName = "Session\(sessions.current.rawValue)"
+        let existingImages = sessions.sessionImages[sessions.current] ?? []
+        let imageNumber = existingImages.count + 1
+        let fileName = "\(sessionName)_\(String(format: "%03d", imageNumber)).png"
+        
+        do {
+            // Save to session_images folder
+            let imageURL = AppPaths.sessionImages.appendingPathComponent(fileName)
+            try imageData.write(to: imageURL)
+            
+            // Create session image record
+            let sessionImage = SessionImage(
+                fileName: fileName,
+                originalPath: nil,
+                savedAt: Date()
+            )
+            
+            // Add to session manager
+            sessions.addSessionImage(sessionImage, for: sessions.current)
+            
+            LOG("Image pasted and saved", ctx: [
+                "fileName": fileName,
+                "session": "\(sessions.current.rawValue)",
+                "size": "\(imageData.count)"
+            ])
+            
+        } catch {
+            LOG("Failed to save pasted image", ctx: ["error": error.localizedDescription])
         }
     }
 }

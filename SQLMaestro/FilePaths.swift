@@ -13,6 +13,7 @@ enum AppPaths {
     static let mysqlHostsMap = mappings.appendingPathComponent("mysql_hosts_map.json", conformingTo: .json)
     static let userConfig = mappings.appendingPathComponent("user_config.json", conformingTo: .json)
     static let sessions = appSupport.appendingPathComponent("sessions", isDirectory: true)
+    static let sessionImages = appSupport.appendingPathComponent("session_images", isDirectory: true)
     
     static func ensureAll() {
         [appSupport, templates, backups, backupZips, logs, mappings].forEach { url in
