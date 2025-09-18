@@ -3032,6 +3032,8 @@ struct ContentView: View {
         let dbTables: [String]
         let notes: String
         let alternateFields: [String: String]
+        let sessionImages: [SessionImage]
+
     }
 
     private func sanitizeFileName(_ name: String) -> String {
@@ -3101,7 +3103,9 @@ struct ContentView: View {
             alternateFields: sessions.sessionAlternateFields[sessions.current]?
                 .reduce(into: [String:String]()) { dict, field in
                     dict[field.name] = field.value
-                } ?? [:]        )
+                } ?? [:],
+            sessionImages: sessions.sessionImages[sessions.current] ?? []
+        )
 
         do {
             let enc = JSONEncoder()
@@ -3162,6 +3166,8 @@ struct ContentView: View {
             // Restore alternate fields
             sessions.sessionAlternateFields[sessions.current] =
                 loaded.alternateFields.map { AlternateField(name: $0.key, value: $0.value) }
+            sessions.sessionImages[sessions.current] = loaded.sessionImages
+
             
             // Try to restore template
             var matched: TemplateItem? = nil
