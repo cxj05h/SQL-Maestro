@@ -1043,11 +1043,47 @@ struct ContentView: View {
     }
 
     private func openTemplateLink(_ link: TemplateLink) {
-        if let url = URL(string: link.url) {
-            NSWorkspace.shared.open(url)
-            LOG("Opened template link", ctx: ["title": link.title, "url": link.url])
+        var urlString = link.url.trimmingCharacters(in: .whitespacesAndNewlines)
+        
+        // Add https:// if no scheme is present
+        if !urlString.contains("://") {
+            urlString = "https://" + urlString
         }
+        
+        // Handle common typos
+        urlString = urlString.replacingOccurrences(of: " ", with: "%20")
+        
+        guard let url = URL(string: urlString) else {
+            LOG("Invalid URL format", ctx: ["title": link.title, "url": link.url])
+            
+            // Show error to user
+            let alert = NSAlert()
+            alert.messageText = "Invalid URL"
+            alert.informativeText = "The URL '\(link.url)' is not valid. Please edit the link and ensure it's a proper web address."
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+            return
+        }
+        
+        // Validate it's a web URL
+        guard let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https" else {
+            LOG("Non-web URL rejected", ctx: ["title": link.title, "url": urlString])
+            
+            let alert = NSAlert()
+            alert.messageText = "Unsupported URL"
+            alert.informativeText = "Only web URLs (http/https) are supported."
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+            return
+        }
+        
+        NSWorkspace.shared.open(url)
+        LOG("Opened template link", ctx: ["title": link.title, "originalUrl": link.url, "finalUrl": urlString])
     }
+    
     private func deleteSessionImage(_ image: SessionImage) {
         // Remove from file system
         let imageURL = AppPaths.sessionImages.appendingPathComponent(image.fileName)
