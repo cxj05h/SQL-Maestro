@@ -19,9 +19,9 @@ mkdir -p "$RELEASE_ASSETS_PATH"/{templates,mappings}
 echo "📋 Copying demo templates..."
 find "$SANDBOX_PATH/templates" -name "*demo*" -type f -exec cp {} "$RELEASE_ASSETS_PATH/templates/" \;
 
-# Copy all mappings
+# Copy all mappings, excluding backups
 echo "🗺️ Copying mappings..."
-cp "$SANDBOX_PATH/mappings"/* "$RELEASE_ASSETS_PATH/mappings/"
+rsync -av --exclude='*.backup' "$SANDBOX_PATH/mappings/" "$RELEASE_ASSETS_PATH/mappings/"
 
 # Copy root files
 echo "📊 Copying root files..."
