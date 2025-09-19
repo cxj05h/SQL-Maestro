@@ -31,11 +31,11 @@ cat > "$RELEASE_ASSETS_PATH/mappings/org_mysql_map.json" << 'EOFORG'
 }
 EOFORG
 
-cat > "$RELEASE_ASSETS_PATH/mappings/mysql_host_map.json" << 'EOFHOST'
+cat > "$RELEASE_ASSETS_PATH/mappings/mysql_hosts_map.json" << 'EOFHOSTS'
 {
   "hosts": {}
 }
-EOFHOST
+EOFHOSTS
 
 # Copy root files
 echo "📊 Copying root files..."
