@@ -9,7 +9,12 @@ xcuserdata/
 # Build artifacts
 build/
 dist/
+SQLMaestroTests/
+SQLMaestroUITest/
 
 # SwiftPM / misc (if you ever add these)
 .swiftpm/
 .idea/
+SQLMaestro.xcodeproj/
+
+/Users/chrisjones/Documents/Projects/SQLMaestro/SQLMaestroTests
