@@ -9,7 +9,8 @@ Having a helper like Maestro gives you a "workspace" for organizing the importan
 
 This is the Query Template Pane where all the saved Query Templates are visible:
 
-![Session Editor Screenshot](images/Maestro\ Screenshots/CleanShot 2025-09-19 at 13.29.42.png)
+![Session Editor Screenshot](images/Maestro%20Screenshots/CleanShot%202025-09-19%20at%2013.29.42.png)
+
 
 You can right-click a template and select:
 1. Open in VS Code
