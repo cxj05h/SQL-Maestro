@@ -13,3 +13,8 @@ brew uninstall --cask sql-maestro
 brew cleanup --prune=all
 brew doctor
 ```
+
+# Allow macOS to run the unsigned app
+```
+sudo xattr -rd com.apple.quarantine "/Applications/SQLMaestro.app"
+```
