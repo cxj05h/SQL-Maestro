@@ -21,8 +21,9 @@ find "$SANDBOX_PATH/templates" -name "*demo*" -type f -exec cp {} "$RELEASE_ASSE
 
 # Copy all mappings, excluding backups AND user_config.json for security
 echo "🗺️ Copying mappings..."
-rsync -av --exclude='*.backup' --exclude='user_config.json' "$SANDBOX_PATH/mappings/" "$RELEASE_ASSETS_PATH/mappings/"  # ✅ ADDED: --exclude='user_config.json'
-
+# Example: copy without extended attributes
+rsync -av --no-xattrs --exclude='*.backup' --exclude='user_config.json' \
+    "$SANDBOX_PATH/mappings/" "$RELEASE_ASSETS_PATH/mappings/"
 # Clear sensitive mappings (leave editable skeletons)
 echo "🗑️ Creating empty org/mysql mapping skeletons..."
 cat > "$RELEASE_ASSETS_PATH/mappings/org_mysql_map.json" << 'EOFORG'
