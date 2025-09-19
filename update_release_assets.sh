@@ -23,6 +23,20 @@ find "$SANDBOX_PATH/templates" -name "*demo*" -type f -exec cp {} "$RELEASE_ASSE
 echo "🗺️ Copying mappings..."
 rsync -av --exclude='*.backup' --exclude='user_config.json' "$SANDBOX_PATH/mappings/" "$RELEASE_ASSETS_PATH/mappings/"  # ✅ ADDED: --exclude='user_config.json'
 
+# Clear sensitive mappings (leave editable skeletons)
+echo "🗑️ Creating empty org/mysql mapping skeletons..."
+cat > "$RELEASE_ASSETS_PATH/mappings/org_mysql_map.json" << 'EOFORG'
+{
+  "companies": {}
+}
+EOFORG
+
+cat > "$RELEASE_ASSETS_PATH/mappings/mysql_host_map.json" << 'EOFHOST'
+{
+  "hosts": {}
+}
+EOFHOST
+
 # Copy root files
 echo "📊 Copying root files..."
 cp "$SANDBOX_PATH/db_tables_catalog.json" "$RELEASE_ASSETS_PATH/" 2>/dev/null || echo "No db_tables_catalog.json"
