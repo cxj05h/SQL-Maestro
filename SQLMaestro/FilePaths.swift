@@ -42,12 +42,12 @@ enum AppPaths {
             let exampleHosts = """
             {
               "mysql01": {
-                "hostname": "mysql01-replica.internal.spotinst.io",
-                "port": 3306
+                "hostname": "xxxxxx",
+                "port": xxxx
               },
               "mysql04": {
-                "hostname": "mysqlcore-replica.internal.spotinst.io",
-                "port": 3306
+                "hostname": "xxxxx",
+                "port": xxxx
               }
             }
             """
