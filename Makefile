@@ -34,18 +34,6 @@ dist: release
 	mkdir -p dist
 	cd $(DERIVED)/Build/Products/Release && zip -r ../../../../dist/SQLMaestro-$(VERSION).zip SQLMaestro.app
 
-release:
-	@echo "Building Release to $(DERIVED)..."
-	xcodebuild -scheme $(SCHEME) -configuration Release \
-	  -destination 'platform=macOS,arch=$(ARCH)' \
-	  -derivedDataPath $(DERIVED) \
-	  build
-
-dist: release
-	@echo "Zipping to dist/SQLMaestro-$(VERSION).zip..."
-	mkdir -p dist
-	cd $(DERIVED)/Build/Products/Release && zip -r ../../../../dist/SQLMaestro-$(VERSION).zip SQLMaestro.app
-
 clean:
 	@echo "Removing $(DERIVED)..."
 	rm -rf $(DERIVED)
