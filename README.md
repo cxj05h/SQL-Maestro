@@ -8,7 +8,7 @@ Having a helper like Maestro gives you a "workspace" for organizing the importan
 **This is the center-piece of SQL Maestro**: predefined SQL query structures that use Placeholders. Reusable across tickets. Can be linked to DB tables and "Links".
 
 This is the Query Template Pane where all the saved Query Templates are visible:
-![[images/Maestro\ Screenshots/CleanShot 2025-09-19 at 13.29.42.png]]
+![[images/Maestro Screenshots/CleanShot 2025-09-19 at 13.29.42.png]]
 
 You can right-click a template and select:
 1. Open in VS Code
