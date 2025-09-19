@@ -3,7 +3,7 @@
 echo "🔄 Updating ReleaseAssets with current data..."
 
 SANDBOX_PATH="$HOME/Library/Containers/Flexera.SQLMaestro/Data/Library/Application Support/SQLMaestro"
-RELEASE_ASSETS_PATH="./ReleaseAssets"
+RELEASE_ASSETS_PATH="./SQLMaestro/ReleaseAssets"  # ✅ ONLY CHANGE: Fixed path
 
 # Check if sandbox data exists
 if [ ! -d "$SANDBOX_PATH" ]; then
@@ -19,9 +19,9 @@ mkdir -p "$RELEASE_ASSETS_PATH"/{templates,mappings}
 echo "📋 Copying demo templates..."
 find "$SANDBOX_PATH/templates" -name "*demo*" -type f -exec cp {} "$RELEASE_ASSETS_PATH/templates/" \;
 
-# Copy all mappings, excluding backups
+# Copy all mappings, excluding backups AND user_config.json for security
 echo "🗺️ Copying mappings..."
-rsync -av --exclude='*.backup' "$SANDBOX_PATH/mappings/" "$RELEASE_ASSETS_PATH/mappings/"
+rsync -av --exclude='*.backup' --exclude='user_config.json' "$SANDBOX_PATH/mappings/" "$RELEASE_ASSETS_PATH/mappings/"  # ✅ ADDED: --exclude='user_config.json'
 
 # Copy root files
 echo "📊 Copying root files..."
@@ -38,6 +38,16 @@ cat > "$RELEASE_ASSETS_PATH/mappings/user_config.json" << 'EOFCONFIG'
   "querious_path": "/Applications/Querious.app"
 }
 EOFCONFIG
+
+# ✅ ADDED: Verification
+echo "🔍 Verifying credentials are cleared..."
+if grep -q '""' "$RELEASE_ASSETS_PATH/mappings/user_config.json"; then
+    echo "✅ Credentials successfully cleared"
+else
+    echo "❌ WARNING: Credentials may not be cleared!"
+    cat "$RELEASE_ASSETS_PATH/mappings/user_config.json"
+    exit 1
+fi
 
 echo "✅ ReleaseAssets updated successfully!"
 echo "📊 Summary:"
