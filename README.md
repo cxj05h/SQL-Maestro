@@ -9,7 +9,7 @@ Having a helper like Maestro gives you a "workspace" for organizing the importan
 
 This is the Query Template Pane where all the saved Query Templates are visible:
 
-![Session Editor Screenshot](images/Maestro%20Screenshots/CleanShot%202025-09-19%20at%2013.29.42.png)
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.29.42.png)
 
 
 You can right-click a template and select:
@@ -21,7 +21,7 @@ You can right-click a template and select:
 If you select *#2* (Edit in App), the Query Editor will appear where there you can use additional functionality for customizing the queries. 
 You'll also see a few new buttons which are explained further below.
 
-![[CleanShot 2025-09-19 at 13.33.17.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.33.17.png)
 
 - Query Templates are not only useful to **auto-populate queries** with the custom values, but can **be used to store any notes about a troubleshooting** case
 - Also useful for Sumo Logic queries
@@ -53,12 +53,12 @@ These are variables inside Query Templates that **will be auto-replaced with act
 
 
 
-Placeholders are flexible and reusable. They et the same SQL query work across different tickets/contexts.
+Placeholders are flexible and reusable. They let the same SQL query work across different tickets/contexts.
 
 - Placeholders are denoted with double curly brackets and are completely customizable except for 3. See below "Note!"
 - The app comes pre-built with a few standard ones already
 
-![[CleanShot 2025-09-19 at 13.38.46.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.38.46.png)
 ##### **Important Note!!**:
 The below Placeholder **names** SHOULD NOT BE ALTERED **EVER**
 - {{Org-ID}}
@@ -69,15 +69,17 @@ If you want to use these Placeholders in a query, then make sure you press the P
 
 Any Placeholder can be created with any syntax, but it's highly recommended to remain consistent across Query Templates.
 
-#### Creating, Editing and Deleting Placeholders
+#### Creating, Editing, and Deleting Placeholders
 
 When a Placeholder is used in a Query Template like {{example-Placeholder}}, this does not add the Placeholder button icon to the top of the query editor window **IT DOES HOWEVER, create a new row under "Field Names" for you to insert values into on that Query Template.**
 
 **Example:**
 1. Freely add another custom Placeholder in a Query Template
-![[CleanShot 2025-09-19 at 13.41.55.png]]
-2. This will trigger a Query Template Reload, which will then show the newly created Placeholder as an additional Dynamic Field Name for that Query Template
-![[CleanShot 2025-09-19 at 13.44.15 1.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.41.55.png)
+
+3. This will trigger a Query Template Reload, which will then show the newly created Placeholder as an additional Dynamic Field Name for that Query Template
+4. 
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.44.15 1.png)
 
 #### Placeholder Tool Bar
 
@@ -85,33 +87,33 @@ These Placeholder buttons are useful for "repeat Placeholders" that are used oft
 
 Pressing the Placeholder button will insert (at the cursor, or if multiple characters are highlighted) the Placeholder name along with the double curly brackets:
 
-![[CleanShot 2025-09-19 at 13.48.21.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.48.21.png)
 
 
 You'll notice there are buttons on this tool bar which may or may not reflect what you have in your query (note there is no entry of 'example-placeholder' on this bar, even though it exists in the Query Template):
-![[CleanShot 2025-09-19 at 13.46.14.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.46.14.png)
 
 
 ##### Adding, Editing and Deleting Placeholders
 
-![[CleanShot 2025-09-19 at 13.49.27.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.49.27.png)
 
 If you want to add a button for that specific Placeholder, you'll need to: 
 Double click the Query Template > navigate to the edit menu at the very right of the Placeholder bar > "Add new Placeholder"
 
-![[CleanShot 2025-09-19 at 13.50.22.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.50.22.png)
 
 Similarly, if you want to remove a Placeholder from that bar, you can follow the same steps to find "Delete Placeholders".
 
-![[CleanShot 2025-09-19 at 13.50.48.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.50.48.png)
 
 Editing the order in which those Placeholders appear on the Placeholder bar can be done following the above and selecting "Edit Placeholders"
 
-![[CleanShot 2025-09-19 at 13.50.33.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.50.33.png)
 
 #### Top Level Buttons in Query Editor Window (Comment/Uncomment, Insert Divider and Save)
 
-![[CleanShot 2025-09-19 at 13.34.55.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.34.55.png)
 Highlighting text in the query editor and hitting "comment/uncomment" will comment out those lines of text...or uncomment them if pressed in succession
 
 The divider button is used to help organize the queries and inserts a:
@@ -144,7 +146,7 @@ To make the process more friendly for navigating these use cases:
 - Any change to a dynamic field in a focused Query Template triggers that query template to **jump to the top of the list and is highlighted in pink**. 
 - **These changes also persist if you save and load a Ticket Session**
 - **NOTE!!**: if you "Clear Session #" this will clear all values pasted in any Dynamic Field in all Query Templates. 
-![[CleanShot 2025-09-19 at 13.18.08.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.18.08.png)
 
 
 
@@ -152,11 +154,11 @@ To make the process more friendly for navigating these use cases:
 
 ✅ A Placeholder field that changes depending on the Query Template and  Ticket Session. 
 
-![[CleanShot 2025-09-19 at 13.03.52 1.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.03.52 1.png)
 
 #### Dynamic Fields: Pulled from Query Templates
 
-![[CleanShot 2025-09-19 at 13.05.17.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.05.17.png)
 
 #### Using "Date" Dynamic Field
 
@@ -166,11 +168,11 @@ It was designed to be very user friendly, allowing for **mouse-scroll manipulati
 
 Press "Apply" to send the calculated value to the Date Field
 
-![[CleanShot 2025-09-19 at 13.07.33.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.07.33.png)
 
 Use the mouse scroll sensitivity bar to suit the rate-of-change according to your mouse:
 
-![[CleanShot 2025-09-19 at 13.08.02.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.08.02.png)
 
 
 ### **Static Field Name**
@@ -206,28 +208,28 @@ Allows the user to keep work isolated per ticket, save their work (all items abo
 #### Saving and Loading Ticket Sessions
 
 **Cmd+S** will save a session...
-![[CleanShot 2025-09-19 at 13.26.18.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.26.18.png)
 
 ... and **Cmd+L** will load one:
-![[CleanShot 2025-09-19 at 13.26.37.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.26.37.png)
 The Ticket Session you load **will overwrite the current Ticket Session** in focus. 
 
 If you "Renamed" a Ticket Session, this will default as the file name to save:
-![[CleanShot 2025-09-19 at 13.28.19.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.28.19.png)
 
-![[CleanShot 2025-09-19 at 13.28.48.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.28.48.png)
 
 ##### Stored Ticket Session Location
 
 Ticket Sessions are stored in:
 `/Users/xxxxx/Library/Application Support/SQLMaestro/sessions`
 
-![[CleanShot 2025-09-19 at 13.24.14.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.24.14.png)
 
 #### Renaming Ticket Sessions
 Each ticket session can be renamed by right-clicking the ticket session button > Rename
 
-![[CleanShot 2025-09-19 at 13.13.52.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.13.52.png)
 
 Each ticket session can be saved and will inherit the name of the Ticket Session. If the ticket session has not be manually renamed, the default is `#1, #2, #3`
 
@@ -238,17 +240,17 @@ Each ticket session can be saved and will inherit the name of the Ticket Session
 #### Linking Ticket Sessions With ZenDesk Tickets 
 
 You may enter the link to the exact ZD ticket and "Save Ticket Session" to persist the associated link. 
-![[CleanShot 2025-09-19 at 13.14.14.png]]
-![[CleanShot 2025-09-19 at 13.15.27.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.14.14.png)
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.15.27.png)
 
 Open the link to the ticket with this icon that appears **when the relevant ticket session is in focus**:
-![[CleanShot 2025-09-19 at 13.16.11.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.16.11.png)
 ### **Copy Block Values**
 
 ✅ Copies all values (static + dynamic + Placeholders + alternates) for the current session into the clipboard, formatted for pasting elsewhere.
 
 This will paste all the values as a "block", as the name suggests, and will look something like this:
-![[CleanShot 2025-09-19 at 12.40.28.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-12.40.28.png)
 ```
 test
 Org-ID: 6061219239123
@@ -266,7 +268,7 @@ alternate-field2: sig-288348
 This feature does the same thing as the Copy Block Values, but instead of copying all as a block, it copies each row as a separate entry to your clipboard:
 
 (works the same with clipy:)
-![[CleanShot 2025-09-19 at 12.41.42.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-12.41.42.png)
 
 ### **DB Tables**
 
@@ -274,7 +276,7 @@ The idea here was to use Query Templates, not according to what query you want t
 
 Therefore, a Query Template might be designed to troubleshoot Azure Stateful Node and for that case you would want only "Azure" related DB tables to reference and easily copy and paste those table names for convenience
 
-![[CleanShot 2025-09-19 at 12.45.57 1.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-12.45.57 1.png)
 
 Each Query Template can be saved with certain DB tables. Just make sure to "Save" after making changes and this will bind those queries to the Query Template "in focus". 
 
@@ -284,7 +286,7 @@ You can also "Lock" this pane to prevent accidental clicks and easy copy/paste
 
 There are a few helpful KB shortcuts that work in the main screen of the app.
 
-![[CleanShot 2025-09-19 at 12.49.27.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-12.49.27.png)
 
 
 | KB Shortcut | Action                                                                                                                                                                                        |
@@ -306,7 +308,7 @@ There are a few helpful KB shortcuts that work in the main screen of the app.
 
 You may also add images that are currently copied to your clipboard by hitting the "Paste Images" button while focused in any Query Template.
 
-![[CleanShot 2025-09-19 at 12.56.30 1.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-12.56.30 1.png)
 
 The only way to persist an image is if you save it with a Ticket Session. 
 #### Links
@@ -315,9 +317,9 @@ Links are saved and "*linked*" **to specific Query Templates**.
 
 The intention here was to provide relevant links for troubleshooting a particular ticket topic and allow the user to easily access KBs, ZenDesk tickets etc.
 
-![[CleanShot 2025-09-19 at 13.12.18.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.12.18.png)
 
-![[CleanShot 2025-09-19 at 13.12.00.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.12.00.png)
 
 **Note!!**:
 - Links will ONLY be saved if you hit the 'Save Links' button in the first image.  
@@ -328,30 +330,30 @@ The intention here was to provide relevant links for troubleshooting a particula
 
 These notes are also saved in Ticket Sessions
 
-![[CleanShot 2025-09-19 at 12.58.20.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-12.58.20.png)
 ### **Database Connections**
 
 The first step in troubleshooting a ticket typically involves copying the Org Id from the ticket/chat. 
 
 Placing that value in this field:
-![[CleanShot 2025-09-19 at 14.06.44.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-14.06.44.png)
 
 Once that value has been inserted, you can Tab out or Enter and you'll see the Company loads, along with the MySQL DB for that Org. 
 
-![[CleanShot 2025-09-19 at 14.08.25.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-14.08.25.png)
 
 Once the "**Connect to Database**" button is green, you can click it and Querious will open that Org on its respective MySQL DB. (On first-time use, you will first be prompted to allow this action in "Accessibility")
 
-![[CleanShot 2025-09-19 at 14.09.57.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-14.09.57.png)
 
-![[CleanShot 2025-09-19 at 14.11.50.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-14.11.50.png)
 
 To allow this to happen, you will of course need to enter your Querious credentials from here:
-![[CleanShot 2025-09-19 at 14.13.02.png]]
-![[CleanShot 2025-09-19 at 14.12.33.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-14.13.02.png)
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-14.12.33.png)
 #### Org and Host Mapping
 
-![[CleanShot 2025-09-19 at 13.00.07.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.00.07.png)
 
 These are accessible JSON files **which house all the host names to their relevant MySQL DB as well as the Organizations to their respective MySQL DB**
 
@@ -359,9 +361,9 @@ These are accessible JSON files **which house all the host names to their releva
 
 You will receive the two JSON files and can just copy/paste their contents in their respective files through SQL Maestro menu item which opens the JSON:
 
-![[CleanShot 2025-09-19 at 14.22.31.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-14.22.31.png)
 
-![[CleanShot 2025-09-19 at 14.22.55.png]]
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-14.22.55.png)
 
 
 
