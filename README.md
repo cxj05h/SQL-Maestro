@@ -74,7 +74,7 @@ When a Placeholder is used in a Query Template like {{example-Placeholder}}, thi
 **Example:**
 1. Freely add another custom Placeholder in a Query Template
 ![[CleanShot 2025-09-19 at 13.41.55.png]]
-2. This will trigger a Query Template Reload which will then show the newly created Placeholder as an additional Dynamic Field Name for that Query Template
+2. This will trigger a Query Template Reload, which will then show the newly created Placeholder as an additional Dynamic Field Name for that Query Template
 ![[CleanShot 2025-09-19 at 13.44.15 1.png]]
 
 #### Placeholder Tool Bar
@@ -199,7 +199,7 @@ This is useful because each ticket will require those fields regardless of Query
 - Images
 - Alternate Fields
 
-Lets the user keep work isolated per ticket, save their work (all items above) and load their work back into a ticket session if needed.
+Allows the user to keep work isolated per ticket, save their work (all items above), and load their work back into a ticket session if needed.
 
 #### Saving and Loading Ticket Sessions
 
@@ -346,7 +346,7 @@ Once the "**Connect to Database**" button is green, you can click it and Queriou
 
 To allow this to happen, you will of course need to enter your Querious credentials from here:
 ![[CleanShot 2025-09-19 at 14.13.02.png]]
-![[CleanShot 2025-09-19 at 14.12.33 1.png]]
+![[CleanShot 2025-09-19 at 14.12.33.png]]
 #### Org and Host Mapping
 
 ![[CleanShot 2025-09-19 at 13.00.07.png]]
