@@ -307,7 +307,9 @@ Therefore, a Query Template might be designed to troubleshoot Azure Stateful Nod
 
 Each Query Template can be saved with certain DB tables. Just make sure to "Save" after making changes, and this will bind those queries to the Query Template "in focus". 
 
-You can also "Lock" this pane to prevent accidental clicks and easy copy/paste
+You can also "Lock" this pane to prevent accidental clicks or changes.
+
+There's also a "Copy Tables" button that will copy all the tables visible to the clipboard for easy copy/paste.
 
 ## **KB Shortcuts**
 
