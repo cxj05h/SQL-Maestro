@@ -203,6 +203,8 @@ These are fields that remain available per ticket session that hold important va
 
 ### **Ticket Session**
 
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-17.49.44.png)
+
 A container of work for a single Ticket. Includes:
 
 - Placeholders
@@ -219,6 +221,7 @@ Allows the user to keep work isolated per ticket, save their work (all items abo
 #### Saving and Loading Ticket Sessions
 
 **Cmd+S** will save a session...
+
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.26.18.png)
 
 ... and **Cmd+L** will load one:
@@ -265,10 +268,12 @@ Open the link to the ticket with this icon that appears **when the relevant tick
 
 ### **Copy Block Values**
 
-Copies all values (static + dynamic + Placeholders + alternates) for the current session into the clipboard, formatted for pasting elsewhere.
+Copies all values (static + dynamic + placeholders + alternates) for the current session into the clipboard, formatted for pasting elsewhere.
 
 This will paste all the values as a "block", as the name suggests, and will look something like this:
+
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-12.40.28.png)
+
 ```
 test
 Org-ID: 6061219239123
@@ -286,6 +291,7 @@ Lets you copy just one field’s value to the clipboard.
 This feature does the same thing as the Copy Block Values, but instead of copying all as a block, it copies each row as a separate entry to your clipboard:
 
 (works the same with clipy:)
+
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-12.41.42.png)
 
 ### **DB Tables**
