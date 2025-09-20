@@ -3,7 +3,7 @@
 Having a helper like Maestro provides a kind of "workspace" for organizing the important or relevant IDs, resource names, times/dates, screenshots, db tables, KB or Zendesk links, smoke-tested workflows for challenging cases that require multiple steps/checks, etc., etc.
 
 # UI & Features
-### **Query Templates**
+## **Query Templates**
 
 **This is the centerpiece of SQL Maestro**: predefined SQL query structures that use Placeholders. Reusable across tickets. Can be linked to DB tables and "Links".
 
@@ -25,7 +25,8 @@ You'll also notice a few new buttons, which are explained in more detail below.
 
 - Query Templates are not only useful to **auto-populate queries** with the custom values, but can **be used to store any notes or directions for how to troubleshoot a case**
 - Also useful for Sumo Logic queries
-##### Example Use Case With Notes:
+
+### Example Use Case With Notes:
 ```
 ---|-----------------**- NLC -**------------------------------|
 #!!!!AZURE NOTE!!!*** Look at the "state" here or in the UI and make sure the state it failed at here is what I'm setting it to in "Update Instance" DB Action
@@ -122,7 +123,7 @@ The divider button is used to help organize the queries and inserts a:
 
 Make sure to save (cmd + s) or the 'Save' button if you make any changes to the template. 
 
-#### Query Template Change History
+### Query Template Change History
 
 Each time you make a change to an existing Query Template, **that change is recorded in the 'backups' folder in the Application Support for SQL Maestro**:
 
@@ -132,13 +133,13 @@ This is an important feature that will allow you to retrieve any previous change
 
 These files can pile up quickly if you make a lot of changes, so feel free to "prune" the garbage files that are unnecessary. 
 
-#### Query Backups
+### Query Backups
 
 Navigate to the top menu item "Queries" > "Backup Queries"
 
 This will create a zip file containing all queries in your app. Useful for version updates that could potentially (hopefully not) delete those queries.
 
-#### Query Template Indicator Per Ticket Session
+### Query Template Indicator Per Ticket Session
 
 In any particular ticket session, you may need to alter multiple Query Templates and add values to them.
 
@@ -150,18 +151,17 @@ To make the process more friendly for navigating these use cases:
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.18.08.png)
 
 
-
-### **Dynamic Field Name**
+## **Dynamic Field Names**
 
 A Placeholder field that changes depending on the Query Template and  Ticket Session. 
 
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.03.52-1.png)
 
-#### Dynamic Fields: Pulled from Query Templates
+### Dynamic Fields: Pulled from Query Templates
 
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.05.17.png)
 
-#### Using "Date" Dynamic Field
+### Using "Date" Dynamic Field
 
 This is a bit of a special field, in that it will automatically place the applied date in DB format. 
 
@@ -176,13 +176,13 @@ Use the mouse scroll sensitivity bar to suit the rate-of-change according to you
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.08.02.png)
 
 
-### **Static Field Name**
+## **Static Field Name**
 
 A field that is constant across sessions, OrgID, AcctID, and MySQL DB. The values themselves are not constant across ticket sessions; rather, the *actual fields* are not influenced by the Query Template selected. 
 
 This is useful because each ticket will require those fields regardless of the Query Template (the scope of the ticket in question/troubleshooting case )
 
-### **Alternate Fields**
+## **Alternate Fields**
 
 These are fields that remain available per ticket session that hold important values but may not be useful at the moment. 
 
@@ -201,7 +201,7 @@ These are fields that remain available per ticket session that hold important va
 
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-17.27.23.png)
 
-### **Ticket Session**
+## **Ticket Session**
 
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-17.49.44.png)
 
@@ -218,7 +218,7 @@ A container of work for a single Ticket. Includes:
 
 Allows the user to keep work isolated per ticket, save their work (all items above), and load their work back into a ticket session if needed.
 
-#### Saving and Loading Ticket Sessions
+### Saving and Loading Ticket Sessions
 
 **Cmd+S** will save a session...
 
@@ -236,14 +236,14 @@ If you "Renamed" a Ticket Session, this will default as the file name to save:
 
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.28.48.png)
 
-##### Stored Ticket Session Location
+### Stored Ticket Session Location
 
 Ticket Sessions are stored in:
 `/Users/xxxxx/Library/Application Support/SQLMaestro/sessions`
 
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.24.14.png)
 
-#### Renaming Ticket Sessions
+### Renaming Ticket Sessions
 Each ticket session can be renamed by right-clicking the ticket session button > Rename
 
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.13.52.png)
@@ -254,7 +254,7 @@ Each ticket session can be saved and will inherit the name of the Ticket Session
 - It's recommended to name saved ticket sessions in the following format:
   `Name | Of | Chat Session - #ticketnumber`
 
-#### Linking Ticket Sessions With ZenDesk Tickets 
+### Linking Ticket Sessions With ZenDesk Tickets 
 
 You may enter the link to the exact ZD ticket and "Save Ticket Session" to persist the associated link. 
 
@@ -266,7 +266,7 @@ Open the link to the ticket with this icon that appears **when the relevant tick
 
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.16.11.png)
 
-### **Copy Block Values**
+## **Copy Block Values**
 
 Copies all values (static + dynamic + placeholders + alternates) for the current session into the clipboard, formatted for pasting elsewhere.
 
@@ -284,7 +284,7 @@ test-alternate-field: sig-1231231
 alternate-field2: sig-288348
 ```
 
-### **Copy Individual Values**
+## **Copy Individual Values**
 
 Lets you copy just one field’s value to the clipboard.
 
@@ -294,7 +294,7 @@ This feature does the same thing as the Copy Block Values, but instead of copyin
 
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-12.41.42.png)
 
-### **DB Tables**
+## **DB Tables**
 
 The idea here was to use Query Templates, not according to what query you want to run, but according to what kind of ticket you are troubleshooting. 
 
@@ -306,7 +306,7 @@ Each Query Template can be saved with certain DB tables. Just make sure to "Save
 
 You can also "Lock" this pane to prevent accidental clicks and easy copy/paste
 
-### **KB Shortcuts**
+## **KB Shortcuts**
 
 There are a few helpful KB shortcuts that work in the main screen of the app.
 
@@ -326,16 +326,17 @@ There are a few helpful KB shortcuts that work in the main screen of the app.
 | Cmd + L     | Load Ticket Session                                                                                                                                                                           |
 | Cmd + S     | Save Ticket Session                                                                                                                                                                           |
 
-### **Images and Links**
+## **Images and Links**
 
-#### Saving Images
+### Saving Images
 
 You may also add images that are currently copied to your clipboard by hitting the "Paste Images" button while focused in any Query Template.
 
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-12.56.30-1.png)
 
-The only way to persist an image is if you save it with a Ticket Session. 
-#### Links
+The only way to persist an image is if you save it with a Ticket Session.
+
+### Links
 
 Links are saved and "*linked*" **to specific Query Templates**. 
 
@@ -348,7 +349,7 @@ The intention here was to provide relevant links for troubleshooting a particula
 **Note!!**:
 - Links will ONLY be saved if you hit the 'Save Links' button in the first image.  
 
-### **Session Notes**
+## **Session Notes**
 
 Freeform notes that are specific to a ticket session.
 
@@ -356,7 +357,7 @@ These notes are also saved in Ticket Sessions
 
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-12.58.20.png)
 
-### **Database Connections**
+## **Database Connections**
 
 The first step in troubleshooting a ticket typically involves copying the Org Id from the ticket/chat. 
 
@@ -380,7 +381,7 @@ To allow this to happen, you will of course need to enter your Querious credenti
 
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-14.12.33.png)
 
-#### Org and Host Mapping
+### Org and Host Mapping
 
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.00.07.png)
 
