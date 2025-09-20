@@ -397,16 +397,32 @@ You will receive the two JSON files and can just copy/paste their contents in th
 -------
 
 # Install 
+
 ```
 brew tap cxj05h/tap
 brew install --cask sql-maestro
 ```
 
 # Upgrade
-`brew upgrade --cask sql-maestro`
+
+```
+# View current version 
+brew info sql-maestro
+
+# Update homebrew if necessary
+brew update --force
+
+# Update cask version of Maestro
+brew upgrade --cask sql-maestro
+```
+
 
 # Uninstall
+
 ```
+#!!!! AVOID THIS AFTER ALREADY CUSTOMIZING YOUR MAESTRO
+#!!!! BACKUP ALL SESSIONS & QUERIES BEFORE UNINSTALL
+
 brew uninstall --cask sql-maestro
 brew cleanup --prune=all
 brew doctor
