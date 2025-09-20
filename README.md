@@ -18,7 +18,7 @@ You can right-click a template and select:
 3. Open JSON
 4. Show in Finder
 
-If you select *#2* (Edit in App), the Query Editor will appear where there you can use additional functionality for customizing the queries. 
+If you select *#2* (Edit in App), the Query Editor (in-app) (in-app) will appear where there you can use additional functionality for customizing the queries. 
 You'll also notice a few new buttons, which are explained in more detail below.
 
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.33.17.png)
@@ -64,13 +64,13 @@ The below Placeholder **names** SHOULD NOT BE ALTERED **EVER**
 - {{Acct-ID}}
 - {{Date}}
 
-If you want to use these Placeholders in a query, then make sure you press the Placeholder buttons in the 'query editor' window when placing them in a sql query. This will mitigate incorrect syntax issues.
+If you want to use these Placeholders in a query, then make sure you press the Placeholder buttons in the 'Query Editor (in-app)' window when placing them in a sql query. This will mitigate incorrect syntax issues.
 
 Any Placeholder can be created with any syntax, but it's highly recommended to remain consistent across Query Templates.
 
 #### Creating, Editing, and Deleting Placeholders
 
-When a Placeholder is used in a Query Template like {{example-placeholder}}, this does not add the Placeholder button icon to the top of the query editor window **IT DOES HOWEVER, create a new row under "Field Names" for you to insert values into on that Query Template.**
+When a Placeholder is used in a Query Template like {{example-placeholder}}, this does not add the Placeholder button icon to the top of the Query Editor (in-app) window **IT DOES HOWEVER, create a new row under "Field Names" for you to insert values into on that Query Template.**
 
 **Example:**
 1. Freely add another custom Placeholder in a Query Template
@@ -112,14 +112,14 @@ Editing the order in which those Placeholders appear on the Placeholder bar can 
 
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.50.33.png)
 
-#### Top Level Buttons in Query Editor Window (Comment/Uncomment, Insert Divider and Save)
+#### Top Level Buttons in Query Editor (in-app) Window (Comment/Uncomment, Insert Divider and Save)
 
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.34.55.png)
 
-Highlighting text in the query editor and hitting "comment/uncomment" will comment out those lines of text...or uncomment them if pressed in succession
+Highlighting text in the Query Editor (in-app) and hitting "comment/uncomment" will comment out those lines of text...or uncomment them if pressed in succession
 
 The divider button is used to help organize the queries and inserts a:
-`---|-----------------**- xxxxxxxxx -**------------------------|`
+`---|-----------------**- xxxxxxxxx -**---------------------|`
 
 Make sure to save (cmd + s) or the 'Save' button if you make any changes to the template. 
 
@@ -133,23 +133,25 @@ This is an important feature that will allow you to retrieve any previous change
 
 These files can pile up quickly if you make a lot of changes, so feel free to "prune" the garbage files that are unnecessary. 
 
-### Query Backups
+### Query Template Backups
+
+This will create a snapshot zip file containing **ALL** queries in your app. Useful to use before version updates that could potentially (hopefully not) delete those queries or in general, periodically run this especially if you've invested a good amount of time building them.
+
+`/Users/xxxxx/Library/Application Support/SQLMaestro/backups/zips`
 
 Navigate to the top menu item "Queries" > "Backup Queries"
 
-This will create a zip file containing all queries in your app. Useful for version updates that could potentially (hopefully not) delete those queries.
-
 ### Query Template Indicator Per Ticket Session
 
-In any particular ticket session, you may need to alter multiple Query Templates and add values to them.
+In any particular ticket session, you may need to alter multiple Query Templates and add values to them. It can be a hassle trying to remember which templates you were using if you need to jump back-and-forth between them.
 
 To make the process more friendly for navigating these use cases:
 
 - Any change to a dynamic field in a focused Query Template triggers that query template to **jump to the top of the list and is highlighted in pink**. 
 - **These changes also persist if you save and load a Ticket Session**
-- **NOTE!!**: if you "Clear Session #" this will clear all values pasted in any Dynamic Field in all Query Templates. 
-![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.18.08.png)
+- **NOTE!!**: if you "Clear Session #" this will clear **all** values pasted in any Dynamic Field in **all** Query Templates.
 
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.18.08.png)
 
 ## **Dynamic Field Names**
 
@@ -205,14 +207,13 @@ These are fields that remain available per ticket session that hold important va
 
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-17.49.44.png)
 
-A container of work for a single Ticket. Includes:
+A container of work for a single Ticket. 
+Includes:
 
-- Placeholders
-- Dynamic fields
-- Static fields
-- Session notes
-- DB tables
-- Linked template queries with their values
+- Query Templates used (if values were inserted)
+- Placeholder Values / Dynamic Fields Values (per Query Template)
+- Static Field Values
+- Session Notes
 - Images
 - Alternate Fields
 
@@ -220,11 +221,11 @@ Allows the user to keep work isolated per ticket, save their work (all items abo
 
 ### Saving and Loading Ticket Sessions
 
-**Cmd+S** will save a session...
+**Cmd+S** will save a session...:
 
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.26.18.png)
 
-... and **Cmd+L** will load one:
+...and **Cmd+L** will load one:
 
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.26.37.png)
 
