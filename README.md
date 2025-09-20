@@ -1,6 +1,6 @@
-### **SQL Maestro is a tool designed to help relieve some of the stresses of working on a ticket.**
+# **SQL Maestro is a tool designed to help organize your workflow while troublshooting a ticket.**
 
-Having a helper like Maestro provides a kind of "workspace" for organizing the important or relevant IDs, resource names, times/dates, screenshots, db tables, KB or Zendesk links, smoke-tested workflows for challenging cases that require multiple steps/checks, etc., etc.
+Having a helper like Maestro provides a kind of "workspace" for organizing the important or relevant IDs, resource names, times/dates, screenshots, db tables, KB or Zendesk links, and a place to create a guide for challenging cases that require multiple steps/checks, etc.
 
 # UI & Features
 ## **Query Templates**
