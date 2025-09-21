@@ -423,6 +423,8 @@ sudo xattr -rd com.apple.quarantine "/Applications/SQLMaestro.app"
 2. Run the update through the terminal with the below or just `brew upgrade --cask sql-maestro`
 
 ```
+brew update && brew upgrade --cask sql-maestro
+
 # View current version 
 brew info sql-maestro
 
