@@ -253,7 +253,7 @@ private struct AboutView: View {
                 Text("Latest release: \(latest)")
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
-                Text("Install via Homebrew: brew upgrade --cask sql-maestro")
+                Text("Install via Homebrew: brew update && brew upgrade --cask sql-maestro")
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
                     .textSelection(.enabled)
