@@ -462,11 +462,12 @@ struct ContentView: View {
     @State private var toastCopied: Bool = false
     @State private var toastOpenDB: Bool = false
     @State private var toastReloaded: Bool = false
-    
+
     @State private var alternateFieldsLocked: Bool = false
-    
+
     @State private var fontSize: CGFloat = 13
     @State private var hoverRecentKey: String? = nil
+    @State private var previewingSessionImage: SessionImage? = nil
     
     @State private var searchText: String = ""
     @State private var showShortcutsSheet: Bool = false
@@ -2320,6 +2321,9 @@ struct ContentView: View {
                                     },
                                     onRename: { imageToRename in
                                         renameSessionImage(imageToRename)
+                                    },
+                                    onPreview: { imageToPreview in
+                                        previewingSessionImage = imageToPreview
                                     }
                                 )
                             }
@@ -2339,6 +2343,9 @@ struct ContentView: View {
                             .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
                     )
             )
+            .sheet(item: $previewingSessionImage) { sessionImage in
+                SessionImagePreviewSheet(sessionImage: sessionImage)
+            }
         }
         
         private func buildTemplateLinksView() -> some View {
@@ -4428,21 +4435,34 @@ struct ContentView: View {
             let fontSize: CGFloat
             let onDelete: (SessionImage) -> Void
             let onRename: (SessionImage) -> Void
-            
+            let onPreview: (SessionImage) -> Void
+
             var body: some View {
                 HStack(spacing: 8) {
-                    Image(systemName: "photo")
-                        .foregroundStyle(Theme.aqua)
-                        .frame(width: 20)
-                    
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(image.displayName)
-                            .font(.system(size: fontSize - 1, weight: .medium))
-                        
-                        Text(formatDate(image.savedAt))
-                            .font(.system(size: fontSize - 3))
-                            .foregroundStyle(.secondary)
+                    HStack(spacing: 8) {
+                        Image(systemName: "photo")
+                            .foregroundStyle(Theme.aqua)
+                            .frame(width: 20)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(image.displayName)
+                                .font(.system(size: fontSize - 1, weight: .medium))
+
+                            Text(formatDate(image.savedAt))
+                                .font(.system(size: fontSize - 3))
+                                .foregroundStyle(.secondary)
+                        }
                     }
+                    .contentShape(Rectangle())
+                    .simultaneousGesture(
+                        TapGesture()
+                            .modifiers(.command)
+                            .onEnded {
+                                LOG("Session image preview", ctx: ["fileName": image.fileName])
+                                onPreview(image)
+                            }
+                    )
+                    .help("⌘-click to preview")
                     
                     Spacer()
                     
@@ -4491,6 +4511,77 @@ struct ContentView: View {
                 } else {
                     LOG("Session image file not found", ctx: ["fileName": image.fileName])
                 }
+            }
+        }
+
+        private struct SessionImagePreviewSheet: View {
+            let sessionImage: SessionImage
+
+            private var imageURL: URL {
+                AppPaths.sessionImages.appendingPathComponent(sessionImage.fileName)
+            }
+
+            private var imageExists: Bool {
+                FileManager.default.fileExists(atPath: imageURL.path)
+            }
+
+            var body: some View {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text(sessionImage.displayName)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Theme.purple)
+
+                    ScrollView {
+                        Group {
+                            if let nsImage = NSImage(contentsOf: imageURL) {
+                                Image(nsImage: nsImage)
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(maxWidth: 640)
+                                    .cornerRadius(10)
+                                    .shadow(color: .black.opacity(0.12), radius: 10, x: 0, y: 6)
+                            } else {
+                                VStack(spacing: 8) {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .font(.system(size: 30))
+                                        .foregroundStyle(.orange)
+                                    Text("Unable to load image from disk")
+                                        .font(.system(size: 13, weight: .semibold))
+                                    Text(imageURL.path)
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(.secondary)
+                                        .multilineTextAlignment(.center)
+                                        .textSelection(.enabled)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 40)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .frame(maxHeight: .infinity)
+
+                    HStack(spacing: 8) {
+                        Text(imageURL.lastPathComponent)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                        Spacer()
+                        Button("Open") {
+                            NSWorkspace.shared.open(imageURL)
+                            LOG("Session image preview open", ctx: ["fileName": sessionImage.fileName])
+                        }
+                        .disabled(!imageExists)
+
+                        Button("Show in Finder") {
+                            NSWorkspace.shared.activateFileViewerSelecting([imageURL])
+                            LOG("Session image preview show in Finder", ctx: ["fileName": sessionImage.fileName])
+                        }
+                        .disabled(!imageExists)
+                    }
+                }
+                .padding(20)
+                .frame(minWidth: 420, minHeight: 360)
             }
         }
         private func handleImagePaste() {
@@ -4870,4 +4961,3 @@ struct ContentView: View {
             )
         }
     }
-
