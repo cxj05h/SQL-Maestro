@@ -468,6 +468,7 @@ struct ContentView: View {
     @State private var fontSize: CGFloat = 13
     @State private var hoverRecentKey: String? = nil
     @State private var previewingSessionImage: SessionImage? = nil
+    @State private var hoveredTemplateLinkID: UUID? = nil
     
     @State private var searchText: String = ""
     @State private var showShortcutsSheet: Bool = false
@@ -2400,7 +2401,8 @@ struct ContentView: View {
                                         fontSize: fontSize,
                                         onOpen: { openTemplateLink(link) },
                                         onEdit: { editTemplateLink(link) },
-                                        onDelete: { deleteTemplateLink(link) }
+                                        onDelete: { deleteTemplateLink(link) },
+                                        hoveredLinkID: $hoveredTemplateLinkID
                                     )
                                 }
                             }
@@ -4918,26 +4920,27 @@ struct ContentView: View {
         let onOpen: () -> Void
         let onEdit: () -> Void
         let onDelete: () -> Void
-        
+        @Binding var hoveredLinkID: UUID?
+
         var body: some View {
             HStack(spacing: 8) {
                 Image(systemName: "link")
                     .foregroundStyle(Theme.aqua)
                     .frame(width: 20)
-                
+
                 VStack(alignment: .leading, spacing: 2) {
                     Text(link.title)
                         .font(.system(size: fontSize - 1, weight: .medium))
                         .lineLimit(1)
-                    
+
                     Text(link.url)
                         .font(.system(size: fontSize - 3))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
-                
+
                 Spacer()
-                
+
                 HStack(spacing: 4) {
                     Button("Open") { onOpen() }
                         .buttonStyle(.bordered)
@@ -4959,5 +4962,71 @@ struct ContentView: View {
                 RoundedRectangle(cornerRadius: 6)
                     .fill(Color.secondary.opacity(0.1))
             )
+            .overlay(alignment: .topLeading) {
+                if shouldShowTooltip, let tooltip = linkTooltip {
+                    LinkTooltipBubble(text: tooltip)
+                        .offset(y: -10)
+                        .allowsHitTesting(false)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                        .zIndex(1)
+                }
+            }
+            .onHover { hovering in
+                if hovering {
+                    hoveredLinkID = link.id
+                } else if hoveredLinkID == link.id {
+                    hoveredLinkID = nil
+                }
+            }
+            .onDisappear {
+                if hoveredLinkID == link.id {
+                    hoveredLinkID = nil
+                }
+            }
+            .zIndex(shouldShowTooltip ? 10 : 0)
+            .animation(.easeInOut(duration: 0.12), value: shouldShowTooltip)
+        }
+
+        private var linkTooltip: String? {
+            let name = link.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let url = link.url.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            var parts: [String] = []
+            if !name.isEmpty { parts.append(name) }
+            if !url.isEmpty { parts.append(url) }
+
+            if parts.isEmpty {
+                return nil
+            }
+
+            return parts.joined(separator: "\n")
+        }
+
+        private var shouldShowTooltip: Bool {
+            hoveredLinkID == link.id && linkTooltip != nil
+        }
+    }
+
+    private struct LinkTooltipBubble: View {
+        let text: String
+
+        var body: some View {
+            Text(text)
+                .font(.system(size: 12))
+                .foregroundStyle(Color.primary)
+                .multilineTextAlignment(.leading)
+                .lineLimit(nil)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color(nsColor: .textBackgroundColor))
+                        .shadow(color: .black.opacity(0.2), radius: 6, x: 0, y: 4)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
+                )
         }
     }
