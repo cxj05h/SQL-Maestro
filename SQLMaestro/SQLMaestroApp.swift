@@ -16,6 +16,11 @@ struct SQLMaestroApp: App {
                 .environmentObject(sessions)
         }
         .commands {
+            CommandGroup(replacing: .appInfo) {
+                Button("About SQLMaestro") {
+                    AboutWindowController.shared.show()
+                }
+            }
             AppMenuCommands(tmpl: templates, sessions: sessions)
             CommandGroup(after: .help) {
                 Button("Keyboard Shortcuts…") {
