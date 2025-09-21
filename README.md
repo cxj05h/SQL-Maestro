@@ -341,6 +341,10 @@ You may also add images that are currently copied to your clipboard by hitting t
 
 The only way to persist an image is if you save it with a Ticket Session.
 
+**Note!!**: 
+
+- Press cmd + left-click to show a preview of the image
+
 ### Links
 
 Links are saved and "*linked*" **to specific Query Templates**. 
@@ -408,8 +412,15 @@ You will receive the two JSON files and can just copy/paste their contents in th
 brew tap cxj05h/tap
 brew install --cask sql-maestro
 ```
+## Allow macOS to run the unsigned app
+```
+sudo xattr -rd com.apple.quarantine "/Applications/SQLMaestro.app"
+```
 
 # Upgrade
+
+1. Go to the menu bar > SQL Maestro > About to check the version and if there's an update. 
+2. Run the update through the terminal with the below or just `brew upgrade --cask sql-maestro`
 
 ```
 # View current version 
@@ -432,9 +443,4 @@ brew upgrade --cask sql-maestro
 brew uninstall --cask sql-maestro
 brew cleanup --prune=all
 brew doctor
-```
-
-# Allow macOS to run the unsigned app
-```
-sudo xattr -rd com.apple.quarantine "/Applications/SQLMaestro.app"
 ```
