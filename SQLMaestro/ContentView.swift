@@ -820,8 +820,8 @@ struct ContentView: View {
                                 withAnimation { showTroubleshootingGuide.toggle() }
                             }
                         }
-                        .buttonStyle(.bordered)
-                        .tint(Theme.purple)
+                        .buttonStyle(.borderedProminent)
+                        .tint(Theme.accent)
                         .font(.system(size: fontSize))
                         .disabled(selectedTemplate == nil)
                         
@@ -840,7 +840,7 @@ struct ContentView: View {
                             
                             LOG("All fields cleared (including static + used templates)", ctx: ["session": "\(sessions.current.rawValue)"])
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(.borderedProminent)
                         .tint(Theme.accent)
                         .keyboardShortcut("k", modifiers: [.command])
                         .font(.system(size: fontSize))
@@ -3227,6 +3227,7 @@ struct ContentView: View {
                         
                         // Auto-populate the query for convenience
                         self.populateQuery()
+                        UsedTemplatesStore.shared.touch(session: self.sessions.current, templateId: updatedTemplate.id)
                         
                         LOG("Template editing workflow completed", ctx: [
                             "template": updatedTemplate.name,
@@ -3335,6 +3336,7 @@ struct ContentView: View {
                 withAnimation { toastCopied = false }
             }
             LOG("Populate Query", ctx: ["template": t.name, "bytes":"\(sql.count)"])
+            UsedTemplatesStore.shared.touch(session: sessions.current, templateId: t.id)
             
             if let entry = mapping.lookup(orgId: orgId) {
                 mysqlDb = entry.mysqlDb
