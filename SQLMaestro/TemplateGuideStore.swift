@@ -81,27 +81,31 @@ final class TemplateGuideStore: ObservableObject {
             return nil
         }
     }
-    
-    func deleteImage(_ image: TemplateGuideImage, for template: TemplateItem) {
+
+    @discardableResult
+    func deleteImage(_ image: TemplateGuideImage, for template: TemplateItem) -> Bool {
         let key = key(for: template)
         var images = imageCache[key] ?? []
-        guard let idx = images.firstIndex(where: { $0.id == image.id }) else { return }
+        guard let idx = images.firstIndex(where: { $0.id == image.id }) else { return false }
         let url = imageURL(fileName: image.fileName, for: template)
         try? FileManager.default.removeItem(at: url)
         images.remove(at: idx)
         imageCache[key] = images
         persistImages(for: template, images: images)
+        return true
     }
-    
-    func renameImage(_ image: TemplateGuideImage, to newName: String, for template: TemplateItem) {
+
+    @discardableResult
+    func renameImage(_ image: TemplateGuideImage, to newName: String, for template: TemplateItem) -> Bool {
         let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty else { return false }
         let key = key(for: template)
         guard var images = imageCache[key],
-              let idx = images.firstIndex(where: { $0.id == image.id }) else { return }
+              let idx = images.firstIndex(where: { $0.id == image.id }) else { return false }
         images[idx].customName = trimmed
         imageCache[key] = images
         persistImages(for: template, images: images)
+        return true
     }
     
     func imageURL(for image: TemplateGuideImage, template: TemplateItem) -> URL {
@@ -114,17 +118,22 @@ final class TemplateGuideStore: ObservableObject {
         return notesCache[key(for: template)]?.text ?? ""
     }
     
-    func setNotes(_ text: String, for template: TemplateItem) {
+    @discardableResult
+    func setNotes(_ text: String, for template: TemplateItem) -> Bool {
         let key = key(for: template)
+        var changed = false
         if var state = notesCache[key] {
             if state.text != text {
                 state.text = text
                 state.dirty = true
                 notesCache[key] = state
+                changed = true
             }
         } else {
             notesCache[key] = GuideNotesState(text: text, dirty: true)
+            changed = true
         }
+        return changed
     }
     
     func isNotesDirty(for template: TemplateItem?) -> Bool {

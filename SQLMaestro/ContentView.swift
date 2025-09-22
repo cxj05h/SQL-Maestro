@@ -1047,6 +1047,7 @@ struct ContentView: View {
                 guard !title.isEmpty, !url.isEmpty else { return }
                 
                 templateLinksStore.addLink(title: title, url: url, for: template)
+                touchTemplateActivity(for: template)
             }
         }
         
@@ -1083,16 +1084,17 @@ struct ContentView: View {
                 // Update the link in the store
                 var links = templateLinksStore.links(for: template)
                 if let index = links.firstIndex(where: { $0.id == link.id }) {
-                    links[index] = TemplateLink(title: newTitle, url: newUrl)
-                    // Manually set the ID to preserve it
-                    links[index] = TemplateLink(title: newTitle, url: newUrl)
+                    links[index] = TemplateLink(id: link.id, title: newTitle, url: newUrl)
                     templateLinksStore.setLinks(links, for: template)
+                    touchTemplateActivity(for: template)
                 }
             }
         }
-        
+
         private func deleteTemplateLink(_ link: TemplateLink) {
-            templateLinksStore.removeLink(withId: link.id, for: selectedTemplate)
+            guard let template = selectedTemplate else { return }
+            templateLinksStore.removeLink(withId: link.id, for: template)
+            touchTemplateActivity(for: template)
         }
         
         private func openTemplateLink(_ link: TemplateLink) {
@@ -1164,6 +1166,7 @@ struct ContentView: View {
             }
             templateGuideStore.prepare(for: template)
             if let newImage = templateGuideStore.addImage(data: imageData, for: template) {
+                touchTemplateActivity(for: template)
                 LOG("Guide image added", ctx: ["template": template.name, "fileName": newImage.fileName])
             }
 #endif
@@ -1171,8 +1174,10 @@ struct ContentView: View {
 
         private func deleteGuideImage(_ image: TemplateGuideImage) {
             guard let template = selectedTemplate else { return }
-            templateGuideStore.deleteImage(image, for: template)
-            LOG("Guide image deleted", ctx: ["template": template.name, "fileName": image.fileName])
+            if templateGuideStore.deleteImage(image, for: template) {
+                touchTemplateActivity(for: template)
+                LOG("Guide image deleted", ctx: ["template": template.name, "fileName": image.fileName])
+            }
         }
 
         private func renameGuideImage(_ image: TemplateGuideImage) {
@@ -1190,8 +1195,10 @@ struct ContentView: View {
             if alert.runModal() == .alertFirstButtonReturn {
                 let newName = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !newName.isEmpty else { return }
-                templateGuideStore.renameImage(image, to: newName, for: template)
-                LOG("Guide image renamed", ctx: ["template": template.name, "fileName": image.fileName, "newName": newName])
+                if templateGuideStore.renameImage(image, to: newName, for: template) {
+                    touchTemplateActivity(for: template)
+                    LOG("Guide image renamed", ctx: ["template": template.name, "fileName": image.fileName, "newName": newName])
+                }
             }
 #endif
         }
@@ -1202,6 +1209,10 @@ struct ContentView: View {
             if FileManager.default.fileExists(atPath: url.path) {
                 NSWorkspace.shared.open(url)
             }
+        }
+
+        private func touchTemplateActivity(for template: TemplateItem) {
+            UsedTemplatesStore.shared.touch(session: sessions.current, templateId: template.id)
         }
         // Commit any non-empty draft values for the CURRENT session to global history
         private func commitDraftsForCurrentSession() {
@@ -2784,6 +2795,7 @@ struct ContentView: View {
                             guard let template = selectedTemplate else { return }
                             if templateGuideStore.saveNotes(for: template) {
                                 guideNotesDraft = templateGuideStore.currentNotes(for: template)
+                                touchTemplateActivity(for: template)
                             }
                         }
                         .buttonStyle(.borderedProminent)
@@ -2822,7 +2834,9 @@ struct ContentView: View {
                                 .disableAutocorrection(true)
                                 .autocorrectionDisabled(true)
                                 .onChange(of: guideNotesDraft) { _, newVal in
-                                    templateGuideStore.setNotes(newVal, for: template)
+                                    if templateGuideStore.setNotes(newVal, for: template) {
+                                        touchTemplateActivity(for: template)
+                                    }
                                 }
                         } else {
                             VStack {

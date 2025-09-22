@@ -54,11 +54,12 @@ struct TemplateLinks: Codable {
 }
 
 struct TemplateLink: Identifiable, Codable {
-    let id = UUID()
+    let id: UUID
     var title: String
     var url: String
     
-    init(title: String, url: String) {
+    init(id: UUID = UUID(), title: String, url: String) {
+        self.id = id
         self.title = title
         self.url = url
     }

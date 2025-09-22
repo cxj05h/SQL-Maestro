@@ -26,7 +26,7 @@ final class UsedTemplatesStore: ObservableObject {
     /// Returns true if the given template has at least one recorded value for the session.
     func isTemplateUsed(in session: TicketSession, templateId: UUID) -> Bool {
         lock.lock(); defer { lock.unlock() }
-        return usedBySession[session]?[templateId]?.values.isEmpty == false
+        return usedBySession[session]?[templateId] != nil
     }
 
     /// Returns a snapshot of all used template records for a session.
@@ -56,6 +56,21 @@ final class UsedTemplatesStore: ObservableObject {
         } else {
             lock.unlock()
         }
+    }
+
+    /// Update or create a record and bump its timestamp without altering values.
+    func touch(session: TicketSession, templateId: UUID) {
+        lock.lock()
+        var map = usedBySession[session] ?? [:]
+        if var record = map[templateId] {
+            record.lastUpdated = Date()
+            map[templateId] = record
+        } else {
+            map[templateId] = UsedTemplateRecord(templateId: templateId, values: [:], lastUpdated: Date())
+        }
+        usedBySession[session] = map
+        lock.unlock()
+        DispatchQueue.main.async { [weak self] in self?.objectWillChange.send() }
     }
 
     /// Set a dynamic placeholder value for (session, template).
