@@ -138,6 +138,10 @@ final class TemplateManager: ObservableObject {
         try FileManager.default.moveItem(at: item.url, to: dest)
         LOG("Template renamed", ctx: ["old": item.url.lastPathComponent, "new": dest.lastPathComponent])
 
+        Task { @MainActor in
+            TemplateGuideStore.shared.handleTemplateRenamed(from: item.url, to: dest)
+        }
+
         loadTemplates()
         guard let renamed = self.templates.first(where: { $0.url == dest }) else {
             throw NSError(domain: "TemplateManager", code: 5, userInfo: [NSLocalizedDescriptionKey: "Failed to locate renamed template"])

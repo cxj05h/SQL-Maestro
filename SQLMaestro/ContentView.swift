@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 
 enum SessionTemplateTab {
     case sessionImages
+    case guideImages
     case templateLinks
 }
 
@@ -454,6 +455,7 @@ struct ContentView: View {
     @ObservedObject private var dbTablesStore = DBTablesStore.shared
     @ObservedObject private var dbTablesCatalog = DBTablesCatalog.shared
     @ObservedObject private var templateLinksStore = TemplateLinksStore.shared
+    @ObservedObject private var templateGuideStore = TemplateGuideStore.shared
     @ObservedObject private var usedTemplates = UsedTemplatesStore.shared
     @State private var selectedTemplate: TemplateItem?
     @State private var currentSQL: String = ""
@@ -468,6 +470,9 @@ struct ContentView: View {
     @State private var fontSize: CGFloat = 13
     @State private var hoverRecentKey: String? = nil
     @State private var previewingSessionImage: SessionImage? = nil
+    @State private var previewingGuideImage: TemplateGuideImage? = nil
+    @State private var showTroubleshootingGuide: Bool = false
+    @State private var guideNotesDraft: String = ""
     @State private var hoveredTemplateLinkID: UUID? = nil
     
     @State private var searchText: String = ""
@@ -808,6 +813,18 @@ struct ContentView: View {
                             .font(.system(size: fontSize))
                             .registerShortcut(name: "Populate Query", key: .return, modifiers: [.command], scope: "Global")
                         
+                        Button(showTroubleshootingGuide ? "Hide Guide" : "Troubleshooting Guide") {
+                            if let template = selectedTemplate {
+                                templateGuideStore.prepare(for: template)
+                                guideNotesDraft = templateGuideStore.currentNotes(for: template)
+                                withAnimation { showTroubleshootingGuide.toggle() }
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(Theme.purple)
+                        .font(.system(size: fontSize))
+                        .disabled(selectedTemplate == nil)
+                        
                         Button("Clear Session #\(sessions.current.rawValue)") {
                             commitDraftsForCurrentSession()
                             sessions.clearAllFieldsForCurrentSession()
@@ -1119,7 +1136,7 @@ struct ContentView: View {
             NSWorkspace.shared.open(url)
             LOG("Opened template link", ctx: ["title": link.title, "originalUrl": link.url, "finalUrl": urlString])
         }
-        
+
         private func deleteSessionImage(_ image: SessionImage) {
             // Remove from file system
             let imageURL = AppPaths.sessionImages.appendingPathComponent(image.fileName)
@@ -1131,6 +1148,60 @@ struct ContentView: View {
             sessions.sessionImages[sessions.current] = images
             
             LOG("Session image deleted", ctx: ["fileName": image.fileName])
+        }
+
+        private func handleGuideImagePaste() {
+            guard let template = selectedTemplate else { return }
+#if os(macOS)
+            let pasteboard = NSPasteboard.general
+            guard pasteboard.canReadItem(withDataConformingToTypes: [NSPasteboard.PasteboardType.png.rawValue]) else {
+                LOG("No PNG image found in clipboard for guide paste")
+                return
+            }
+            guard let imageData = pasteboard.data(forType: .png) else {
+                LOG("Failed to read PNG data for guide image paste")
+                return
+            }
+            templateGuideStore.prepare(for: template)
+            if let newImage = templateGuideStore.addImage(data: imageData, for: template) {
+                LOG("Guide image added", ctx: ["template": template.name, "fileName": newImage.fileName])
+            }
+#endif
+        }
+
+        private func deleteGuideImage(_ image: TemplateGuideImage) {
+            guard let template = selectedTemplate else { return }
+            templateGuideStore.deleteImage(image, for: template)
+            LOG("Guide image deleted", ctx: ["template": template.name, "fileName": image.fileName])
+        }
+
+        private func renameGuideImage(_ image: TemplateGuideImage) {
+            guard let template = selectedTemplate else { return }
+#if os(macOS)
+            let alert = NSAlert()
+            alert.messageText = "Rename Guide Image"
+            alert.informativeText = "Enter a new name for this guide image:" 
+            let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+            input.stringValue = image.displayName
+            input.placeholderString = "Enter image name..."
+            alert.accessoryView = input
+            alert.addButton(withTitle: "Rename")
+            alert.addButton(withTitle: "Cancel")
+            if alert.runModal() == .alertFirstButtonReturn {
+                let newName = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !newName.isEmpty else { return }
+                templateGuideStore.renameImage(image, to: newName, for: template)
+                LOG("Guide image renamed", ctx: ["template": template.name, "fileName": image.fileName, "newName": newName])
+            }
+#endif
+        }
+
+        private func openGuideImage(_ image: TemplateGuideImage) {
+            guard let template = selectedTemplate else { return }
+            let url = templateGuideStore.imageURL(for: image, template: template)
+            if FileManager.default.fileExists(atPath: url.path) {
+                NSWorkspace.shared.open(url)
+            }
         }
         // Commit any non-empty draft values for the CURRENT session to global history
         private func commitDraftsForCurrentSession() {
@@ -1270,7 +1341,7 @@ struct ContentView: View {
         
         // MARK: — Dynamic fields from template placeholders
         private var dynamicFields: some View {
-            VStack(alignment: .leading, spacing: 6) {
+            return VStack(alignment: .leading, spacing: 6) {
                 Text("Field Names")
                     .font(.system(size: fontSize + 4, weight: .semibold))
                     .foregroundStyle(Theme.pink)
@@ -2156,8 +2227,9 @@ struct ContentView: View {
                         }
                     }
                     .padding(6)
+                    .frame(maxWidth: .infinity, minHeight: 160, alignment: .topLeading)
                 }
-                .frame(minHeight: 120, maxHeight: 180)
+                .frame(minHeight: 160, maxHeight: 220)
                 .background(
                     RoundedRectangle(cornerRadius: 8)
                         .fill(Theme.grayBG.opacity(0.25))
@@ -2166,31 +2238,32 @@ struct ContentView: View {
                                 .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
                         )
                 )
+                .frame(maxWidth: .infinity)
             }
         }
         
         // MARK: — Session & Template Tabbed Pane
         private var sessionAndTemplatePane: some View {
             VStack(alignment: .leading, spacing: 6) {
-                // Tab selector
-                HStack {
-                    Text("Session & Template")
-                        .font(.system(size: fontSize + 1, weight: .semibold))
-                        .foregroundStyle(Theme.purple)
-                    
-                    Spacer()
-                    
-                    Picker("Tab", selection: $selectedSessionTemplateTab) {                    Text("Images").tag(SessionTemplateTab.sessionImages)
-                        Text("Links").tag(SessionTemplateTab.templateLinks)
-                    }
-                    .pickerStyle(.segmented)
-                    .frame(width: 140)
+                Text("Session & Template")
+                    .font(.system(size: fontSize + 1, weight: .semibold))
+                    .foregroundStyle(Theme.purple)
+
+                Picker("Tab", selection: $selectedSessionTemplateTab) {
+                    Text("Ses. Images").tag(SessionTemplateTab.sessionImages)
+                    Text("Guide Images").tag(SessionTemplateTab.guideImages)
+                    Text("Links").tag(SessionTemplateTab.templateLinks)
                 }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.trailing, 12)
                 
                 // Tab content - simple conditional view
                 Group {
                     if selectedSessionTemplateTab == .sessionImages {
                         buildSessionImagesView()
+                    } else if selectedSessionTemplateTab == .guideImages {
+                        buildTemplateGuideImagesView()
                     } else {
                         buildTemplateLinksView()
                     }
@@ -2346,6 +2419,91 @@ struct ContentView: View {
             )
             .sheet(item: $previewingSessionImage) { sessionImage in
                 SessionImagePreviewSheet(sessionImage: sessionImage)
+            }
+        }
+        
+        private func buildTemplateGuideImagesView() -> some View {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    if let template = selectedTemplate {
+                        Text("\(template.name) Guide Images")
+                            .font(.system(size: fontSize, weight: .medium))
+                            .foregroundStyle(Theme.purple)
+                    } else {
+                        Text("No Template Selected")
+                            .font(.system(size: fontSize, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Button("Paste Guide Image") {
+                        handleGuideImagePaste()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.purple)
+                    .font(.system(size: fontSize - 2))
+                    .disabled(selectedTemplate == nil)
+                }
+
+                if let template = selectedTemplate {
+                    let guideImages = templateGuideStore.images(for: template)
+
+                    if guideImages.isEmpty {
+                        VStack {
+                            Image(systemName: "photo")
+                                .font(.system(size: 32))
+                                .foregroundStyle(.secondary.opacity(0.5))
+                            Text("No guide images yet")
+                                .font(.system(size: fontSize - 1))
+                                .foregroundStyle(.secondary)
+                            Text("Paste screenshots to document this template")
+                                .font(.system(size: fontSize - 3))
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 6) {
+                                ForEach(guideImages) { image in
+                                    TemplateGuideImageRow(
+                                        image: image,
+                                        fontSize: fontSize,
+                                        onOpen: { openGuideImage(image) },
+                                        onRename: { renameGuideImage(image) },
+                                        onDelete: { deleteGuideImage(image) },
+                                        onPreview: { previewingGuideImage = image }
+                                    )
+                                }
+                            }
+                            .padding(4)
+                        }
+                    }
+                } else {
+                    VStack {
+                        Text("Select a template to manage guide images")
+                            .font(.system(size: fontSize - 1))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Theme.grayBG.opacity(0.25))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
+                    )
+            )
+            .sheet(item: $previewingGuideImage) { guideImage in
+                if let template = selectedTemplate {
+                    TemplateGuideImagePreviewSheet(template: template, guideImage: guideImage)
+                }
             }
         }
         
@@ -2614,12 +2772,35 @@ struct ContentView: View {
         
         // MARK: — Output area
         private var outputView: some View {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text("Output SQL")
+            let guideDirty = templateGuideStore.isNotesDirty(for: selectedTemplate)
+            return VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text(showTroubleshootingGuide ? "Troubleshooting Guide" : "Output SQL")
                         .font(.system(size: fontSize + 4, weight: .semibold))
                         .foregroundStyle(Theme.aqua)
+
+                    if showTroubleshootingGuide, guideDirty {
+                        Button("Save Guide") {
+                            guard let template = selectedTemplate else { return }
+                            if templateGuideStore.saveNotes(for: template) {
+                                guideNotesDraft = templateGuideStore.currentNotes(for: template)
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Theme.purple)
+                        .font(.system(size: fontSize - 1))
+
+                        Button("Revert") {
+                            guard let template = selectedTemplate else { return }
+                            guideNotesDraft = templateGuideStore.revertNotes(for: template)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(Theme.pink)
+                        .font(.system(size: fontSize - 1))
+                    }
+
                     Spacer()
+
                     Button {
                         withAnimation { showNotesSidebar.toggle() }
                     } label: {
@@ -2630,9 +2811,38 @@ struct ContentView: View {
                     .font(.system(size: fontSize - 1))
                     .help("Toggle Session Notes sidebar")
                 }
-                if showNotesSidebar {
-                    HSplitView {
-                        // Left: Output SQL
+
+                let leftPane = Group {
+                    if showTroubleshootingGuide {
+                        if let template = selectedTemplate {
+                            TextEditor(text: $guideNotesDraft)
+                                .font(.system(size: fontSize))
+                                .frame(minHeight: 160)
+                                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.purple.opacity(0.3)))
+                                .disableAutocorrection(true)
+                                .autocorrectionDisabled(true)
+                                .onChange(of: guideNotesDraft) { _, newVal in
+                                    templateGuideStore.setNotes(newVal, for: template)
+                                }
+                        } else {
+                            VStack {
+                                Text("Select a template to view its troubleshooting guide")
+                                    .font(.system(size: fontSize - 1))
+                                    .foregroundStyle(.secondary)
+                                Spacer()
+                            }
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Theme.grayBG.opacity(0.25))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
+                                    )
+                            )
+                            .frame(minHeight: 160)
+                        }
+                    } else {
                         TextEditor(text: $populatedSQL)
                             .font(.system(size: fontSize, weight: .regular, design: .monospaced))
                             .frame(minHeight: 160)
@@ -2646,9 +2856,14 @@ struct ContentView: View {
                                     textView.isAutomaticTextReplacementEnabled = false
                                 }
                             }
+                    }
+                }
+
+                if showNotesSidebar {
+                    HSplitView {
+                        leftPane
                             .frame(minWidth: 900, idealWidth: 1100)
-                        
-                        // Right: Session Notes (inline)
+
                         SessionNotesInline(
                             fontSize: fontSize,
                             session: sessions.current,
@@ -2664,22 +2879,10 @@ struct ContentView: View {
                     }
                     .frame(minHeight: 160)
                 } else {
-                    TextEditor(text: $populatedSQL)
-                        .font(.system(size: fontSize, weight: .regular, design: .monospaced))
-                        .frame(minHeight: 160)
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.aqua.opacity(0.3)))
-                        .disableAutocorrection(true)
-                        .autocorrectionDisabled(true)
-                        .onReceive(NotificationCenter.default.publisher(for: NSText.didBeginEditingNotification)) { _ in
-                            if let textView = NSApp.keyWindow?.firstResponder as? NSTextView {
-                                textView.isAutomaticQuoteSubstitutionEnabled = false
-                                textView.isAutomaticDashSubstitutionEnabled = false
-                                textView.isAutomaticTextReplacementEnabled = false
-                            }
-                        }
+                    leftPane
                 }
             }
-            
+
         }
         
         // Session buttons with proper functionality
@@ -2891,6 +3094,11 @@ struct ContentView: View {
                 // Hydrate template links from sidecar
                 _ = templateLinksStore.loadSidecar(for: t)
                 LOG("Template links hydrated", ctx: ["template": t.name])
+                templateGuideStore.prepare(for: t)
+                guideNotesDraft = templateGuideStore.currentNotes(for: t)
+            } else {
+                showTroubleshootingGuide = false
+                guideNotesDraft = ""
             }
         }
         
@@ -2922,8 +3130,12 @@ struct ContentView: View {
                 // NEW: hydrate DB tables for this session/template
                 _ = DBTablesStore.shared.loadSidecar(for: newSession, template: found)
                 LOG("DBTables sidecar hydrated (session switch)", ctx: ["template": found.name, "session": "\(newSession.rawValue)"])
+                templateGuideStore.prepare(for: found)
+                guideNotesDraft = templateGuideStore.currentNotes(for: found)
             } else {
                 selectedTemplate = nil
+                showTroubleshootingGuide = false
+                guideNotesDraft = ""
             }
             
             LOG("Session switched", ctx: ["from": "\(previousSession.rawValue)", "to": "\(newSession.rawValue)"])
@@ -2942,6 +3154,8 @@ struct ContentView: View {
             // Hydrate template links from sidecar
             _ = templateLinksStore.loadSidecar(for: t)
             LOG("Template links hydrated", ctx: ["template": t.name])
+            templateGuideStore.prepare(for: t)
+            guideNotesDraft = templateGuideStore.currentNotes(for: t)
         }
         
         private func editTemplateInline(_ t: TemplateItem) {
@@ -3066,6 +3280,7 @@ struct ContentView: View {
         private func populateQuery() {
             commitDraftsForCurrentSession()
             guard let t = selectedTemplate else { return }
+            showTroubleshootingGuide = false
             var sql = t.rawSQL
             
             // Static placeholders that should always use static field values
@@ -4516,6 +4731,72 @@ struct ContentView: View {
             }
         }
 
+        struct TemplateGuideImageRow: View {
+            let image: TemplateGuideImage
+            let fontSize: CGFloat
+            let onOpen: () -> Void
+            let onRename: () -> Void
+            let onDelete: () -> Void
+            let onPreview: () -> Void
+
+            var body: some View {
+                HStack(spacing: 8) {
+                    HStack(spacing: 8) {
+                        Image(systemName: "photo.fill")
+                            .foregroundStyle(Theme.purple)
+                            .frame(width: 20)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(image.displayName)
+                                .font(.system(size: fontSize - 1, weight: .medium))
+
+                            Text(formatDate(image.savedAt))
+                                .font(.system(size: fontSize - 3))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    .contentShape(Rectangle())
+                    .simultaneousGesture(
+                        TapGesture()
+                            .modifiers(.command)
+                            .onEnded { onPreview() }
+                    )
+                    .help("⌘-click to preview")
+
+                    Spacer()
+
+                    HStack(spacing: 4) {
+                        Button("Open") { onOpen() }
+                            .buttonStyle(.bordered)
+                            .font(.system(size: fontSize - 3))
+
+                        Button("Rename") { onRename() }
+                            .buttonStyle(.bordered)
+                            .tint(Theme.purple)
+                            .font(.system(size: fontSize - 3))
+
+                        Button("Delete") { onDelete() }
+                            .buttonStyle(.bordered)
+                            .tint(.red)
+                            .font(.system(size: fontSize - 3))
+                    }
+                }
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color.secondary.opacity(0.1))
+                )
+            }
+
+            private func formatDate(_ date: Date) -> String {
+                let formatter = DateFormatter()
+                formatter.dateStyle = .none
+                formatter.timeStyle = .short
+                return formatter.string(from: date)
+            }
+        }
+
         private struct SessionImagePreviewSheet: View {
             let sessionImage: SessionImage
 
@@ -4578,6 +4859,76 @@ struct ContentView: View {
                         Button("Show in Finder") {
                             NSWorkspace.shared.activateFileViewerSelecting([imageURL])
                             LOG("Session image preview show in Finder", ctx: ["fileName": sessionImage.fileName])
+                        }
+                        .disabled(!imageExists)
+                    }
+                }
+                .padding(20)
+                .frame(minWidth: 420, minHeight: 360)
+            }
+        }
+
+        private struct TemplateGuideImagePreviewSheet: View {
+            let template: TemplateItem
+            let guideImage: TemplateGuideImage
+
+            private var imageURL: URL {
+                TemplateGuideStore.shared.imageURL(for: guideImage, template: template)
+            }
+
+            private var imageExists: Bool {
+                FileManager.default.fileExists(atPath: imageURL.path)
+            }
+
+            var body: some View {
+                VStack(alignment: .leading, spacing: 16) {
+                    Text(guideImage.displayName)
+                        .font(.system(size: 17, weight: .semibold))
+                        .foregroundStyle(Theme.purple)
+
+                    ScrollView {
+                        Group {
+                            if let nsImage = NSImage(contentsOf: imageURL) {
+                                Image(nsImage: nsImage)
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(maxWidth: 640)
+                                    .cornerRadius(10)
+                                    .shadow(color: .black.opacity(0.12), radius: 10, x: 0, y: 6)
+                            } else {
+                                VStack(spacing: 8) {
+                                    Image(systemName: "exclamationmark.triangle.fill")
+                                        .font(.system(size: 30))
+                                        .foregroundStyle(.orange)
+                                    Text("Unable to load image from disk")
+                                        .font(.system(size: 13, weight: .semibold))
+                                    Text(imageURL.path)
+                                        .font(.system(size: 12))
+                                        .foregroundStyle(.secondary)
+                                        .multilineTextAlignment(.center)
+                                        .textSelection(.enabled)
+                                }
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 40)
+                            }
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .frame(maxHeight: .infinity)
+
+                    HStack(spacing: 8) {
+                        Text(imageURL.lastPathComponent)
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+                            .textSelection(.enabled)
+                        Spacer()
+                        Button("Open") {
+                            NSWorkspace.shared.open(imageURL)
+                        }
+                        .disabled(!imageExists)
+
+                        Button("Show in Finder") {
+                            NSWorkspace.shared.activateFileViewerSelecting([imageURL])
                         }
                         .disabled(!imageExists)
                     }
@@ -4938,6 +5289,22 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
+                .overlay(alignment: .topLeading) {
+                    if shouldShowTooltip, let tooltip = linkTooltip {
+                        LinkTooltipBubble(text: tooltip)
+                            .offset(y: -6)
+                            .allowsHitTesting(false)
+                            .transition(.opacity)
+                            .zIndex(1)
+                    }
+                }
+                .onHover { hovering in
+                    if hovering {
+                        hoveredLinkID = link.id
+                    } else if hoveredLinkID == link.id {
+                        hoveredLinkID = nil
+                    }
+                }
 
                 Spacer()
 
@@ -4962,22 +5329,6 @@ struct ContentView: View {
                 RoundedRectangle(cornerRadius: 6)
                     .fill(Color.secondary.opacity(0.1))
             )
-            .overlay(alignment: .topLeading) {
-                if shouldShowTooltip, let tooltip = linkTooltip {
-                    LinkTooltipBubble(text: tooltip)
-                        .offset(y: -10)
-                        .allowsHitTesting(false)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
-                        .zIndex(1)
-                }
-            }
-            .onHover { hovering in
-                if hovering {
-                    hoveredLinkID = link.id
-                } else if hoveredLinkID == link.id {
-                    hoveredLinkID = nil
-                }
-            }
             .onDisappear {
                 if hoveredLinkID == link.id {
                     hoveredLinkID = nil

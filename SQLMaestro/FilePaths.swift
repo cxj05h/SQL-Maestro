@@ -9,6 +9,7 @@ enum AppPaths {
     static let backupZips = backups.appendingPathComponent("zips", isDirectory: true)
     static let logs = appSupport.appendingPathComponent("logs", isDirectory: true)
     static let mappings = appSupport.appendingPathComponent("mappings", isDirectory: true)
+    static let templateGuides = appSupport.appendingPathComponent("template_guides", isDirectory: true)
     static let orgMysqlMap = mappings.appendingPathComponent("org_mysql_map.json", conformingTo: .json)
     static let mysqlHostsMap = mappings.appendingPathComponent("mysql_hosts_map.json", conformingTo: .json)
     static let userConfig = mappings.appendingPathComponent("user_config.json", conformingTo: .json)
@@ -16,7 +17,7 @@ enum AppPaths {
     static let sessionImages = appSupport.appendingPathComponent("session_images", isDirectory: true)
     
     static func ensureAll() {
-        [appSupport, templates, backups, backupZips, logs, mappings].forEach { url in
+        [appSupport, templates, backups, backupZips, logs, mappings, templateGuides].forEach { url in
             try? FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         }
         // Ensure sessions directory exists for saved ticket sessions
