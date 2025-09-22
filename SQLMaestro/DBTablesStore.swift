@@ -101,6 +101,29 @@ final class DBTablesStore: ObservableObject {
         }
     }
 
+    func handleTemplateRenamed(from oldURL: URL, to newURL: URL) {
+        let fm = FileManager.default
+        let oldSidecar = oldURL.templateTablesSidecarURL()
+        let newSidecar = newURL.templateTablesSidecarURL()
+
+        guard fm.fileExists(atPath: oldSidecar.path) else { return }
+
+        do {
+            try? fm.createDirectory(at: newSidecar.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if fm.fileExists(atPath: newSidecar.path) {
+                try fm.removeItem(at: newSidecar)
+            }
+            try fm.moveItem(at: oldSidecar, to: newSidecar)
+            LOG("Template tables sidecar renamed", ctx: ["from": oldSidecar.lastPathComponent, "to": newSidecar.lastPathComponent])
+        } catch {
+            LOG("Template tables sidecar rename failed", ctx: [
+                "from": oldSidecar.lastPathComponent,
+                "to": newSidecar.lastPathComponent,
+                "error": error.localizedDescription
+            ])
+        }
+    }
+
     // MARK: - Utilities
 
     /// Trim, lowercase for comparison, remove duplicates, and validate charset.

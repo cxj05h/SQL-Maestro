@@ -100,4 +100,27 @@ final class TemplateLinksStore: ObservableObject {
             return false
         }
     }
+
+    func handleTemplateRenamed(from oldURL: URL, to newURL: URL) {
+        let fm = FileManager.default
+        let oldSidecar = oldURL.templateLinksSidecarURL()
+        let newSidecar = newURL.templateLinksSidecarURL()
+
+        guard fm.fileExists(atPath: oldSidecar.path) else { return }
+
+        do {
+            try? fm.createDirectory(at: newSidecar.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if fm.fileExists(atPath: newSidecar.path) {
+                try fm.removeItem(at: newSidecar)
+            }
+            try fm.moveItem(at: oldSidecar, to: newSidecar)
+            LOG("Template links sidecar renamed", ctx: ["from": oldSidecar.lastPathComponent, "to": newSidecar.lastPathComponent])
+        } catch {
+            LOG("Template links sidecar rename failed", ctx: [
+                "from": oldSidecar.lastPathComponent,
+                "to": newSidecar.lastPathComponent,
+                "error": error.localizedDescription
+            ])
+        }
+    }
 }

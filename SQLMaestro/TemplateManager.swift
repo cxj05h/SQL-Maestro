@@ -135,11 +135,16 @@ final class TemplateManager: ObservableObject {
             i += 1
         }
 
-        try FileManager.default.moveItem(at: item.url, to: dest)
-        LOG("Template renamed", ctx: ["old": item.url.lastPathComponent, "new": dest.lastPathComponent])
+        let originalURL = item.url
+
+        try FileManager.default.moveItem(at: originalURL, to: dest)
+        LOG("Template renamed", ctx: ["old": originalURL.lastPathComponent, "new": dest.lastPathComponent])
+
+        DBTablesStore.shared.handleTemplateRenamed(from: originalURL, to: dest)
+        TemplateLinksStore.shared.handleTemplateRenamed(from: originalURL, to: dest)
 
         Task { @MainActor in
-            TemplateGuideStore.shared.handleTemplateRenamed(from: item.url, to: dest)
+            TemplateGuideStore.shared.handleTemplateRenamed(from: originalURL, to: dest)
         }
 
         loadTemplates()
