@@ -368,6 +368,12 @@ These notes are also saved in Ticket Sessions
 
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-12.58.20.png)
 
+## **Troubleshooting Guide and Images**
+
+Troubleshooting Guide notes act similarly to "Session Notes" with the difference being they are specific to a Query Template.
+
+"Guide Images" are images that are linked to a specific Query Template. 
+
 ## **Database Connections**
 
 The first step in troubleshooting a ticket typically involves copying the Org Id from the ticket/chat. 
