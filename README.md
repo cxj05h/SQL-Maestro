@@ -157,7 +157,9 @@ To make the process more friendly for navigating these use cases:
 
 ## **Dynamic Field Names**
 
-A Placeholder field that changes depending on the Query Template and  Ticket Session. 
+A Placeholder field that changes depending on the Query Template and  Ticket Session.
+
+- The "Recents" drop-down will capture values that were run with "Populate Query"
 
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.03.52-1.png)
 
