@@ -5303,15 +5303,6 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
                 }
-                .overlay(alignment: .topLeading) {
-                    if shouldShowTooltip, let tooltip = linkTooltip {
-                        LinkTooltipBubble(text: tooltip)
-                            .offset(y: -6)
-                            .allowsHitTesting(false)
-                            .transition(.opacity)
-                            .zIndex(1)
-                    }
-                }
                 .onHover { hovering in
                     if hovering {
                         hoveredLinkID = link.id
@@ -5343,12 +5334,22 @@ struct ContentView: View {
                 RoundedRectangle(cornerRadius: 6)
                     .fill(Color.secondary.opacity(0.1))
             )
+            .overlay(alignment: .topLeading) {
+                if shouldShowTooltip, let tooltip = linkTooltip {
+                    LinkTooltipBubble(text: tooltip)
+                        .offset(x: 28, y: -6)
+                        .allowsHitTesting(false)
+                        .transition(.opacity)
+                        .zIndex(100)
+                        .compositingGroup()
+                        .drawingGroup()
+                }
+            }
             .onDisappear {
                 if hoveredLinkID == link.id {
                     hoveredLinkID = nil
                 }
             }
-            .zIndex(shouldShowTooltip ? 10 : 0)
             .animation(.easeInOut(duration: 0.12), value: shouldShowTooltip)
         }
 
@@ -5378,7 +5379,7 @@ struct ContentView: View {
         var body: some View {
             Text(text)
                 .font(.system(size: 12))
-                .foregroundStyle(Color.primary)
+                .foregroundStyle(Color.white)
                 .multilineTextAlignment(.leading)
                 .lineLimit(nil)
                 .fixedSize(horizontal: false, vertical: true)
@@ -5386,12 +5387,14 @@ struct ContentView: View {
                 .padding(.vertical, 6)
                 .background(
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(Color(nsColor: .textBackgroundColor))
-                        .shadow(color: .black.opacity(0.2), radius: 6, x: 0, y: 4)
+                        .fill(Color.black)
+                        .shadow(color: .black.opacity(0.4), radius: 6, x: 0, y: 4)
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
-                        .stroke(Color.primary.opacity(0.08), lineWidth: 0.5)
+                        .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
                 )
+                .compositingGroup()
+                .drawingGroup()
         }
     }
