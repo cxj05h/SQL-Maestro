@@ -2142,18 +2142,18 @@ struct ContentView: View {
                             .buttonStyle(.bordered)
                             .tint(Theme.pink)
                             .disabled(!isDirty)
-                            
-                            Button("Copy Tables") {
-                                copyTablesToClipboard()
-                            }
-                            .buttonStyle(.bordered)
-                            .tint(Theme.aqua)
-                            .help("Copy all DB table names for this session/template to clipboard")
                         } else {
                             Text("Unlock to save changes")
                                 .font(.system(size: fontSize - 2))
                                 .foregroundStyle(.secondary)
                         }
+
+                        Button("Copy Tables") {
+                            copyTablesToClipboard()
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(Theme.aqua)
+                        .help("Copy all DB table names for this session/template to clipboard")
                         
                         Spacer()
                     }
