@@ -486,7 +486,7 @@ struct ContentView: View {
     @FocusState private var isSearchFocused: Bool
     @FocusState private var isListFocused: Bool
     @FocusState private var focusedDBTableRow: Int?
-    @State private var dbTablesLocked: Bool = false
+    @State private var dbTablesLocked: Bool = true
     @State private var suggestionIndexByRow: [Int: Int] = [:]
     @State private var keyEventMonitor: Any?
     
