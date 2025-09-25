@@ -292,6 +292,57 @@ extension WheelNumberField {
     }
 }
 
+struct MarkdownPreviewView: View {
+    var text: String
+    var fontSize: CGFloat
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 8) {
+                MarkdownPreviewRepresentable(markdown: text, fontSize: fontSize)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+        .textSelection(.enabled)
+    }
+}
+
+struct MarkdownPreviewRepresentable: NSViewRepresentable {
+    let markdown: String
+    let fontSize: CGFloat
+
+    func makeNSView(context: Context) -> NSTextView {
+        let textView = NSTextView()
+        textView.isEditable = false
+        textView.isSelectable = true
+        textView.drawsBackground = false
+        textView.textContainerInset = NSSize(width: 0, height: 0)
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.heightTracksTextView = false
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.textContainer?.lineFragmentPadding = 0
+        updateText(in: textView)
+        return textView
+    }
+
+    func updateNSView(_ nsView: NSTextView, context: Context) {
+        updateText(in: nsView)
+    }
+
+    private func updateText(in textView: NSTextView) {
+        LOG("Markdown preview render", ctx: ["length": "\(markdown.count)"])
+        let rendered = MarkdownEditor.renderPreview(markdown: markdown, fontSize: fontSize)
+        textView.textStorage?.setAttributedString(rendered)
+        textView.textContainer?.lineFragmentPadding = 0
+        textView.layoutManager?.ensureLayout(for: textView.textContainer!)
+    }
+}
+
 /// Minimal stub that opens the template file in the default editor.
 /// Replaced by the full-featured editor when that file is linked.
 enum TemplateEditorWindow {
@@ -477,6 +528,8 @@ struct ContentView: View {
     @State private var sessionNotesDrafts: [TicketSession: String] = [:]
     @StateObject private var sessionNotesEditor = MarkdownEditorController()
     @StateObject private var guideNotesEditor = MarkdownEditorController()
+    @State private var notesPreviewMode: Bool = false
+    @State private var guidePreviewMode: Bool = false
     
     @State private var searchText: String = ""
     @State private var showShortcutsSheet: Bool = false
@@ -2851,7 +2904,8 @@ struct ContentView: View {
                             .font(.system(size: fontSize - 1))
                         }
 
-                        MarkdownToolbar(iconSize: fontSize + 2, controller: guideNotesEditor)
+                        MarkdownToolbar(iconSize: fontSize + 2, isEnabled: !guidePreviewMode, controller: guideNotesEditor)
+                        PreviewModeToggle(isPreview: $guidePreviewMode)
                     }
 
                     Spacer(minLength: 12)
@@ -2870,12 +2924,18 @@ struct ContentView: View {
                 let leftPane = Group {
                     if showTroubleshootingGuide {
                         if let template = selectedTemplate {
-                            MarkdownEditor(
-                                text: $guideNotesDraft,
-                                fontSize: fontSize,
-                                controller: guideNotesEditor,
-                                onLinkRequested: handleTroubleshootingLink(selectedText:source:completion:)
-                            )
+                            Group {
+                                if guidePreviewMode {
+                                    MarkdownPreviewView(text: guideNotesDraft, fontSize: fontSize)
+                                } else {
+                                    MarkdownEditor(
+                                        text: $guideNotesDraft,
+                                        fontSize: fontSize,
+                                        controller: guideNotesEditor,
+                                        onLinkRequested: handleTroubleshootingLink(selectedText:source:completion:)
+                                    )
+                                }
+                            }
                             .frame(minHeight: 200)
                             .background(
                                 RoundedRectangle(cornerRadius: 8)
@@ -2939,6 +2999,7 @@ struct ContentView: View {
                             ),
                             savedValue: sessions.sessionNotes[sessions.current] ?? "",
                             controller: sessionNotesEditor,
+                            isPreview: $notesPreviewMode,
                             onSave: saveSessionNotes,
                             onRevert: revertSessionNotes,
                             onLinkRequested: handleSessionNotesLink(selectedText:source:completion:)
@@ -5380,6 +5441,7 @@ struct ContentView: View {
     // MARK: – Session Notes Inline (sidebar)
     struct MarkdownToolbar: View {
         var iconSize: CGFloat
+        var isEnabled: Bool = true
         @ObservedObject var controller: MarkdownEditorController
 
         var body: some View {
@@ -5442,6 +5504,39 @@ struct ContentView: View {
                             .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
                     )
             )
+            .opacity(isEnabled ? 1.0 : 0.45)
+            .disabled(!isEnabled)
+        }
+    }
+
+    struct PreviewModeToggle: View {
+        @Binding var isPreview: Bool
+
+        var body: some View {
+            HStack(spacing: 6) {
+                modeButton(title: "Edit", isActive: !isPreview) {
+                    isPreview = false
+                }
+
+                modeButton(title: "Preview", isActive: isPreview) {
+                    isPreview = true
+                }
+            }
+        }
+
+        @ViewBuilder
+        private func modeButton(title: String, isActive: Bool, action: @escaping () -> Void) -> some View {
+            Button(title, action: action)
+                .font(.system(size: 12, weight: .semibold))
+                .padding(.vertical, 4)
+                .padding(.horizontal, 10)
+                .background(isActive ? Theme.purple : Theme.grayBG.opacity(0.4))
+                .foregroundStyle(isActive ? Color.white : Theme.purple)
+                .clipShape(Capsule())
+                .overlay(
+                    Capsule()
+                        .stroke(Theme.purple.opacity(isActive ? 1.0 : 0.6), lineWidth: 1)
+                )
         }
     }
 
@@ -5451,6 +5546,7 @@ struct ContentView: View {
         @Binding var draft: String
         var savedValue: String
         @ObservedObject var controller: MarkdownEditorController
+        @Binding var isPreview: Bool
         var onSave: () -> Void
         var onRevert: () -> Void
         var onLinkRequested: (_ selectedText: String, _ source: MarkdownEditor.LinkRequestSource, _ completion: @escaping (MarkdownEditor.LinkInsertion?) -> Void) -> Void
@@ -5464,7 +5560,8 @@ struct ContentView: View {
                         .font(.system(size: fontSize - 1, weight: .semibold))
                         .foregroundStyle(Theme.aqua)
 
-                    MarkdownToolbar(iconSize: fontSize + 2, controller: controller)
+                    MarkdownToolbar(iconSize: fontSize + 2, isEnabled: !isPreview, controller: controller)
+                    PreviewModeToggle(isPreview: $isPreview)
 
                     Spacer()
 
@@ -5481,12 +5578,18 @@ struct ContentView: View {
                     }
                 }
 
-                MarkdownEditor(
-                    text: $draft,
-                    fontSize: fontSize,
-                    controller: controller,
-                    onLinkRequested: onLinkRequested
-                )
+                Group {
+                    if isPreview {
+                        MarkdownPreviewView(text: draft, fontSize: fontSize)
+                    } else {
+                        MarkdownEditor(
+                            text: $draft,
+                            fontSize: fontSize,
+                            controller: controller,
+                            onLinkRequested: onLinkRequested
+                        )
+                    }
+                }
                 .frame(maxWidth: .infinity, minHeight: 180)
                 .background(
                     RoundedRectangle(cornerRadius: 8)
