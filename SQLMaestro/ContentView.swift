@@ -840,8 +840,8 @@ struct ContentView: View {
                             
                             LOG("All fields cleared (including static + used templates)", ctx: ["session": "\(sessions.current.rawValue)"])
                         }
-                        .buttonStyle(.borderedProminent)
-                        .tint(Theme.accent)
+                        .buttonStyle(.bordered)
+                        .tint(Theme.aqua)
                         .keyboardShortcut("k", modifiers: [.command])
                         .font(.system(size: fontSize))
                         .registerShortcut(name: "Clear Session", keyLabel: "K", modifiers: [.command], scope: "Global")
