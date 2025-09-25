@@ -55,7 +55,7 @@ struct MarkdownEditor: NSViewRepresentable {
         textView.isAutomaticDashSubstitutionEnabled = false
         textView.isAutomaticTextReplacementEnabled = false
         textView.isAutomaticLinkDetectionEnabled = true
-        textView.allowsUndo = true
+        textView.allowsUndo = false
         textView.font = NSFont.systemFont(ofSize: fontSize)
         textView.textContainerInset = NSSize(width: 8, height: 10)
         textView.isVerticallyResizable = true
@@ -65,6 +65,7 @@ struct MarkdownEditor: NSViewRepresentable {
         textView.textContainer?.heightTracksTextView = false
         textView.backgroundColor = .clear
         textView.drawsBackground = false
+        textView.selectionGranularity = .selectByCharacter
         textView.linkTextAttributes = [
             .foregroundColor: NSColor.systemTeal,
             .underlineStyle: NSUnderlineStyle.single.rawValue
@@ -103,6 +104,8 @@ struct MarkdownEditor: NSViewRepresentable {
         private static let bulletRegex = try! NSRegularExpression(pattern: "^(\\s*)([-*+])\\s+", options: [])
         private static let numberedRegex = try! NSRegularExpression(pattern: "^(\\s*)(\\d+)([\\.)])\\s+", options: [])
         private static let bulletSanitizeRegex = try! NSRegularExpression(pattern: "^(\\s*)•\\s+", options: [.anchorsMatchLines])
+        private static let blockQuoteSanitizeRegex = try! NSRegularExpression(pattern: "^(\\s*>)(\\s*)(?!\\|)(.*)$", options: [.anchorsMatchLines])
+        private static let blockQuoteRemovalRegex = try! NSRegularExpression(pattern: "^>\\s*\\|?\\s*", options: [])
 
         init(parent: MarkdownEditor) {
             self.parent = parent
@@ -166,8 +169,10 @@ struct MarkdownEditor: NSViewRepresentable {
                     applyMarkdownStyles()
                     textView.scrollRangeToVisible(selection)
                     return true
+                } else {
+                    NSSound.beep()
+                    return true
                 }
-                return false
             case #selector(NSStandardKeyBindingResponding.moveWordRightAndModifySelection(_:)),
                  #selector(NSStandardKeyBindingResponding.moveWordLeftAndModifySelection(_:)):
                 LOG("MarkdownEditor word selection", ctx: ["selector": NSStringFromSelector(commandSelector)])
@@ -196,6 +201,22 @@ struct MarkdownEditor: NSViewRepresentable {
             guard let tv = notification.object as? NSTextView, tv == textView else { return }
             currentSelection = tv.selectedRange()
             applyMarkdownStyles()
+        }
+
+        func textView(_ textView: NSTextView, willChangeSelectionFromCharacterRange oldSelectedCharRange: NSRange, toCharacterRange newSelectedCharRange: NSRange) -> NSRange {
+            guard newSelectedCharRange.location != NSNotFound, newSelectedCharRange.length > 0 else {
+                return newSelectedCharRange
+            }
+            let nsString = textView.string as NSString
+            guard NSMaxRange(newSelectedCharRange) <= nsString.length else { return newSelectedCharRange }
+            let substring = nsString.substring(with: newSelectedCharRange)
+            if substring.hasSuffix("\n") {
+                let trimmed = substring.dropLast()
+                if !trimmed.contains("\n") {
+                    return NSRange(location: newSelectedCharRange.location, length: max(0, newSelectedCharRange.length - 1))
+                }
+            }
+            return newSelectedCharRange
         }
 
         func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
@@ -235,23 +256,99 @@ struct MarkdownEditor: NSViewRepresentable {
             let nsString = textView.string as NSString
             let safeLocation = max(0, min(selectedRange.location, nsString.length))
             let safeLength = max(0, min(selectedRange.length, nsString.length - safeLocation))
-            let range = NSRange(location: safeLocation, length: safeLength)
-            let selectedText = nsString.substring(with: range)
-            let newString = (prefix + selectedText + suffix)
+            let originalRange = NSRange(location: safeLocation, length: safeLength)
+            var coreRange = originalRange
 
-            let caret = prefix.count + selectedText.count + suffix.count
-            replace(range: range, with: newString, caretPosition: range.location + caret)
-            LOG("Markdown wrap", ctx: [
-                "prefix": prefix,
-                "suffix": suffix,
-                "selection": "\(range.location):\(range.length)",
-                "resultLength": "\(newString.count)"
-            ])
+            var newlineScalars: [UnicodeScalar] = []
+            while coreRange.length > 0 {
+                let lastIndex = coreRange.location + coreRange.length - 1
+                let char = nsString.character(at: lastIndex)
+                guard let scalar = UnicodeScalar(char), CharacterSet.newlines.contains(scalar) else { break }
+                newlineScalars.append(scalar)
+                coreRange.length -= 1
+            }
+
+            let trailingNewlines = String(newlineScalars.reversed().map(Character.init))
+            let coreText = coreRange.length > 0 ? nsString.substring(with: coreRange) : ""
+            let prefixLength = (prefix as NSString).length
+            let suffixLength = (suffix as NSString).length
+
+            func replaceWith(range: NSRange, text: String, caretOffset: Int) {
+                replace(range: range, with: text + trailingNewlines, caretPosition: range.location + caretOffset)
+                LOG("Markdown wrap", ctx: [
+                    "prefix": prefix,
+                    "suffix": suffix,
+                    "selection": "\(range.location):\(range.length)",
+                    "resultLength": "\(text.count + trailingNewlines.count)"
+                ])
+            }
+
+            if originalRange.length > 0 {
+                let nsLength = nsString.length
+                var prefixRange: NSRange?
+                var suffixRange: NSRange?
+
+                if coreRange.length >= prefixLength + suffixLength,
+                   coreRange.length >= prefixLength,
+                   nsString.substring(with: NSRange(location: coreRange.location, length: prefixLength)) == prefix,
+                   nsString.substring(with: NSRange(location: coreRange.location + coreRange.length - suffixLength, length: suffixLength)) == suffix {
+                    prefixRange = NSRange(location: coreRange.location, length: prefixLength)
+                    suffixRange = NSRange(location: coreRange.location + coreRange.length - suffixLength, length: suffixLength)
+                } else {
+                    let prefixCandidate = coreRange.location - prefixLength
+                    if prefixCandidate >= 0,
+                       prefixCandidate + prefixLength <= nsLength {
+                        let candidate = nsString.substring(with: NSRange(location: prefixCandidate, length: prefixLength))
+                        if candidate == prefix {
+                            prefixRange = NSRange(location: prefixCandidate, length: prefixLength)
+                        }
+                    }
+
+                    let suffixCandidate = coreRange.location + coreRange.length
+                    if suffixCandidate + suffixLength <= nsLength {
+                        let candidate = nsString.substring(with: NSRange(location: suffixCandidate, length: suffixLength))
+                        if candidate == suffix {
+                            suffixRange = NSRange(location: suffixCandidate, length: suffixLength)
+                        }
+                    }
+                }
+
+                if let prefixRange, let suffixRange {
+                    var innerStart = coreRange.location
+                    var innerLength = coreRange.length
+                    if prefixRange.location == coreRange.location {
+                        innerStart += prefixLength
+                        innerLength = max(0, innerLength - prefixLength)
+                    }
+                    if suffixRange.location + suffixRange.length == coreRange.location + coreRange.length {
+                        innerLength = max(0, innerLength - suffixLength)
+                    }
+
+                    let innerRange = innerLength > 0 ? NSRange(location: innerStart, length: innerLength) : NSRange(location: innerStart, length: 0)
+                    let innerText = innerLength > 0 ? nsString.substring(with: innerRange) : ""
+
+                    var unionStart = originalRange.location
+                    var unionEnd = originalRange.location + originalRange.length
+                    unionStart = min(unionStart, prefixRange.location)
+                    unionEnd = max(unionEnd, suffixRange.location + suffixRange.length)
+                    let rangeToReplace = NSRange(location: unionStart, length: max(0, unionEnd - unionStart))
+                    let caretOffset = (innerText as NSString).length
+                    replaceWith(range: rangeToReplace, text: innerText, caretOffset: caretOffset)
+                    return
+                }
+            }
+
+            let newCore = coreText
+            let wrapped = prefix + newCore + suffix
+            let caret = (prefix as NSString).length + (newCore as NSString).length + (suffix as NSString).length
+            replaceWith(range: originalRange, text: wrapped, caretOffset: caret)
         }
 
         private func sanitizeMarkdown(_ string: String) -> String {
-            let range = NSRange(location: 0, length: (string as NSString).length)
-            let sanitized = Coordinator.bulletSanitizeRegex.stringByReplacingMatches(in: string, options: [], range: range, withTemplate: "$1- ")
+            let initialRange = NSRange(location: 0, length: (string as NSString).length)
+            var sanitized = Coordinator.bulletSanitizeRegex.stringByReplacingMatches(in: string, options: [], range: initialRange, withTemplate: "$1- ")
+            let quoteRange = NSRange(location: 0, length: (sanitized as NSString).length)
+            sanitized = Coordinator.blockQuoteSanitizeRegex.stringByReplacingMatches(in: sanitized, options: [], range: quoteRange, withTemplate: "$1 | $3")
             if sanitized != string {
                 LOG("Markdown sanitize applied", ctx: ["before": "\(string.prefix(40))", "after": "\(sanitized.prefix(40))"])
             }
@@ -355,13 +452,20 @@ struct MarkdownEditor: NSViewRepresentable {
             let lineRange = nsString.lineRange(for: range)
             let lines = nsString.substring(with: lineRange).components(separatedBy: "\n")
             let transformed = lines.map { line -> String in
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
-                guard !trimmed.isEmpty else { return line }
-                let normalizedPrefix = prefix.trimmingCharacters(in: .whitespaces)
-                if trimmed.hasPrefix(normalizedPrefix) || trimmed.hasPrefix("• ") {
-                    return line
+                let leading = line.prefix { $0.isWhitespace }
+                var remainder = String(line.drop { $0.isWhitespace })
+                guard !remainder.isEmpty else { return line }
+                if remainder.hasPrefix(prefix) {
+                    remainder.removeFirst(prefix.count)
+                    return String(leading) + remainder
                 }
-                return prefix + trimmed
+                if remainder.hasPrefix("• ") {
+                    remainder.removeFirst(2)
+                    return String(leading) + remainder
+                }
+                let content = remainder.trimmingCharacters(in: .whitespaces)
+                guard !content.isEmpty else { return line }
+                return String(leading) + prefix + content
             }.joined(separator: "\n")
             let caret = lineRange.location + NSString(string: transformed).length
             replace(range: lineRange, with: transformed, caretPosition: caret)
@@ -374,15 +478,20 @@ struct MarkdownEditor: NSViewRepresentable {
             if range.location == NSNotFound { range = NSRange(location: nsString.length, length: 0) }
             let lineRange = nsString.lineRange(for: range)
             let lines = nsString.substring(with: lineRange).components(separatedBy: "\n")
-            var index = 1
+            var nextNumber = 1
             let transformed = lines.map { line -> String in
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
-                defer { index += 1 }
-                guard !trimmed.isEmpty else { index -= 1; return line }
-                if let match = trimmed.range(of: "^\\d+\\. ", options: .regularExpression), match.lowerBound == trimmed.startIndex {
-                    return line
+                let leading = line.prefix { $0.isWhitespace }
+                var remainder = String(line.drop { $0.isWhitespace })
+                guard !remainder.isEmpty else { return line }
+                if let match = remainder.range(of: "^\\d+[\\.)]\\s*", options: .regularExpression) {
+                    remainder.removeSubrange(match)
+                    return String(leading) + remainder
                 }
-                return "\(index). " + trimmed
+                let content = remainder.trimmingCharacters(in: .whitespaces)
+                guard !content.isEmpty else { return line }
+                let numbered = "\(nextNumber). " + content
+                nextNumber += 1
+                return String(leading) + numbered
             }.joined(separator: "\n")
             let caret = lineRange.location + NSString(string: transformed).length
             replace(range: lineRange, with: transformed, caretPosition: caret)
@@ -396,12 +505,19 @@ struct MarkdownEditor: NSViewRepresentable {
             let lineRange = nsString.lineRange(for: range)
             let lines = nsString.substring(with: lineRange).components(separatedBy: "\n")
             let transformed = lines.map { line -> String in
-                let trimmed = line.trimmingCharacters(in: .whitespaces)
-                guard !trimmed.isEmpty else { return line }
-                if trimmed.hasPrefix("> ") {
-                    return line
+                let leading = line.prefix { $0.isWhitespace }
+                var remainder = String(line.drop { $0.isWhitespace })
+                guard !remainder.isEmpty else { return line }
+                let nsRemainder = remainder as NSString
+                let remainderRange = NSRange(location: 0, length: nsRemainder.length)
+                if let match = Coordinator.blockQuoteRemovalRegex.firstMatch(in: remainder, options: [], range: remainderRange) {
+                    let contentStart = match.range.length
+                    let content = nsRemainder.substring(from: contentStart)
+                    return String(leading) + content
                 }
-                return "> " + trimmed
+                let content = remainder.trimmingCharacters(in: .whitespaces)
+                guard !content.isEmpty else { return line }
+                return String(leading) + "> | " + content
             }.joined(separator: "\n")
             let caret = lineRange.location + NSString(string: transformed).length
             replace(range: lineRange, with: transformed, caretPosition: caret)
@@ -570,8 +686,11 @@ enum MarkdownStyler {
             let startMarker = NSRange(location: match.range.location, length: min(3, match.range.length))
             let endMarker = NSRange(location: max(match.range.location + match.range.length - 3, match.range.location), length: min(3, match.range.length))
             let reveal = intersects(contentRange, with: selectedRange) || intersects(startMarker, with: selectedRange) || intersects(endMarker, with: selectedRange)
-            setMarkerVisibility(storage: storage, markerRange: startMarker, reveal: reveal, baseFont: baseFont)
-            setMarkerVisibility(storage: storage, markerRange: endMarker, reveal: reveal, baseFont: baseFont)
+            let isPreviewContext = selectedRange.location == NSNotFound
+            let tickColor = isPreviewContext ? nil : NSColor.systemOrange.withAlphaComponent(0.75)
+            let compress = isPreviewContext
+            setMarkerVisibility(storage: storage, markerRange: startMarker, reveal: reveal, baseFont: baseFont, hiddenColor: tickColor, compressWidth: compress)
+            setMarkerVisibility(storage: storage, markerRange: endMarker, reveal: reveal, baseFont: baseFont, hiddenColor: tickColor, compressWidth: compress)
         }
     }
 
@@ -591,8 +710,11 @@ enum MarkdownStyler {
             let startMarker = NSRange(location: match.range.location, length: 1)
             let endMarker = NSRange(location: match.range.location + match.range.length - 1, length: 1)
             let reveal = intersects(contentRange, with: selectedRange) || intersects(startMarker, with: selectedRange) || intersects(endMarker, with: selectedRange)
-            setMarkerVisibility(storage: storage, markerRange: startMarker, reveal: reveal, baseFont: baseFont)
-            setMarkerVisibility(storage: storage, markerRange: endMarker, reveal: reveal, baseFont: baseFont)
+            let isPreviewContext = selectedRange.location == NSNotFound
+            let tickColor = isPreviewContext ? nil : NSColor.systemOrange.withAlphaComponent(0.75)
+            let compress = isPreviewContext
+            setMarkerVisibility(storage: storage, markerRange: startMarker, reveal: reveal, baseFont: baseFont, hiddenColor: tickColor, compressWidth: compress)
+            setMarkerVisibility(storage: storage, markerRange: endMarker, reveal: reveal, baseFont: baseFont, hiddenColor: tickColor, compressWidth: compress)
         }
     }
 
@@ -671,6 +793,23 @@ enum MarkdownStyler {
             let markerLength = lineString.length > 1 && lineString.character(at: 1) == 32 ? 2 : 1
             let markerRange = NSRange(location: lineRange.location, length: min(markerLength, lineRange.length))
             let contentRange = NSRange(location: markerRange.location + markerRange.length, length: max(0, lineRange.length - markerRange.length))
+            if contentRange.length > 0 {
+                let italicFont = NSFontManager.shared.convert(baseFont, toHaveTrait: .italicFontMask)
+                let contentString = string.substring(with: contentRange) as NSString
+                var italicRange = contentRange
+                if contentString.length >= 2 && contentString.character(at: 0) == 124 { // '|'
+                    let spaceAfterPipe = contentString.character(at: 1) == 32
+                    let pipeLength = spaceAfterPipe ? 2 : 1
+                    let pipeRange = NSRange(location: contentRange.location, length: min(pipeLength, contentRange.length))
+                    storage.addAttribute(.foregroundColor, value: NSColor.controlAccentColor, range: pipeRange)
+                    let adjustedLocation = contentRange.location + pipeRange.length
+                    let adjustedLength = max(0, contentRange.length - pipeRange.length)
+                    italicRange = NSRange(location: adjustedLocation, length: adjustedLength)
+                }
+                if italicRange.length > 0 {
+                    storage.addAttribute(.font, value: italicFont, range: italicRange)
+                }
+            }
             let reveal = intersects(contentRange, with: selectedRange) || intersects(markerRange, with: selectedRange)
             setMarkerVisibility(storage: storage, markerRange: markerRange, reveal: reveal, baseFont: baseFont)
         }
@@ -725,22 +864,19 @@ enum MarkdownStyler {
         for match in matches {
             let reveal = intersects(match.range, with: selectedRange)
             let color = NSColor.systemGray
-            let attributes: [NSAttributedString.Key: Any]
+            var attributes: [NSAttributedString.Key: Any] = [
+                .underlineStyle: NSUnderlineStyle.single.rawValue,
+                .underlineColor: color
+            ]
+
             if reveal {
-                attributes = [
-                    .foregroundColor: color,
-                    .underlineStyle: NSUnderlineStyle.single.rawValue,
-                    .underlineColor: color
-                ]
+                attributes[.foregroundColor] = color
             } else {
-                attributes = [
-                    .foregroundColor: NSColor.clear,
-                    .font: NSFont.systemFont(ofSize: baseFont.pointSize * 0.1),
-                    .kern: -baseFont.pointSize * 0.6,
-                    .underlineStyle: NSUnderlineStyle.single.rawValue,
-                    .underlineColor: color
-                ]
+                attributes[.foregroundColor] = color.withAlphaComponent(0.6)
+                attributes[.font] = NSFont.systemFont(ofSize: baseFont.pointSize * 0.95)
+                attributes[.baselineOffset] = -1
             }
+
             storage.addAttributes(attributes, range: match.range)
         }
     }
@@ -827,18 +963,26 @@ enum MarkdownStyler {
         return NSIntersectionRange(range, selection).length > 0
     }
 
-    private static func setMarkerVisibility(storage: NSTextStorage, markerRange: NSRange?, reveal: Bool, baseFont: NSFont, compressWidth: Bool = true) {
+    private static func setMarkerVisibility(storage: NSTextStorage, markerRange: NSRange?, reveal: Bool, baseFont: NSFont, hiddenColor: NSColor? = nil, compressWidth: Bool = true) {
         guard let markerRange, markerRange.length > 0 else { return }
         if reveal {
             storage.removeAttribute(.foregroundColor, range: markerRange)
             storage.removeAttribute(.font, range: markerRange)
             storage.removeAttribute(.kern, range: markerRange)
+            storage.removeAttribute(.baselineOffset, range: markerRange)
+            storage.removeAttribute(.backgroundColor, range: markerRange)
         } else {
-            var attributes: [NSAttributedString.Key: Any] = [.foregroundColor: NSColor.clear]
+            var attributes: [NSAttributedString.Key: Any] = [:]
+            attributes[.foregroundColor] = hiddenColor ?? .clear
+            storage.removeAttribute(.baselineOffset, range: markerRange)
+            storage.removeAttribute(.backgroundColor, range: markerRange)
             if compressWidth {
                 let hiddenFont = NSFont.systemFont(ofSize: max(0.1, baseFont.pointSize * 0.05))
                 attributes[.font] = hiddenFont
                 attributes[.kern] = -baseFont.pointSize * 0.65
+            } else {
+                storage.removeAttribute(.font, range: markerRange)
+                storage.removeAttribute(.kern, range: markerRange)
             }
             storage.addAttributes(attributes, range: markerRange)
         }
