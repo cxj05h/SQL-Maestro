@@ -474,6 +474,9 @@ struct ContentView: View {
     @State private var showTroubleshootingGuide: Bool = false
     @State private var guideNotesDraft: String = ""
     @State private var hoveredTemplateLinkID: UUID? = nil
+    @State private var sessionNotesDrafts: [TicketSession: String] = [:]
+    @StateObject private var sessionNotesEditor = MarkdownEditorController()
+    @StateObject private var guideNotesEditor = MarkdownEditorController()
     
     @State private var searchText: String = ""
     @State private var showShortcutsSheet: Bool = false
@@ -529,6 +532,9 @@ struct ContentView: View {
                     Text("Query Templates")
                         .font(.system(size: fontSize + 4, weight: .semibold))
                         .foregroundStyle(Theme.purple)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
+                        .layoutPriority(1)
                     Spacer()
                     Button("New Template") { createNewTemplateFlow() }
                         .buttonStyle(.borderedProminent)
@@ -834,7 +840,8 @@ struct ContentView: View {
                             companyLabel = ""
                             draftDynamicValues[sessions.current] = [:]
                             sessionStaticFields[sessions.current] = ("", "", "", "")
-                            
+                            sessionNotesDrafts[sessions.current] = ""
+                        
                             // NEW: also clear used templates
                             UsedTemplatesStore.shared.clearSession(sessions.current)
                             
@@ -942,6 +949,7 @@ struct ContentView: View {
                 draftDynamicValues[s] = [:]
                 sessionStaticFields[s] = ("", "", "", "")
                 UsedTemplatesStore.shared.clearSession(s)
+                sessionNotesDrafts[s] = sessions.sessionNotes[s] ?? ""
             }
             orgId = ""
             acctId = ""
@@ -993,6 +1001,16 @@ struct ContentView: View {
                 NSEvent.removeMonitor(m)
                 scrollMonitor = nil
                 LOG("Scroll monitor removed")
+            }
+        }
+        .onChange(of: sessions.current) { _, newSession in
+            sessionNotesDrafts[newSession] = sessions.sessionNotes[newSession] ?? ""
+        }
+        .onReceive(sessions.$sessionNotes) { newValue in
+            for session in TicketSession.allCases {
+                if !isSessionNotesDirty(session: session) {
+                    sessionNotesDrafts[session] = newValue[session] ?? ""
+                }
             }
         }
         }
@@ -2811,28 +2829,32 @@ struct ContentView: View {
                         .font(.system(size: fontSize + 4, weight: .semibold))
                         .foregroundStyle(Theme.aqua)
 
-                    if showTroubleshootingGuide, guideDirty {
-                        Button("Save Guide") {
-                            guard let template = selectedTemplate else { return }
-                            if templateGuideStore.saveNotes(for: template) {
-                                guideNotesDraft = templateGuideStore.currentNotes(for: template)
-                                touchTemplateActivity(for: template)
+                    if showTroubleshootingGuide {
+                        if guideDirty {
+                            Button("Save Guide") {
+                                guard let template = selectedTemplate else { return }
+                                if templateGuideStore.saveNotes(for: template) {
+                                    guideNotesDraft = templateGuideStore.currentNotes(for: template)
+                                    touchTemplateActivity(for: template)
+                                }
                             }
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(Theme.purple)
-                        .font(.system(size: fontSize - 1))
+                            .buttonStyle(.borderedProminent)
+                            .tint(Theme.purple)
+                            .font(.system(size: fontSize - 1))
 
-                        Button("Revert") {
-                            guard let template = selectedTemplate else { return }
-                            guideNotesDraft = templateGuideStore.revertNotes(for: template)
+                            Button("Revert") {
+                                guard let template = selectedTemplate else { return }
+                                guideNotesDraft = templateGuideStore.revertNotes(for: template)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(Theme.pink)
+                            .font(.system(size: fontSize - 1))
                         }
-                        .buttonStyle(.bordered)
-                        .tint(Theme.pink)
-                        .font(.system(size: fontSize - 1))
+
+                        MarkdownToolbar(iconSize: fontSize + 2, controller: guideNotesEditor)
                     }
 
-                    Spacer()
+                    Spacer(minLength: 12)
 
                     Button {
                         withAnimation { showNotesSidebar.toggle() }
@@ -2848,17 +2870,26 @@ struct ContentView: View {
                 let leftPane = Group {
                     if showTroubleshootingGuide {
                         if let template = selectedTemplate {
-                            TextEditor(text: $guideNotesDraft)
-                                .font(.system(size: fontSize))
-                                .frame(minHeight: 160)
-                                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.purple.opacity(0.3)))
-                                .disableAutocorrection(true)
-                                .autocorrectionDisabled(true)
-                                .onChange(of: guideNotesDraft) { _, newVal in
-                                    if templateGuideStore.setNotes(newVal, for: template) {
-                                        touchTemplateActivity(for: template)
-                                    }
+                            MarkdownEditor(
+                                text: $guideNotesDraft,
+                                fontSize: fontSize,
+                                controller: guideNotesEditor,
+                                onLinkRequested: handleTroubleshootingLink(selectedText:source:completion:)
+                            )
+                            .frame(minHeight: 200)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Theme.grayBG.opacity(0.25))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
+                                    )
+                            )
+                            .onChange(of: guideNotesDraft) { _, newVal in
+                                if templateGuideStore.setNotes(newVal, for: template) {
+                                    touchTemplateActivity(for: template)
                                 }
+                            }
                         } else {
                             VStack {
                                 Text("Select a template to view its troubleshooting guide")
@@ -2902,12 +2933,15 @@ struct ContentView: View {
                         SessionNotesInline(
                             fontSize: fontSize,
                             session: sessions.current,
-                            text: Binding(
-                                get: { sessions.sessionNotes[sessions.current] ?? "" },
-                                set: { sessions.sessionNotes[sessions.current] = $0 }
+                            draft: Binding(
+                                get: { sessionNotesDrafts[sessions.current] ?? "" },
+                                set: { sessionNotesDrafts[sessions.current] = $0 }
                             ),
-                            isEditing: $notesIsEditing,
-                            showToolbar: $showNotesToolbar
+                            savedValue: sessions.sessionNotes[sessions.current] ?? "",
+                            controller: sessionNotesEditor,
+                            onSave: saveSessionNotes,
+                            onRevert: revertSessionNotes,
+                            onLinkRequested: handleSessionNotesLink(selectedText:source:completion:)
                         )
                         .frame(minWidth: 300, idealWidth: 360)
                         .layoutPriority(1)
@@ -2927,8 +2961,10 @@ struct ContentView: View {
                     .font(.system(size: fontSize))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                    .fixedSize(horizontal: true, vertical: false)
+                    .minimumScaleFactor(0.8)
+                    .allowsTightening(true)
                     .frame(minWidth: 70, alignment: .leading)
+                    .layoutPriority(1)
                 if let link = sessions.sessionLinks[sessions.current], !link.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Button {
                         openCurrentSessionLink()
@@ -2993,22 +3029,6 @@ struct ContentView: View {
                 .help("Copy Org-ID, Acct-ID, mysqlDb, and all template values as individual clipboard items")
                 // Invisible bridge view to receive menu notifications and register KB shortcuts for Help sheet
                 Color.clear.frame(width: 0, height: 0)
-                    .onAppear {
-                        kbToggleNotesMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
-                            if event.modifierFlags.contains(.command),
-                               event.charactersIgnoringModifiers?.lowercased() == "e" {
-                                toggleSessionNotesEditMode()
-                                return nil // swallow the event
-                            }
-                            return event
-                        }
-                    }
-                    .onDisappear {
-                        if let mon = kbToggleNotesMonitor {
-                            NSEvent.removeMonitor(mon)
-                            kbToggleNotesMonitor = nil
-                        }
-                    }
                     .background(TicketSessionNotificationBridge(
                         onSave: { saveTicketSessionFlow() },
                         onLoad: { loadTicketSessionFlow() },
@@ -3020,8 +3040,6 @@ struct ContentView: View {
                                 .registerShortcut(name: "Save Ticket Session…", keyLabel: "S", modifiers: [.command], scope: "Ticket Sessions")
                             Color.clear
                                 .registerShortcut(name: "Load Ticket Session…", keyLabel: "L", modifiers: [.command], scope: "Ticket Sessions")
-                            Color.clear
-                                .registerShortcut(name: "Toggle Session Notes Edit Mode", keyLabel: "E", modifiers: [.command], scope: "Session Notes")
                         }
                     )
             }
@@ -3116,7 +3134,138 @@ struct ContentView: View {
                 withAnimation { toastCopied = false }
             }
         }
-        
+
+        private func isSessionNotesDirty(session: TicketSession) -> Bool {
+            (sessionNotesDrafts[session] ?? "") != (sessions.sessionNotes[session] ?? "")
+        }
+
+        private func saveSessionNotes() {
+            let currentSession = sessions.current
+            let draft = sessionNotesDrafts[currentSession] ?? ""
+            sessions.sessionNotes[currentSession] = draft
+            LOG("Session notes saved", ctx: ["session": "\(currentSession.rawValue)", "length": "\(draft.count)"])
+        }
+
+        private func revertSessionNotes() {
+            let currentSession = sessions.current
+            let saved = sessions.sessionNotes[currentSession] ?? ""
+            sessionNotesDrafts[currentSession] = saved
+            LOG("Session notes reverted", ctx: ["session": "\(currentSession.rawValue)"])
+        }
+
+        private func handleSessionNotesLink(selectedText: String,
+                                             source _: MarkdownEditor.LinkRequestSource,
+                                             completion: @escaping (MarkdownEditor.LinkInsertion?) -> Void) {
+            let alert = NSAlert()
+            alert.messageText = "Insert Link"
+            alert.informativeText = "Add a title and URL to insert a Markdown link into the session notes."
+
+            let container = NSView(frame: NSRect(x: 0, y: 0, width: 320, height: 80))
+
+            let titleField = NSTextField(frame: NSRect(x: 0, y: 44, width: 320, height: 24))
+            titleField.placeholderString = "Link text (optional)"
+            titleField.stringValue = selectedText
+
+            let urlField = NSTextField(frame: NSRect(x: 0, y: 12, width: 320, height: 24))
+            urlField.placeholderString = "https://example.com/path"
+
+            container.addSubview(titleField)
+            container.addSubview(urlField)
+
+            alert.accessoryView = container
+            alert.addButton(withTitle: "Insert")
+            alert.addButton(withTitle: "Cancel")
+
+            let response = alert.runModal()
+            guard response == .alertFirstButtonReturn else {
+                completion(nil)
+                return
+            }
+
+            let label = titleField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            let rawURL = urlField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !rawURL.isEmpty else {
+                completion(nil)
+                return
+            }
+
+            let normalized = normalizeURL(rawURL)
+            completion(MarkdownEditor.LinkInsertion(label: label.isEmpty ? normalized : label,
+                                                    url: normalized,
+                                                    saveToTemplateLinks: false))
+            LOG("Session notes link inserted", ctx: ["url": normalized])
+        }
+
+        private func handleTroubleshootingLink(selectedText: String,
+                                               source _: MarkdownEditor.LinkRequestSource,
+                                               completion: @escaping (MarkdownEditor.LinkInsertion?) -> Void) {
+            let alert = NSAlert()
+            alert.messageText = "Insert Link"
+            alert.informativeText = "Add a title and URL to insert a Markdown link into the troubleshooting guide."
+
+            let containerHeight: CGFloat = selectedTemplate == nil ? 80 : 110
+            let container = NSView(frame: NSRect(x: 0, y: 0, width: 340, height: containerHeight))
+
+            let titleField = NSTextField(frame: NSRect(x: 0, y: containerHeight - 36, width: 340, height: 24))
+            titleField.placeholderString = "Link text (optional)"
+            titleField.stringValue = selectedText
+
+            let urlFieldY = selectedTemplate == nil ? 12 : 40
+            let urlField = NSTextField(frame: NSRect(x: 0, y: CGFloat(urlFieldY), width: 340, height: 24))
+            urlField.placeholderString = "https://example.com/path"
+
+            var saveCheckbox: NSButton?
+            if selectedTemplate != nil {
+                let checkbox = NSButton(checkboxWithTitle: "Save this link to template links?", target: nil, action: nil)
+                checkbox.frame = NSRect(x: 0, y: 8, width: 340, height: 24)
+                checkbox.state = .off
+                container.addSubview(checkbox)
+                saveCheckbox = checkbox
+            }
+
+            container.addSubview(titleField)
+            container.addSubview(urlField)
+
+            alert.accessoryView = container
+            alert.addButton(withTitle: "Insert")
+            alert.addButton(withTitle: "Cancel")
+
+            let response = alert.runModal()
+            guard response == .alertFirstButtonReturn else {
+                completion(nil)
+                return
+            }
+
+            let label = titleField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            let rawURL = urlField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !rawURL.isEmpty else {
+                completion(nil)
+                return
+            }
+
+            let normalized = normalizeURL(rawURL)
+            var shouldSaveLink = false
+            if let checkbox = saveCheckbox, checkbox.state == .on, let template = selectedTemplate {
+                templateLinksStore.addLink(title: label.isEmpty ? normalized : label, url: normalized, for: template)
+                shouldSaveLink = true
+                touchTemplateActivity(for: template)
+            }
+
+            completion(MarkdownEditor.LinkInsertion(label: label.isEmpty ? normalized : label,
+                                                    url: normalized,
+                                                    saveToTemplateLinks: shouldSaveLink))
+            LOG("Troubleshooting link inserted", ctx: ["url": normalized, "savedToTemplate": shouldSaveLink ? "true" : "false"])
+        }
+
+        private func normalizeURL(_ raw: String) -> String {
+            var text = raw
+            if !text.contains("://") {
+                text = "https://" + text
+            }
+            text = text.replacingOccurrences(of: " ", with: "%20")
+            return text
+        }
+
         // Helper to set selection and persist for current session (no draft commit here for responsiveness)
         private func selectTemplate(_ t: TemplateItem?) {
             selectedTemplate = t
@@ -3366,16 +3515,8 @@ struct ContentView: View {
         }
         
         @State private var isNotesSheetOpen: Bool = false
-        @State private var notesIsEditing: Bool = true
-        @State private var showNotesToolbar: Bool = true
         @State private var showNotesSidebar: Bool = true
-        @State private var kbToggleNotesMonitor: Any? = nil
         
-        
-        private func toggleSessionNotesEditMode() {
-            notesIsEditing.toggle()
-            LOG("KB: Toggle Session Notes Edit Mode", ctx: ["isEditing": "\(notesIsEditing)"])
-        }
         
     private func promptRename(for s: TicketSession) {
         let alert = NSAlert()
@@ -3653,6 +3794,7 @@ struct ContentView: View {
 
             // Restore notes, alternates, images
             sessions.sessionNotes[sessions.current] = loaded.notes
+            sessionNotesDrafts[sessions.current] = loaded.notes
             sessions.sessionAlternateFields[sessions.current] =
                 loaded.alternateFields.map { AlternateField(name: $0.key, value: $0.value) }
             sessions.sessionImages[sessions.current] = loaded.sessionImages
@@ -3710,6 +3852,7 @@ struct ContentView: View {
                 case .alertSecondButtonReturn: // No, Don’t Save
                     sessions.clearAllFieldsForCurrentSession()
                     sessions.sessionNotes[sessions.current] = ""
+                    sessionNotesDrafts[sessions.current] = ""
                     sessionStaticFields[sessions.current] = ("", "", "", "")
                     LOG("Session cleared via prompt", ctx: ["session": "\(sessions.current.rawValue)"])
                 default:
@@ -3720,12 +3863,14 @@ struct ContentView: View {
                 case .alertFirstButtonReturn: // No, Don’t Save
                     sessions.clearAllFieldsForCurrentSession()
                     sessions.sessionNotes[sessions.current] = ""
+                    sessionNotesDrafts[sessions.current] = ""
                     sessionStaticFields[sessions.current] = ("", "", "", "")
                     LOG("Session cleared via prompt", ctx: ["session": "\(sessions.current.rawValue)"])
                 case .alertSecondButtonReturn: // Yes, Save
                     saveTicketSessionFlow()
                     sessions.clearAllFieldsForCurrentSession()
                     sessions.sessionNotes[sessions.current] = ""
+                    sessionNotesDrafts[sessions.current] = ""
                     sessionStaticFields[sessions.current] = ("", "", "", "")
                     LOG("Session cleared after save via prompt", ctx: ["session": "\(sessions.current.rawValue)"])
                 default:
@@ -5233,71 +5378,127 @@ struct ContentView: View {
         }
     }
     // MARK: – Session Notes Inline (sidebar)
+    struct MarkdownToolbar: View {
+        var iconSize: CGFloat
+        @ObservedObject var controller: MarkdownEditorController
+
+        var body: some View {
+            let size = max(14, iconSize)
+            HStack(spacing: 10) {
+                Button(action: controller.bold) {
+                    Image(systemName: "textformat.bold")
+                        .font(.system(size: size, weight: .semibold))
+                }
+                Button(action: controller.italic) {
+                    Image(systemName: "textformat.italic")
+                        .font(.system(size: size, weight: .semibold))
+                }
+                Menu {
+                    Button("Heading 1") { controller.heading(level: 1) }
+                    Button("Heading 2") { controller.heading(level: 2) }
+                    Button("Heading 3") { controller.heading(level: 3) }
+                    Button("Heading 4") { controller.heading(level: 4) }
+                } label: {
+                    Image(systemName: "textformat.size")
+                        .font(.system(size: size + 1, weight: .semibold))
+                }
+                Button(action: controller.inlineCode) {
+                    Image(systemName: "chevron.left.slash.chevron.right")
+                        .font(.system(size: size, weight: .semibold))
+                }
+                Button(action: controller.codeBlock) {
+                    Image(systemName: "curlybraces")
+                        .font(.system(size: size, weight: .semibold))
+                }
+                Button(action: controller.blockQuote) {
+                    Image(systemName: "text.quote")
+                        .font(.system(size: size, weight: .semibold))
+                }
+                Button(action: controller.bulletList) {
+                    Image(systemName: "list.bullet")
+                        .font(.system(size: size, weight: .semibold))
+                }
+                Button(action: controller.numberedList) {
+                    Image(systemName: "list.number")
+                        .font(.system(size: size, weight: .semibold))
+                }
+                Button(action: controller.horizontalRule) {
+                    Image(systemName: "minus")
+                        .font(.system(size: size - 1, weight: .semibold))
+                }
+                Button(action: controller.link) {
+                    Image(systemName: "link")
+                        .font(.system(size: size, weight: .semibold))
+                }
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Theme.grayBG.opacity(0.35))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
+                    )
+            )
+        }
+    }
+
     struct SessionNotesInline: View {
         var fontSize: CGFloat
         var session: TicketSession
-        @Binding var text: String
-        @Binding var isEditing: Bool
-        @Binding var showToolbar: Bool
-        
-        @State private var localText: String = ""
-        
+        @Binding var draft: String
+        var savedValue: String
+        @ObservedObject var controller: MarkdownEditorController
+        var onSave: () -> Void
+        var onRevert: () -> Void
+        var onLinkRequested: (_ selectedText: String, _ source: MarkdownEditor.LinkRequestSource, _ completion: @escaping (MarkdownEditor.LinkInsertion?) -> Void) -> Void
+
+        private var isDirty: Bool { draft != savedValue }
+
         var body: some View {
             VStack(alignment: .leading, spacing: 6) {
-                HStack {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
                     Text("Session Notes")
                         .font(.system(size: fontSize - 1, weight: .semibold))
                         .foregroundStyle(Theme.aqua)
+
+                    MarkdownToolbar(iconSize: fontSize + 2, controller: controller)
+
                     Spacer()
-                    Picker("Mode", selection: $isEditing) {
-                        Text("Preview").tag(false)
-                        Text("Edit").tag(true)
+
+                    if isDirty {
+                        Button("Save Notes") { onSave() }
+                            .buttonStyle(.borderedProminent)
+                            .tint(Theme.purple)
+                            .font(.system(size: fontSize - 2))
+
+                        Button("Revert") { onRevert() }
+                            .buttonStyle(.bordered)
+                            .tint(Theme.pink)
+                            .font(.system(size: fontSize - 2))
                     }
-                    .pickerStyle(.segmented)
-                    .frame(width: 160)
                 }
-                
-                if isEditing {
-                    // Simple, reliable text editor
-                    TextEditor(text: $localText)
-                        .font(.system(size: fontSize))
-                        .frame(maxWidth: .infinity, minHeight: 160)
-                        .padding(4)
-                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.aqua.opacity(0.25)))
-                } else {
-                    // Simple preview that preserves line breaks
-                    ScrollView {
-                        Text(localText.isEmpty ? "No notes yet..." : localText)
-                            .font(.system(size: fontSize))
-                            .textSelection(.enabled)
-                            .frame(maxWidth: .infinity, alignment: .topLeading)
-                            .padding(10)
-                    }
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Theme.grayBG.opacity(0.25))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
-                            )
-                    )
-                    .frame(maxWidth: .infinity, minHeight: 160, alignment: .topLeading)
-                }
+
+                MarkdownEditor(
+                    text: $draft,
+                    fontSize: fontSize,
+                    controller: controller,
+                    onLinkRequested: onLinkRequested
+                )
+                .frame(maxWidth: .infinity, minHeight: 180)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Theme.grayBG.opacity(0.25))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
+                        )
+                )
             }
             .padding(6)
             .frame(maxWidth: .infinity)
-            .onAppear {
-                self.localText = text
-            }
-            .onChange(of: localText) { _, newVal in
-                self.text = newVal
-            }
-            .onChange(of: session) { _, _ in
-                self.localText = text
-            }
-            .onChange(of: text) { _, newVal in
-                self.localText = newVal
-            }
         }
     }
     
