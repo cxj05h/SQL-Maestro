@@ -98,6 +98,7 @@ struct MarkdownEditor: NSViewRepresentable {
         var suppressTextChangeCallback = false
         var baseFont: NSFont
         var currentSelection: NSRange = NSRange(location: 0, length: 0)
+        private var undoStack: [(text: String, selection: NSRange)] = []
 
         private static let bulletRegex = try! NSRegularExpression(pattern: "^(\\s*)([-*+])\\s+", options: [])
         private static let numberedRegex = try! NSRegularExpression(pattern: "^(\\s*)(\\d+)([\\.)])\\s+", options: [])
@@ -152,6 +153,21 @@ struct MarkdownEditor: NSViewRepresentable {
                 }
             }
             switch commandSelector {
+            case Selector(("undo:")):
+                if let previous = undoStack.popLast() {
+                    LOG("Markdown undo", ctx: ["prevLength": "\(previous.text.count)"])
+                    suppressTextChangeCallback = true
+                    textView.string = previous.text
+                    suppressTextChangeCallback = false
+                    parent.text = previous.text
+                    let selection = previous.selection.location <= previous.text.count ? previous.selection : NSRange(location: previous.text.count, length: 0)
+                    textView.setSelectedRange(selection)
+                    currentSelection = selection
+                    applyMarkdownStyles()
+                    textView.scrollRangeToVisible(selection)
+                    return true
+                }
+                return false
             case #selector(NSStandardKeyBindingResponding.moveWordRightAndModifySelection(_:)),
                  #selector(NSStandardKeyBindingResponding.moveWordLeftAndModifySelection(_:)):
                 LOG("MarkdownEditor word selection", ctx: ["selector": NSStringFromSelector(commandSelector)])
@@ -201,6 +217,14 @@ struct MarkdownEditor: NSViewRepresentable {
             if let replacementString = replacementString,
                replacementString == "\u{0}" {
                 return false
+            }
+            if let tv = textView as NSTextView? {
+                let current = tv.string
+                let selection = tv.selectedRange()
+                if undoStack.last?.text != current {
+                    undoStack.append((current, selection))
+                    if undoStack.count > 50 { undoStack.removeFirst(undoStack.count - 50) }
+                }
             }
             return true
         }
@@ -439,7 +463,7 @@ struct MarkdownEditor: NSViewRepresentable {
             ]
             storage.setAttributes(baseAttributes, range: fullRange)
 
-            MarkdownStyler.apply(to: storage, baseFont: baseFont, selectedRange: currentSelection)
+            MarkdownStyler.apply(to: storage, baseFont: baseFont, selectedRange: currentSelection, isPreview: false)
             storage.endEditing()
             textView.scrollRangeToVisible(currentSelection)
         }
@@ -459,33 +483,50 @@ enum MarkdownStyler {
             .font: baseFont,
             .foregroundColor: NSColor.labelColor
         ], range: fullRange)
-        apply(to: storage, baseFont: baseFont, selectedRange: NSRange(location: NSNotFound, length: 0))
+        apply(to: storage, baseFont: baseFont, selectedRange: NSRange(location: NSNotFound, length: 0), isPreview: true)
         return storage.copy() as? NSAttributedString ?? NSAttributedString(string: markdown)
     }
 
-    static func apply(to storage: NSTextStorage, baseFont: NSFont, selectedRange: NSRange) {
-        let string = storage.string as NSString
+    static func apply(to storage: NSTextStorage, baseFont: NSFont, selectedRange: NSRange, isPreview: Bool) {
+        var string = storage.string as NSString
         let fullRange = NSRange(location: 0, length: string.length)
 
         applyCodeBlocks(storage: storage, string: string, baseFont: baseFont, selectedRange: selectedRange)
+        string = storage.string as NSString
         applyInlineCode(storage: storage, string: string, baseFont: baseFont, selectedRange: selectedRange)
+        string = storage.string as NSString
         applyHeadings(storage: storage, string: string, baseFont: baseFont, selectedRange: selectedRange)
+        string = storage.string as NSString
         applyBold(storage: storage, string: string, baseFont: baseFont, selectedRange: selectedRange)
+        string = storage.string as NSString
         applyItalic(storage: storage, string: string, baseFont: baseFont, selectedRange: selectedRange)
+        string = storage.string as NSString
         applyBlockQuotes(storage: storage, string: string, baseFont: baseFont, selectedRange: selectedRange)
-        applyHorizontalRules(storage: storage, string: string, baseFont: baseFont, selectedRange: selectedRange)
-        applyLists(storage: storage, string: string, baseFont: baseFont, selectedRange: selectedRange)
+        string = storage.string as NSString
+        applyHorizontalRules(storage: storage, string: string, baseFont: baseFont, selectedRange: selectedRange, isPreview: isPreview)
+        string = storage.string as NSString
+        applyLists(storage: storage, string: string, baseFont: baseFont, selectedRange: selectedRange, isPreview: isPreview)
+
+        // Reapply base attributes to any characters inserted during transforms (e.g. preview attachments)
+        let currentLength = storage.length
+        if currentLength != fullRange.length {
+            storage.addAttributes([
+                .font: baseFont,
+                .foregroundColor: NSColor.labelColor
+            ], range: NSRange(location: 0, length: currentLength))
+        }
 
         // detect markdown links and underline them
         let pattern = "\\[([^\\]]+)\\]\\(([^\\)]+)\\)"
         if let regex = try? NSRegularExpression(pattern: pattern, options: []) {
-            regex.enumerateMatches(in: string as String, options: [], range: fullRange) { match, _, _ in
+            let finalString = storage.string as NSString
+            regex.enumerateMatches(in: finalString as String, options: [], range: NSRange(location: 0, length: finalString.length)) { match, _, _ in
                 guard let match else { return }
                 guard match.numberOfRanges >= 3 else { return }
 
                 let labelRange = match.range(at: 1)
                 let urlRange = match.range(at: 2)
-                let urlString = string.substring(with: urlRange).trimmingCharacters(in: .whitespacesAndNewlines)
+                let urlString = finalString.substring(with: urlRange).trimmingCharacters(in: .whitespacesAndNewlines)
 
                 if let url = URL(string: urlString) {
                     storage.addAttributes([
@@ -635,10 +676,53 @@ enum MarkdownStyler {
         }
     }
 
-    private static func applyHorizontalRules(storage: NSTextStorage, string: NSString, baseFont: NSFont, selectedRange: NSRange) {
+    private static func applyHorizontalRules(storage: NSTextStorage, string: NSString, baseFont: NSFont, selectedRange: NSRange, isPreview: Bool) {
         let pattern = "^---$"
         guard let regex = try? NSRegularExpression(pattern: pattern, options: [.anchorsMatchLines]) else { return }
-        for match in regex.matches(in: string as String, options: [], range: NSRange(location: 0, length: string.length)) {
+        let matches = regex.matches(in: string as String, options: [], range: NSRange(location: 0, length: string.length))
+
+        if isPreview {
+            guard !matches.isEmpty else { return }
+            LOG("Markdown hr preview", ctx: ["count": "\(matches.count)"])
+            guard let snapshot = storage.copy() as? NSAttributedString else {
+                LOG("Markdown hr preview snapshot copy failed")
+                return
+            }
+            let snapshotString = snapshot.string as NSString
+            let rebuilt = NSMutableAttributedString()
+            var cursor = 0
+
+            for match in matches {
+                if match.range.location > cursor {
+                    let leadingRange = NSRange(location: cursor, length: match.range.location - cursor)
+                    rebuilt.append(snapshot.attributedSubstring(from: leadingRange))
+                }
+
+                let attachment = HorizontalRuleAttachment(thickness: 1.0, color: .systemGray)
+                rebuilt.append(NSAttributedString(attachment: attachment))
+
+                let lineEnd = match.range.location + match.range.length
+                let hasTrailingNewline = lineEnd < snapshotString.length && snapshotString.character(at: lineEnd) == 10
+                if !hasTrailingNewline {
+                    rebuilt.append(NSAttributedString(string: "\n", attributes: [
+                        .font: baseFont,
+                        .foregroundColor: NSColor.labelColor
+                    ]))
+                }
+
+                cursor = lineEnd
+            }
+
+            if cursor < snapshotString.length {
+                let trailingRange = NSRange(location: cursor, length: snapshotString.length - cursor)
+                rebuilt.append(snapshot.attributedSubstring(from: trailingRange))
+            }
+
+            storage.setAttributedString(rebuilt)
+            return
+        }
+
+        for match in matches {
             let reveal = intersects(match.range, with: selectedRange)
             let color = NSColor.systemGray
             let attributes: [NSAttributedString.Key: Any]
@@ -661,13 +745,13 @@ enum MarkdownStyler {
         }
     }
 
-    private static func applyLists(storage: NSTextStorage, string: NSString, baseFont: NSFont, selectedRange: NSRange) {
+    private static func applyLists(storage: NSTextStorage, string: NSString, baseFont: NSFont, selectedRange: NSRange, isPreview: Bool) {
         let bulletPattern = "^(\\s*[-\\*+])(\\s+)"
         let numberPattern = "^(\\s*)(\\d+)([\\.)])(\\s+)"
 
         if let bulletRegex = try? NSRegularExpression(pattern: bulletPattern, options: [.anchorsMatchLines]) {
-            bulletRegex.enumerateMatches(in: string as String, options: [], range: NSRange(location: 0, length: string.length)) { match, _, _ in
-                guard let match else { return }
+            let matches = bulletRegex.matches(in: string as String, options: [], range: NSRange(location: 0, length: string.length))
+            for match in matches.reversed() {
                 let prefixRange = match.range(at: 1)
                 let spacingRange = match.range(at: 2)
                 let paragraphRange = string.paragraphRange(for: match.range)
@@ -680,7 +764,7 @@ enum MarkdownStyler {
                 let reveal = intersects(contentRange, with: selectedRange) || intersects(prefixRange, with: selectedRange)
                 let mutable = storage.mutableString
                 let originalMarker = (string.substring(with: match.range(at: 2)) as NSString).substring(to: 1)
-                if reveal {
+                if reveal && !isPreview {
                     if prefixRange.length == 1 && mutable.substring(with: prefixRange) == "•" {
                         mutable.replaceCharacters(in: prefixRange, with: originalMarker)
                     }
@@ -696,8 +780,8 @@ enum MarkdownStyler {
         }
 
         if let numberRegex = try? NSRegularExpression(pattern: numberPattern, options: [.anchorsMatchLines]) {
-            numberRegex.enumerateMatches(in: string as String, options: [], range: NSRange(location: 0, length: string.length)) { match, _, _ in
-                guard let match else { return }
+            let matches = numberRegex.matches(in: string as String, options: [], range: NSRange(location: 0, length: string.length))
+            for match in matches.reversed() {
                 let indentRange = match.range(at: 1)
                 let numberRange = match.range(at: 2)
                 let delimiterRange = match.range(at: 3)
@@ -709,7 +793,6 @@ enum MarkdownStyler {
                 let contentStart = match.range.location + match.range.length
                 let contentLength = max(0, paragraphRange.location + paragraphRange.length - contentStart)
                 let contentRange = NSRange(location: contentStart, length: contentLength)
-                let markersRange = NSRange(location: match.range.location, length: match.range.length - spacingRange.length)
                 let reveal = intersects(contentRange, with: selectedRange) || intersects(numberRange, with: selectedRange)
                 setMarkerVisibility(storage: storage, markerRange: indentRange, reveal: true, baseFont: baseFont)
                 setMarkerVisibility(storage: storage, markerRange: numberRange, reveal: true, baseFont: baseFont, compressWidth: false)
@@ -759,5 +842,51 @@ enum MarkdownStyler {
             }
             storage.addAttributes(attributes, range: markerRange)
         }
+    }
+}
+
+private final class HorizontalRuleAttachment: NSTextAttachment {
+    init(thickness: CGFloat, color: NSColor) {
+        super.init(data: nil, ofType: nil)
+        attachmentCell = HorizontalRuleAttachmentCell(thickness: thickness, color: color)
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+    }
+}
+
+private final class HorizontalRuleAttachmentCell: NSTextAttachmentCell {
+    private let thickness: CGFloat
+    private let color: NSColor
+
+    init(thickness: CGFloat, color: NSColor) {
+        self.thickness = max(1.0, thickness)
+        self.color = color
+        super.init()
+    }
+
+    required init(coder: NSCoder) {
+        self.thickness = 1.0
+        self.color = .systemGray
+        super.init(coder: coder)
+    }
+
+    override func cellSize() -> NSSize {
+        NSSize(width: 1, height: max(12, thickness + 6))
+    }
+
+    override func cellFrame(for textContainer: NSTextContainer, proposedLineFragment lineFrag: NSRect, glyphPosition position: NSPoint, characterIndex charIndex: Int) -> NSRect {
+        NSRect(x: lineFrag.minX, y: lineFrag.midY - thickness / 2, width: lineFrag.width, height: max(lineFrag.height, thickness + 6))
+    }
+
+    override func draw(withFrame cellFrame: NSRect, in controlView: NSView?) {
+        let lineRect = NSInsetRect(cellFrame, 0, (cellFrame.height - thickness) / 2.0)
+        color.set()
+        let path = NSBezierPath()
+        path.move(to: NSPoint(x: lineRect.minX, y: lineRect.midY))
+        path.line(to: NSPoint(x: lineRect.maxX, y: lineRect.midY))
+        path.lineWidth = thickness
+        path.stroke()
     }
 }

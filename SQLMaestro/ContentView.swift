@@ -292,51 +292,43 @@ extension WheelNumberField {
     }
 }
 
-struct MarkdownPreviewView: View {
+struct MarkdownPreviewView: NSViewRepresentable {
     var text: String
     var fontSize: CGFloat
 
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 8) {
-                MarkdownPreviewRepresentable(markdown: text, fontSize: fontSize)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-            }
-            .padding(10)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-        .textSelection(.enabled)
-    }
-}
-
-struct MarkdownPreviewRepresentable: NSViewRepresentable {
-    let markdown: String
-    let fontSize: CGFloat
-
-    func makeNSView(context: Context) -> NSTextView {
+    func makeNSView(context: Context) -> NSScrollView {
         let textView = NSTextView()
         textView.isEditable = false
         textView.isSelectable = true
         textView.drawsBackground = false
-        textView.textContainerInset = NSSize(width: 0, height: 0)
+        textView.textContainerInset = NSSize(width: 8, height: 10)
         textView.textContainer?.widthTracksTextView = true
         textView.textContainer?.heightTracksTextView = false
+        textView.textContainer?.lineFragmentPadding = 0
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
-        textView.textContainer?.lineFragmentPadding = 0
-        updateText(in: textView)
-        return textView
+        textView.autoresizingMask = [.width]
+
+        let scrollView = NSScrollView()
+        scrollView.hasVerticalScroller = true
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.autohidesScrollers = false
+        scrollView.documentView = textView
+
+        update(textView)
+        return scrollView
     }
 
-    func updateNSView(_ nsView: NSTextView, context: Context) {
-        updateText(in: nsView)
+    func updateNSView(_ nsView: NSScrollView, context: Context) {
+        guard let textView = nsView.documentView as? NSTextView else { return }
+        update(textView)
     }
 
-    private func updateText(in textView: NSTextView) {
-        LOG("Markdown preview render", ctx: ["length": "\(markdown.count)"])
-        let rendered = MarkdownEditor.renderPreview(markdown: markdown, fontSize: fontSize)
+    private func update(_ textView: NSTextView) {
+        LOG("Markdown preview render", ctx: ["length": "\(text.count)"])
+        let rendered = MarkdownEditor.renderPreview(markdown: text, fontSize: fontSize)
         textView.textStorage?.setAttributedString(rendered)
         textView.textContainer?.lineFragmentPadding = 0
         textView.layoutManager?.ensureLayout(for: textView.textContainer!)
@@ -972,6 +964,13 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .showDatabaseSettings)) { _ in
             showDatabaseSettings = true
         }
+        .overlay(
+            Button(action: togglePreviewShortcut) {
+                EmptyView()
+            }
+            .keyboardShortcut("e", modifiers: [.command])
+            .frame(width: 0, height: 0)
+        )
         .sheet(isPresented: $showShortcutsSheet) {
             KeyboardShortcutsSheet(onClose: { showShortcutsSheet = false })
         }
@@ -3385,7 +3384,17 @@ struct ContentView: View {
             
             LOG("Session switched", ctx: ["from": "\(previousSession.rawValue)", "to": "\(newSession.rawValue)"])
         }
-        
+
+        private func togglePreviewShortcut() {
+            if showTroubleshootingGuide {
+                guidePreviewMode.toggle()
+                LOG("Cmd+E toggled guide preview", ctx: ["isPreview": guidePreviewMode ? "true" : "false"])
+            } else {
+                notesPreviewMode.toggle()
+                LOG("Cmd+E toggled notes preview", ctx: ["isPreview": notesPreviewMode ? "true" : "false"])
+            }
+        }
+
         private func loadTemplate(_ t: TemplateItem) {
             commitDraftsForCurrentSession()
             selectedTemplate = t
