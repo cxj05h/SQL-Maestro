@@ -1215,6 +1215,10 @@ struct ContentView: View {
             UsedTemplatesStore.shared.touch(session: sessions.current, templateId: template.id)
         }
         
+        private func trimTrailingWhitespace(_ string: String) -> String {
+            string.replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression)
+        }
+        
         private func normalizedSearchText(_ string: String) -> String {
             string.lowercased()
                 .components(separatedBy: CharacterSet.alphanumerics.inverted)
@@ -1443,6 +1447,12 @@ struct ContentView: View {
                             LOG("Global cache updated (submit)", ctx: ["field": label, "value": finalVal])
                         }
                         onCommit?(finalVal)
+                    }
+                    .onChange(of: value.wrappedValue) { _, newVal in
+                        let trimmed = trimTrailingWhitespace(newVal)
+                        if trimmed != newVal {
+                            value.wrappedValue = trimmed
+                        }
                     }
                     
                     // Recents popover trigger
