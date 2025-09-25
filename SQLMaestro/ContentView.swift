@@ -1214,6 +1214,13 @@ struct ContentView: View {
         private func touchTemplateActivity(for template: TemplateItem) {
             UsedTemplatesStore.shared.touch(session: sessions.current, templateId: template.id)
         }
+        
+        private func normalizedSearchText(_ string: String) -> String {
+            string.lowercased()
+                .components(separatedBy: CharacterSet.alphanumerics.inverted)
+                .filter { !$0.isEmpty }
+                .joined(separator: " ")
+        }
         // Commit any non-empty draft values for the CURRENT session to global history
         private func commitDraftsForCurrentSession() {
             let cur = sessions.current
@@ -1231,9 +1238,13 @@ struct ContentView: View {
             if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 baseList = templates.templates
             } else {
-                let query = searchText.lowercased()
-                baseList = templates.templates.filter { template in
-                    template.name.lowercased().contains(query)
+                let query = normalizedSearchText(searchText)
+                if query.isEmpty {
+                    baseList = templates.templates
+                } else {
+                    baseList = templates.templates.filter { template in
+                        normalizedSearchText(template.name).contains(query)
+                    }
                 }
             }
             
