@@ -450,7 +450,7 @@ struct ContentView: View {
     @StateObject private var mapping = MappingStore()
     @StateObject private var mysqlHosts = MysqlHostStore()
     @StateObject private var userConfig = UserConfigStore()
-    @State private var selectedSessionTemplateTab: SessionTemplateTab = .sessionImages
+    @State private var selectedSessionTemplateTab: SessionTemplateTab = .templateLinks
     @EnvironmentObject var sessions: SessionManager
     @ObservedObject private var dbTablesStore = DBTablesStore.shared
     @ObservedObject private var dbTablesCatalog = DBTablesCatalog.shared
