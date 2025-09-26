@@ -2922,7 +2922,7 @@ struct ContentView: View {
                                 } else {
                                     MarkdownEditor(
                                         text: $guideNotesDraft,
-                                        fontSize: fontSize,
+                                        fontSize: fontSize * 1.5,
                                         controller: guideNotesEditor,
                                         onLinkRequested: handleTroubleshootingLink(selectedText:source:completion:)
                                     )
@@ -4001,20 +4001,6 @@ struct ContentView: View {
         }
         
         private func renameTemplateFlow(_ item: TemplateItem) {
-            // 🔔 Warning before rename
-            let alert = NSAlert()
-            alert.messageText = "Renaming this template will reset its DB Tables."
-            alert.informativeText = "You will need to manually copy the saved values from the old JSON into the new template if needed."
-            alert.alertStyle = .warning
-            alert.addButton(withTitle: "Continue")
-            alert.addButton(withTitle: "Cancel")
-            
-            let choice = alert.runModal()
-            if choice != .alertFirstButtonReturn {
-                return // User cancelled
-            }
-            
-            // Proceed with the rename
             guard let newName = promptForString(
                 title: "Rename Template",
                 message: "Enter a new name for '\(item.name)'",
@@ -4445,11 +4431,11 @@ struct ContentView: View {
                 if hasTrailingNewline { lines.removeLast() } // last element is "" from trailing newline
                 
                 // Decide if we are commenting or uncommenting
-                // "commented" means: optional leading spaces + "--" optionally followed by a space
+                // "commented" means: optional leading spaces + either "#" or "--" (legacy) optionally followed by a space
                 let nonEmpty = lines.filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
                 let allAlreadyCommented = nonEmpty.allSatisfy { line in
                     let trimmedLeading = line.drop(while: { $0 == " " || $0 == "\t" })
-                    return trimmedLeading.hasPrefix("--")
+                    return trimmedLeading.hasPrefix("#") || trimmedLeading.hasPrefix("--")
                 }
                 
                 var changedCount = 0
@@ -4464,19 +4450,27 @@ struct ContentView: View {
                     let remainder = original.dropFirst(leadingWhitespace.count)
                     
                     if allAlreadyCommented {
-                        // UNcomment: remove leading "--" and an optional single space after
-                        if remainder.hasPrefix("--") {
-                            let afterDashes = remainder.dropFirst(2)
-                            let afterSpace = afterDashes.first == " " ? afterDashes.dropFirst() : afterDashes
+                        // UNcomment: remove the recognized comment marker and optional following space
+                        let removePrefix: (Substring, Int) -> String = { segment, toDrop in
+                            let afterPrefix = segment.dropFirst(toDrop)
+                            let afterSpace = afterPrefix.first == " " ? afterPrefix.dropFirst() : afterPrefix
                             changedCount += 1
                             return String(leadingWhitespace) + String(afterSpace)
-                        } else {
+                        }
+                        if remainder.hasPrefix("#") {
+                            return removePrefix(remainder, 1)
+                        }
+                        if remainder.hasPrefix("--") {
+                            return removePrefix(remainder, 2)
+                        }
+                        return original
+                    } else {
+                        // Comment: insert "# " after any leading indentation
+                        if remainder.hasPrefix("#") {
                             return original
                         }
-                    } else {
-                        // Comment: insert "-- " after any leading indentation
                         changedCount += 1
-                        return String(leadingWhitespace) + "-- " + String(remainder)
+                        return String(leadingWhitespace) + "# " + String(remainder)
                     }
                 }
                 
@@ -4553,7 +4547,7 @@ struct ContentView: View {
                         .tint(Theme.purple)
                         .font(.system(size: fontSize - 1))
                         .keyboardShortcut("/", modifiers: [.command]) // ⌘/
-                        .help("Toggle '--' comments on selected lines (⌘/)")
+                        .help("Toggle '# ' comments on selected lines (⌘/)")
                         
                         Button {
                             insertVisualDivider()
@@ -5643,7 +5637,7 @@ struct ContentView: View {
                     } else {
                         MarkdownEditor(
                             text: $draft,
-                            fontSize: fontSize,
+                            fontSize: fontSize * 1.5,
                             controller: controller,
                             onLinkRequested: onLinkRequested
                         )
