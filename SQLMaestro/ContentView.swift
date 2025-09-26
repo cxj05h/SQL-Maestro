@@ -311,9 +311,9 @@ struct MarkdownPreviewView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 10)
+                .textSelection(.enabled)
         }
         .background(Color.clear)
-        .focusable(false)
     }
 }
 
@@ -876,9 +876,9 @@ struct ContentView: View {
                         }
                         .buttonStyle(.bordered)
                         .tint(Theme.aqua)
-                        .keyboardShortcut("k", modifiers: [.command])
+                        .keyboardShortcut("k", modifiers: [.command, .shift])
                         .font(.system(size: fontSize))
-                        .registerShortcut(name: "Clear Session", keyLabel: "K", modifiers: [.command], scope: "Global")
+                        .registerShortcut(name: "Clear Session", keyLabel: "⇧⌘K", modifiers: [.command, .shift], scope: "Global")
                         
                         Spacer()
                     }
@@ -953,7 +953,10 @@ struct ContentView: View {
             .keyboardShortcut("e", modifiers: [.command])
             .registerShortcut(name: "Toggle Edit/Preview Notes", keyLabel: "E", modifiers: [.command], scope: "Global")
             .frame(width: 0, height: 0)
-        )
+            .buttonStyle(.plain)
+            .opacity(0.0001)
+            .allowsHitTesting(false)
+            )
         .sheet(isPresented: $showShortcutsSheet) {
             KeyboardShortcutsSheet(onClose: { showShortcutsSheet = false })
         }
@@ -2886,8 +2889,14 @@ struct ContentView: View {
                             .font(.system(size: fontSize - 1))
                         }
 
-                        MarkdownToolbar(iconSize: fontSize + 2, isEnabled: !guidePreviewMode, controller: guideNotesEditor)
-                        PreviewModeToggle(isPreview: $guidePreviewMode)
+                    MarkdownToolbar(iconSize: fontSize + 2, isEnabled: !guidePreviewMode, controller: guideNotesEditor)
+                    PreviewModeToggle(isPreview: Binding(
+                        get: { guidePreviewMode },
+                        set: { newValue in
+                            guidePreviewMode = newValue
+                            notesPreviewMode = newValue
+                        }
+                    ))
                     }
 
                     Spacer(minLength: 12)
@@ -2981,7 +2990,13 @@ struct ContentView: View {
                             ),
                             savedValue: sessions.sessionNotes[sessions.current] ?? "",
                             controller: sessionNotesEditor,
-                            isPreview: $notesPreviewMode,
+                            isPreview: Binding(
+                                get: { notesPreviewMode },
+                                set: { newValue in
+                                    notesPreviewMode = newValue
+                                    guidePreviewMode = newValue
+                                }
+                            ),
                             onSave: saveSessionNotes,
                             onRevert: revertSessionNotes,
                             onLinkRequested: handleSessionNotesLink(selectedText:source:completion:)
@@ -3369,19 +3384,21 @@ struct ContentView: View {
         }
 
         private func togglePreviewShortcut() {
-            guidePreviewMode.toggle()
-            notesPreviewMode.toggle()
-            LOG("Cmd+E toggled preview states", ctx: [
-                "guidePreview": guidePreviewMode ? "true" : "false",
-                "notesPreview": notesPreviewMode ? "true" : "false"
-            ])
+            let newValue = !(guidePreviewMode && notesPreviewMode)
+            guidePreviewMode = newValue
+            notesPreviewMode = newValue
+            LOG("Cmd+E synced preview", ctx: ["state": newValue ? "preview" : "edit"])
         }
 
         private func loadTemplate(_ t: TemplateItem) {
             commitDraftsForCurrentSession()
             selectedTemplate = t
             currentSQL = t.rawSQL
-            guidePreviewMode = true
+            guidePreviewMode = false
+            notesPreviewMode = false
+            DispatchQueue.main.async {
+                guideNotesEditor.focus()
+            }
             // Remember the template per session
             sessionSelectedTemplate[sessions.current] = t.id
             LOG("Template loaded", ctx: ["template": t.name, "phCount":"\(t.placeholders.count)"])
@@ -5443,10 +5460,12 @@ struct ContentView: View {
                     Image(systemName: "textformat.bold")
                         .font(.system(size: size, weight: .semibold))
                 }
+                .help("Bold (⌘B)")
                 Button(action: controller.italic) {
                     Image(systemName: "textformat.italic")
                         .font(.system(size: size, weight: .semibold))
                 }
+                .help("Italic (⌘I)")
                 Menu {
                     Button("Heading 1") { controller.heading(level: 1) }
                     Button("Heading 2") { controller.heading(level: 2) }
@@ -5456,30 +5475,32 @@ struct ContentView: View {
                     Image(systemName: "textformat.size")
                         .font(.system(size: size + 1, weight: .semibold))
                 }
+                .help("Insert heading")
                 Button(action: controller.inlineCode) {
                     Image(systemName: "chevron.left.slash.chevron.right")
                         .font(.system(size: size, weight: .semibold))
                 }
+                .help("Inline code (⌘`)")
                 Button(action: controller.codeBlock) {
                     Image(systemName: "curlybraces")
                         .font(.system(size: size, weight: .semibold))
                 }
+                .help("Code block")
                 Button(action: controller.bulletList) {
                     Image(systemName: "list.bullet")
                         .font(.system(size: size, weight: .semibold))
                 }
+                .help("Bulleted list")
                 Button(action: controller.numberedList) {
                     Image(systemName: "list.number")
                         .font(.system(size: size, weight: .semibold))
                 }
-                Button(action: controller.horizontalRule) {
-                    Image(systemName: "minus")
-                        .font(.system(size: size - 1, weight: .semibold))
-                }
+                .help("Numbered list")
                 Button(action: controller.link) {
                     Image(systemName: "link")
                         .font(.system(size: size, weight: .semibold))
                 }
+                .help("Insert link (⇧⌘K)")
             }
             .buttonStyle(.plain)
             .padding(.horizontal, 10)
