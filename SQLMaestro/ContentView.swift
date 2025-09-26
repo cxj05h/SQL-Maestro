@@ -1,7 +1,7 @@
 import SwiftUI
+import MarkdownUI
 import AppKit
 import UniformTypeIdentifiers
-import MarkdownUI
 
 enum SessionTemplateTab {
     case sessionImages
@@ -503,7 +503,7 @@ struct ContentView: View {
     @StateObject private var sessionNotesEditor = MarkdownEditorController()
     @StateObject private var guideNotesEditor = MarkdownEditorController()
     @State private var notesPreviewMode: Bool = false
-    @State private var guidePreviewMode: Bool = false
+    @State private var guidePreviewMode: Bool = true
     
     @State private var searchText: String = ""
     @State private var showShortcutsSheet: Bool = false
@@ -951,6 +951,7 @@ struct ContentView: View {
                 EmptyView()
             }
             .keyboardShortcut("e", modifiers: [.command])
+            .registerShortcut(name: "Toggle Edit/Preview Notes", keyLabel: "E", modifiers: [.command], scope: "Global")
             .frame(width: 0, height: 0)
         )
         .sheet(isPresented: $showShortcutsSheet) {
@@ -3368,19 +3369,19 @@ struct ContentView: View {
         }
 
         private func togglePreviewShortcut() {
-            if showTroubleshootingGuide {
-                guidePreviewMode.toggle()
-                LOG("Cmd+E toggled guide preview", ctx: ["isPreview": guidePreviewMode ? "true" : "false"])
-            } else {
-                notesPreviewMode.toggle()
-                LOG("Cmd+E toggled notes preview", ctx: ["isPreview": notesPreviewMode ? "true" : "false"])
-            }
+            guidePreviewMode.toggle()
+            notesPreviewMode.toggle()
+            LOG("Cmd+E toggled preview states", ctx: [
+                "guidePreview": guidePreviewMode ? "true" : "false",
+                "notesPreview": notesPreviewMode ? "true" : "false"
+            ])
         }
 
         private func loadTemplate(_ t: TemplateItem) {
             commitDraftsForCurrentSession()
             selectedTemplate = t
             currentSQL = t.rawSQL
+            guidePreviewMode = true
             // Remember the template per session
             sessionSelectedTemplate[sessions.current] = t.id
             LOG("Template loaded", ctx: ["template": t.name, "phCount":"\(t.placeholders.count)"])
