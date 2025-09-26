@@ -1,6 +1,7 @@
 import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
+import MarkdownUI
 
 enum SessionTemplateTab {
     case sessionImages
@@ -292,46 +293,24 @@ extension WheelNumberField {
     }
 }
 
-struct MarkdownPreviewView: NSViewRepresentable {
+struct MarkdownPreviewView: View {
     var text: String
     var fontSize: CGFloat
 
-    func makeNSView(context: Context) -> NSScrollView {
-        let textView = NSTextView()
-        textView.isEditable = false
-        textView.isSelectable = true
-        textView.drawsBackground = false
-        textView.textContainerInset = NSSize(width: 8, height: 10)
-        textView.textContainer?.widthTracksTextView = true
-        textView.textContainer?.heightTracksTextView = false
-        textView.textContainer?.lineFragmentPadding = 0
-        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
-        textView.isVerticallyResizable = true
-        textView.isHorizontallyResizable = false
-        textView.autoresizingMask = [.width]
-
-        let scrollView = NSScrollView()
-        scrollView.hasVerticalScroller = true
-        scrollView.drawsBackground = false
-        scrollView.borderType = .noBorder
-        scrollView.autohidesScrollers = false
-        scrollView.documentView = textView
-
-        update(textView)
-        return scrollView
-    }
-
-    func updateNSView(_ nsView: NSScrollView, context: Context) {
-        guard let textView = nsView.documentView as? NSTextView else { return }
-        update(textView)
-    }
-
-    private func update(_ textView: NSTextView) {
-        LOG("Markdown preview render", ctx: ["length": "\(text.count)"])
-        let rendered = MarkdownEditor.renderPreview(markdown: text, fontSize: fontSize)
-        textView.textStorage?.setAttributedString(rendered)
-        textView.textContainer?.lineFragmentPadding = 0
-        textView.layoutManager?.ensureLayout(for: textView.textContainer!)
+    var body: some View {
+        ScrollView {
+            Markdown(text)
+                .markdownTheme(.gitHub)
+                .markdownTextStyle(\.text) {
+                    FontSize(fontSize)
+                }
+                .markdownMargin(top: 0, bottom: 0)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 10)
+        }
+        .background(Color.clear)
+        .focusable(false)
     }
 }
 
@@ -5479,10 +5458,6 @@ struct ContentView: View {
                 }
                 Button(action: controller.codeBlock) {
                     Image(systemName: "curlybraces")
-                        .font(.system(size: size, weight: .semibold))
-                }
-                Button(action: controller.blockQuote) {
-                    Image(systemName: "text.quote")
                         .font(.system(size: size, weight: .semibold))
                 }
                 Button(action: controller.bulletList) {
