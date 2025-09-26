@@ -13,7 +13,6 @@ final class MarkdownEditorController: ObservableObject {
     func numberedList() { coordinator?.toggleNumberedList() }
     func inlineCode() { coordinator?.wrapSelection(prefix: "`", suffix: "`") }
     func codeBlock() { coordinator?.wrapSelection(prefix: "\n```\n", suffix: "\n```\n") }
-    func horizontalRule() { coordinator?.insertHorizontalRule() }
     func link() { coordinator?.requestLinkInsertion(source: .toolbar) }
 }
 
@@ -126,8 +125,10 @@ struct MarkdownEditor: NSViewRepresentable {
                let character = event.charactersIgnoringModifiers?.lowercased() {
                 switch character {
                 case "k":
-                    requestLinkInsertion(source: .keyboard)
-                    return true
+                    if !event.modifierFlags.contains(.shift) {
+                        requestLinkInsertion(source: .keyboard)
+                        return true
+                    }
                 case "b":
                     wrapSelection(prefix: "**", suffix: "**")
                     return true
@@ -227,12 +228,6 @@ struct MarkdownEditor: NSViewRepresentable {
             }
             let joined = transformed.joined(separator: "\n")
             replace(range: lineRange, with: joined, newSelection: NSRange(location: lineRange.location, length: joined.utf16.count))
-        }
-
-        func insertHorizontalRule() {
-            guard let textView else { return }
-            let insertion = "\n---\n"
-            insert(text: insertion)
         }
 
         func requestLinkInsertion(source: LinkRequestSource) {

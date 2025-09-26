@@ -1,6 +1,8 @@
 import SwiftUI
 import MarkdownUI
+#if canImport(AppKit)
 import AppKit
+#endif
 import UniformTypeIdentifiers
 
 enum SessionTemplateTab {
@@ -502,8 +504,7 @@ struct ContentView: View {
     @State private var sessionNotesDrafts: [TicketSession: String] = [:]
     @StateObject private var sessionNotesEditor = MarkdownEditorController()
     @StateObject private var guideNotesEditor = MarkdownEditorController()
-    @State private var notesPreviewMode: Bool = false
-    @State private var guidePreviewMode: Bool = true
+    @State private var isPreviewMode: Bool = true
     
     @State private var searchText: String = ""
     @State private var showShortcutsSheet: Bool = false
@@ -551,199 +552,7 @@ struct ContentView: View {
     
     var body: some View {
         NavigationSplitView {
-            // Query Templates Pane
-            // Query Templates Pane
-            VStack(spacing: 8) {
-                // Header with buttons
-                HStack(spacing: 8) {
-                    Text("Query Templates")
-                        .font(.system(size: fontSize + 4, weight: .semibold))
-                        .foregroundStyle(Theme.purple)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.85)
-                        .layoutPriority(1)
-                    Spacer()
-                    Button("New Template") { createNewTemplateFlow() }
-                        .buttonStyle(.borderedProminent)
-                        .tint(Theme.purple)
-                        .font(.system(size: fontSize))
-                    Button("Reload") {
-                        templates.loadTemplates()
-                        withAnimation { toastReloaded = true }
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
-                            withAnimation { toastReloaded = false }
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Theme.accent)
-                    .font(.system(size: fontSize))
-                    .keyboardShortcut("r", modifiers: [.command])
-                    .registerShortcut(name: "Reload Templates", keyLabel: "R", modifiers: [.command], scope: "Templates")
-                }
-                
-                // Search field
-                HStack {
-                    Image(systemName: "magnifyingglass")
-                        .foregroundStyle(.secondary)
-                        .font(.system(size: fontSize))
-                    TextField("Search templates...", text: $searchText)
-                        .textFieldStyle(.roundedBorder)
-                        .font(.system(size: fontSize))
-                        .focused($isSearchFocused)
-                        .onTapGesture {
-                            LOG("Template search focused")
-                        }
-                        .onChange(of: searchText) { oldVal, newVal in
-                            LOG("Template search", ctx: ["query": newVal, "results": "\(filteredTemplates.count)"])
-                        }
-                        .onKeyPress(.return) {
-                            if !filteredTemplates.isEmpty {
-                                if selectedTemplate == nil {
-                                    selectedTemplate = filteredTemplates.first
-                                }
-                                isSearchFocused = false
-                                isListFocused = true
-                                LOG("Focus transferred from search to list", ctx: ["selectedTemplate": selectedTemplate?.name ?? "none"])
-                            }
-                            return .handled
-                        }
-                    if !searchText.isEmpty {
-                        Button("Clear") {
-                            searchText = ""
-                            selectedTemplate = nil
-                            isSearchFocused = true
-                            LOG("Template search cleared")
-                        }
-                        .buttonStyle(.borderless)
-                        .foregroundStyle(Theme.pink)
-                        .font(.system(size: fontSize))
-                    }
-                }
-                .contextMenu {
-                    if let sel = selectedTemplate {
-                        Button("Open JSON") { openTemplateJSON(sel) }
-                        Button("Show in Finder") { revealTemplateInFinder(sel) }
-                        Divider()
-                        Button(role: .destructive) { deleteTemplateFlow(sel) } label: {
-                            Text("Delete Selected Template…")
-                        }
-                    } else {
-                        Text("No template selected").foregroundStyle(.secondary)
-                    }
-                }
-                
-                // Template List
-                List(filteredTemplates, id: \.id, selection: $selectedTemplate) { template in                    HStack(spacing: 8) {
-                    let isUsed = UsedTemplatesStore.shared.isTemplateUsed(in: sessions.current, templateId: template.id)
-                    let isSelected = selectedTemplate?.id == template.id
-                    
-                    Image(systemName: "doc.text.fill")
-                        .foregroundStyle(
-                            isSelected
-                            ? (isUsed ? Theme.pink : .white)
-                            : (isUsed ? Theme.pink.opacity(0.8) : Theme.gold.opacity(0.6))
-                        )
-                        .font(.system(size: fontSize + 1))
-                    
-                    // Template name
-                    Text(template.name)
-                        .font(.system(size: fontSize))
-                        .foregroundStyle(isSelected ? .white : .primary)
-                    
-                    Spacer()
-                    
-                    // Placeholder count capsule
-                    if !template.placeholders.isEmpty {
-                        Text("\(template.placeholders.count)")
-                            .font(.system(size: fontSize - 3))
-                            .fontWeight(.medium)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(
-                                isSelected
-                                ? (isUsed ? Theme.pink.opacity(0.3) : .white.opacity(0.3))
-                                : (isUsed ? Theme.pink.opacity(0.15) : Theme.gold.opacity(0.15))
-                            )
-                            .foregroundStyle(
-                                isSelected
-                                ? (isUsed ? Theme.pink : .white)
-                                : (isUsed ? Theme.pink : Theme.gold)
-                            )
-                            .clipShape(Capsule())
-                    }
-                }
-                .padding(.vertical, 4)
-                .padding(.horizontal, 8)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(selectedTemplate?.id == template.id ? Theme.purple.opacity(0.1) : Color.clear)
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(selectedTemplate?.id == template.id ? Theme.purple.opacity(0.3) : Color.clear, lineWidth: 1.5)
-                        )
-                )
-                .contentShape(Rectangle())
-                .contextMenu {
-                    Button("Open in VS Code") { openInVSCode(template.url) }
-                    Button("Edit in App") { editTemplateInline(template) }
-                    
-                    Button("Open JSON") { openTemplateJSON(template) }
-                    Button("Show in Finder") { revealTemplateInFinder(template) }
-                    
-                    Divider()
-                    Button("Rename…") { renameTemplateFlow(template) }
-                    
-                    Divider()
-                    Button(role: .destructive) { deleteTemplateFlow(template) } label: {
-                        Text("Delete Template…")
-                    }
-                }
-                .highPriorityGesture(
-                    TapGesture(count: 2).onEnded {
-                        editTemplateInline(template)
-                    }
-                )
-                .onTapGesture {
-                    selectTemplate(template)
-                    LOG("Template selected", ctx: ["template": template.name])
-                }
-                }
-                .animation(nil, value: selectedTemplate?.id)
-                .listStyle(.plain)
-                .scrollContentBackground(.hidden)
-                .onKeyPress(.return) {
-                    if !filteredTemplates.isEmpty {
-                        if selectedTemplate == nil {
-                            selectTemplate(filteredTemplates.first)
-                        }
-                        if let selected = selectedTemplate {
-                            loadTemplate(selected)
-                            LOG("Template loaded via Enter key", ctx: ["template": selected.name])
-                            return .handled
-                        }
-                        return .handled
-                    }
-                    return .ignored
-                }
-                .onKeyPress(.upArrow) {
-                    navigateTemplate(direction: -1)
-                    return .handled
-                }
-                .onKeyPress(.downArrow) {
-                    navigateTemplate(direction: 1)
-                    return .handled
-                }
-                .focused($isListFocused)
-                
-                if !searchText.isEmpty {
-                    Text("\(filteredTemplates.count) of \(templates.templates.count) templates")
-                        .font(.system(size: fontSize - 2))
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding()
-            .background(Theme.grayBG)
-            .frame(minWidth: 300, idealWidth: 320) // expanded by ~50px
+            templatesPane
         } detail: {
             // Right side: Fields + Output
             VStack(spacing: 12) {
@@ -850,6 +659,9 @@ struct ContentView: View {
                             if let template = selectedTemplate {
                                 templateGuideStore.prepare(for: template)
                                 guideNotesDraft = templateGuideStore.currentNotes(for: template)
+                                if !showTroubleshootingGuide {
+                                    setPreviewMode(true)
+                                }
                                 withAnimation { showTroubleshootingGuide.toggle() }
                             }
                         }
@@ -878,7 +690,7 @@ struct ContentView: View {
                         .tint(Theme.aqua)
                         .keyboardShortcut("k", modifiers: [.command, .shift])
                         .font(.system(size: fontSize))
-                        .registerShortcut(name: "Clear Session", keyLabel: "⇧⌘K", modifiers: [.command, .shift], scope: "Global")
+                        .registerShortcut(name: "Clear Session", keyLabel: "K", modifiers: [.command, .shift], scope: "Global")
                         
                         Spacer()
                     }
@@ -981,6 +793,12 @@ struct ContentView: View {
         
         .onAppear {
             LOG("App started")
+            #if canImport(AppKit)
+            DispatchQueue.main.async {
+                configureTooltipDelay(0.5)
+            }
+            #endif
+            setPreviewMode(true)
             // Clear all sessions & used templates on launch (full reset)
             for s in TicketSession.allCases {
                 sessions.clearAllFields(for: s)
@@ -1052,6 +870,192 @@ struct ContentView: View {
             }
         }
         }
+    
+    // MARK: – Templates Pane (split to help the type checker)
+    @ViewBuilder
+    private var templatesPane: some View {
+    TemplatesSidebar {
+    templatesHeader
+    } search: {
+    templatesSearch
+    } list: {
+    templatesList
+    } footer: {
+    templatesFooter
+    }
+    .padding()
+    .background(Theme.grayBG)
+    .frame(minWidth: 300, idealWidth: 320)
+    }
+
+    @ViewBuilder
+    private var templatesFooter: some View {
+    if !searchText.isEmpty {
+    Text("\(filteredTemplates.count) of \(templates.templates.count) templates")
+    .font(.system(size: fontSize - 2))
+    .foregroundStyle(.secondary)
+    }
+    }
+
+    @ViewBuilder
+    private var templatesHeader: some View {
+    HStack(spacing: 8) {
+    Text("Query Templates")
+    .font(.system(size: fontSize + 4, weight: .semibold))
+    .foregroundStyle(Theme.purple)
+    .lineLimit(1)
+    .minimumScaleFactor(0.85)
+    .layoutPriority(1)
+    Spacer()
+    Button("New Template") { createNewTemplateFlow() }
+    .buttonStyle(.borderedProminent)
+    .tint(Theme.purple)
+    .font(.system(size: fontSize))
+    Button("Reload") {
+    templates.loadTemplates()
+    withAnimation { toastReloaded = true }
+    DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+    withAnimation { toastReloaded = false }
+    }
+    }
+    .buttonStyle(.borderedProminent)
+    .tint(Theme.accent)
+    .font(.system(size: fontSize))
+    .keyboardShortcut("r", modifiers: [.command])
+    .registerShortcut(name: "Reload Templates", keyLabel: "R", modifiers: [.command], scope: "Templates")
+    }
+    }
+
+    @ViewBuilder
+    private var templatesSearch: some View {
+    HStack {
+    Image(systemName: "magnifyingglass")
+    .foregroundStyle(.secondary)
+    .font(.system(size: fontSize))
+    TextField("Search templates...", text: $searchText)
+    .textFieldStyle(.roundedBorder)
+    .font(.system(size: fontSize))
+    .focused($isSearchFocused)
+    if !searchText.isEmpty {
+    Button("Clear") {
+    searchText = ""
+    selectedTemplate = nil
+    isSearchFocused = true
+    }
+    .buttonStyle(.borderless)
+    .foregroundStyle(Theme.pink)
+    .font(.system(size: fontSize))
+    }
+    }
+    .contextMenu {
+    if let sel = selectedTemplate {
+    Button("Open JSON") { openTemplateJSON(sel) }
+    Button("Show in Finder") { revealTemplateInFinder(sel) }
+    Divider()
+    Button(role: .destructive, action: { deleteTemplateFlow(sel) }) {
+    Text("Delete Selected Template…")
+    }
+    } else {
+    Text("No template selected").foregroundStyle(.secondary)
+    }
+    }
+    }
+
+    @ViewBuilder
+    private var templatesList: some View {
+    List(filteredTemplates, id: \.id, selection: Binding(
+        get: { selectedTemplate?.id },
+        set: { newValue in
+            if let id = newValue,
+               let found = templates.templates.first(where: { $0.id == id }) {
+                selectTemplate(found)
+            } else {
+                selectTemplate(nil)
+            }
+        }
+    )) { template in
+    templateRow(template)
+    }
+    .animation(nil, value: selectedTemplate?.id)
+    .listStyle(.plain)
+    .scrollContentBackground(.hidden)
+    .onKeyPress(.return) {
+    if !filteredTemplates.isEmpty {
+    if selectedTemplate == nil { selectTemplate(filteredTemplates.first) }
+    if let selected = selectedTemplate {
+    loadTemplate(selected)
+    return .handled
+    }
+    return .handled
+    }
+    return .ignored
+    }
+    .onKeyPress(.upArrow) { navigateTemplate(direction: -1); return .handled }
+    .onKeyPress(.downArrow) { navigateTemplate(direction: 1); return .handled }
+    .focused($isListFocused)
+    }
+
+    @ViewBuilder
+    private func templateRow(_ template: TemplateItem) -> some View {
+    let isUsed = UsedTemplatesStore.shared.isTemplateUsed(in: sessions.current, templateId: template.id)
+    let isSelected = selectedTemplate?.id == template.id
+
+    HStack(spacing: 8) {
+    Image(systemName: "doc.text.fill")
+    .foregroundStyle(
+    isSelected ? (isUsed ? Theme.pink : .white)
+    : (isUsed ? Theme.pink.opacity(0.8) : Theme.gold.opacity(0.6))
+    )
+    .font(.system(size: fontSize + 1))
+
+        Text(template.name)
+          .font(.system(size: fontSize))
+          .foregroundStyle(isSelected ? .white : .primary)
+
+        Spacer()
+
+        if !template.placeholders.isEmpty {
+          Text("\(template.placeholders.count)")
+            .font(.system(size: fontSize - 3))
+            .fontWeight(.medium)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(
+              isSelected ? (isUsed ? Theme.pink.opacity(0.3) : .white.opacity(0.3))
+                         : (isUsed ? Theme.pink.opacity(0.15) : Theme.gold.opacity(0.15))
+            )
+            .foregroundStyle(isSelected ? (isUsed ? Theme.pink : .white)
+                                       : (isUsed ? Theme.pink : Theme.gold))
+            .clipShape(Capsule())
+        }
+
+    }
+    .padding(.vertical, 4)
+    .padding(.horizontal, 8)
+    .background(
+    RoundedRectangle(cornerRadius: 8)
+    .fill(isSelected ? Theme.purple.opacity(0.1) : Color.clear)
+    .overlay(
+    RoundedRectangle(cornerRadius: 8)
+    .stroke(isSelected ? Theme.purple.opacity(0.3) : Color.clear, lineWidth: 1.5)
+    )
+    )
+    .contentShape(Rectangle())
+    .contextMenu {
+    Button("Open in VS Code") { openInVSCode(template.url) }
+    Button("Edit in App") { editTemplateInline(template) }
+    Button("Open JSON") { openTemplateJSON(template) }
+    Button("Show in Finder") { revealTemplateInFinder(template) }
+    Divider()
+    Button("Rename…") { renameTemplateFlow(template) }
+    Divider()
+    Button(role: .destructive, action: { deleteTemplateFlow(template) }) { Text("Delete Template…") }
+    }
+    .highPriorityGesture(TapGesture(count: 2).onEnded { editTemplateInline(template) })
+    .onTapGesture { selectTemplate(template) }
+    }
+    
+    
         private func renameSessionImage(_ image: SessionImage) {
             let alert = NSAlert()
             alert.messageText = "Rename Image"
@@ -2889,13 +2893,10 @@ struct ContentView: View {
                             .font(.system(size: fontSize - 1))
                         }
 
-                    MarkdownToolbar(iconSize: fontSize + 2, isEnabled: !guidePreviewMode, controller: guideNotesEditor)
+                    MarkdownToolbar(iconSize: fontSize + 2, isEnabled: !isPreviewMode, controller: guideNotesEditor)
                     PreviewModeToggle(isPreview: Binding(
-                        get: { guidePreviewMode },
-                        set: { newValue in
-                            guidePreviewMode = newValue
-                            notesPreviewMode = newValue
-                        }
+                        get: { isPreviewMode },
+                        set: { setPreviewMode($0) }
                     ))
                     }
 
@@ -2916,7 +2917,7 @@ struct ContentView: View {
                     if showTroubleshootingGuide {
                         if let template = selectedTemplate {
                             Group {
-                                if guidePreviewMode {
+                                if isPreviewMode {
                                     MarkdownPreviewView(text: guideNotesDraft, fontSize: fontSize)
                                 } else {
                                     MarkdownEditor(
@@ -2991,11 +2992,8 @@ struct ContentView: View {
                             savedValue: sessions.sessionNotes[sessions.current] ?? "",
                             controller: sessionNotesEditor,
                             isPreview: Binding(
-                                get: { notesPreviewMode },
-                                set: { newValue in
-                                    notesPreviewMode = newValue
-                                    guidePreviewMode = newValue
-                                }
+                                get: { isPreviewMode },
+                                set: { setPreviewMode($0) }
                             ),
                             onSave: saveSessionNotes,
                             onRevert: revertSessionNotes,
@@ -3328,6 +3326,7 @@ struct ContentView: View {
         private func selectTemplate(_ t: TemplateItem?) {
             selectedTemplate = t
             if let t = t {
+                setPreviewMode(true)
                 sessionSelectedTemplate[sessions.current] = t.id
                 // Hydrate DB tables working set from sidecar
                 _ = DBTablesStore.shared.loadSidecar(for: sessions.current, template: t)
@@ -3384,21 +3383,15 @@ struct ContentView: View {
         }
 
         private func togglePreviewShortcut() {
-            let newValue = !(guidePreviewMode && notesPreviewMode)
-            guidePreviewMode = newValue
-            notesPreviewMode = newValue
-            LOG("Cmd+E synced preview", ctx: ["state": newValue ? "preview" : "edit"])
+            setPreviewMode(!isPreviewMode)
+            LOG("Cmd+E synced preview", ctx: ["state": isPreviewMode ? "preview" : "edit"])
         }
 
         private func loadTemplate(_ t: TemplateItem) {
             commitDraftsForCurrentSession()
             selectedTemplate = t
             currentSQL = t.rawSQL
-            guidePreviewMode = false
-            notesPreviewMode = false
-            DispatchQueue.main.async {
-                guideNotesEditor.focus()
-            }
+            setPreviewMode(true)
             // Remember the template per session
             sessionSelectedTemplate[sessions.current] = t.id
             LOG("Template loaded", ctx: ["template": t.name, "phCount":"\(t.placeholders.count)"])
@@ -3484,6 +3477,22 @@ struct ContentView: View {
                 LOG("Template save failed", ctx: ["template": template.name, "error": error.localizedDescription])
             }
         }
+
+        private func setPreviewMode(_ preview: Bool) {
+            isPreviewMode = preview
+            if !preview, showTroubleshootingGuide {
+                DispatchQueue.main.async { guideNotesEditor.focus() }
+            }
+        }
+
+#if canImport(AppKit)
+        private func configureTooltipDelay(_ delay: TimeInterval) {
+            let manager = NSHelpManager.shared
+            if manager.responds(to: NSSelectorFromString("setToolTipDelay:")) {
+                manager.setValue(delay, forKey: "toolTipDelay")
+            }
+        }
+#endif
         
         private func openInVSCode(_ url: URL) {
             let cfg = NSWorkspace.OpenConfiguration()
@@ -5284,7 +5293,6 @@ struct ContentView: View {
         private func toggleItalic() { wrapSelection(prefix: "*") }
         private func toggleUnderline() { wrapSelection(prefix: "<u>", suffix: "</u>") }
         private func toggleCodeBlock() { wrapSelection(prefix: "\n```\n", suffix: "\n```\n") }
-        private func insertHR() { wrapSelection(prefix: "\n---\n", suffix: "") }
         
         private func applyHeading(_ level: Int) {
             guard let tv = activeTextView() else { return }
@@ -5373,21 +5381,36 @@ struct ContentView: View {
             VStack(spacing: 8) {
                 if showToolbar {
                     HStack(spacing: 8) {
-                        Button { toggleBold() } label: { Image(systemName: "bold") }.keyboardShortcut("b", modifiers: [.command])
-                        Button { toggleItalic() } label: { Image(systemName: "italic") }.keyboardShortcut("i", modifiers: [.command])
-                        Button { toggleUnderline() } label: { Image(systemName: "underline") }.keyboardShortcut("u", modifiers: [.command])
-                        Button { insertLink() } label: { Image(systemName: "link") }.keyboardShortcut("k", modifiers: [.command])
+                        Button(action: { toggleBold() }) { Image(systemName: "bold") }
+                            .keyboardShortcut("b", modifiers: [.command])
+                            .help("Bold (⌘B)")
+                        Button(action: { toggleItalic() }) { Image(systemName: "italic") }
+                            .keyboardShortcut("i", modifiers: [.command])
+                            .help("Italic (⌘I)")
+                        Button(action: { toggleUnderline() }) { Image(systemName: "underline") }
+                            .keyboardShortcut("u", modifiers: [.command])
+                            .help("Underline (⌘U)")
+                        Button(action: { insertLink() }) { Image(systemName: "link") }
+                            .keyboardShortcut("k", modifiers: [.command])
+                            .help("Insert link (⌘K)")
+                            .registerShortcut(name: "Insert Link", keyLabel: "K", modifiers: [.command], scope: "Markdown")
                         Divider()
-                        Button { toggleInlineCode() } label: { Image(systemName: "chevron.left.forwardslash.chevron.right") }
-                        Button { toggleCodeBlock() } label: { Image(systemName: "square.grid.3x3") }
-                        Button { insertHR() } label: { Image(systemName: "scribble.variable") }
+                        Button(action: { toggleInlineCode() }) { Image(systemName: "chevron.left.forwardslash.chevron.right") }
+                            .help("Inline code")
+                        Button(action: { toggleCodeBlock() }) { Image(systemName: "square.grid.3x3") }
+                            .help("Code block")
                         Divider()
-                        Button { applyHeading(1) } label: { Text("H1") }
-                        Button { applyHeading(2) } label: { Text("H2") }
-                        Button { applyHeading(3) } label: { Text("H3") }
+                        Button(action: { applyHeading(1) }) { Text("H1") }
+                            .help("Heading 1")
+                        Button(action: { applyHeading(2) }) { Text("H2") }
+                            .help("Heading 2")
+                        Button(action: { applyHeading(3) }) { Text("H3") }
+                            .help("Heading 3")
                         Divider()
-                        Button { applyList(prefix: "- ") } label: { Image(systemName: "list.bullet") }
-                        Button { applyList(prefix: "1. ") } label: { Image(systemName: "list.number") }
+                        Button(action: { applyList(prefix: "- ") }) { Image(systemName: "list.bullet") }
+                            .help("Bulleted list")
+                        Button(action: { applyList(prefix: "1. ") }) { Image(systemName: "list.number") }
+                            .help("Numbered list")
                     }
                     .font(.system(size: fontSize - 1))
                     .padding(6)
@@ -5447,6 +5470,32 @@ struct ContentView: View {
             }
         }
     }
+    private struct TemplatesSidebar<Header: View, Search: View, List: View, Footer: View>: View {
+        private let header: Header
+        private let search: Search
+        private let list: List
+        private let footer: Footer
+
+        init(@ViewBuilder header: () -> Header,
+             @ViewBuilder search: () -> Search,
+             @ViewBuilder list: () -> List,
+             @ViewBuilder footer: () -> Footer) {
+            self.header = header()
+            self.search = search()
+            self.list = list()
+            self.footer = footer()
+        }
+
+        var body: some View {
+            VStack(spacing: 8) {
+                header
+                search
+                list
+                footer
+            }
+        }
+    }
+
     // MARK: – Session Notes Inline (sidebar)
     struct MarkdownToolbar: View {
         var iconSize: CGFloat
@@ -5475,7 +5524,7 @@ struct ContentView: View {
                     Image(systemName: "textformat.size")
                         .font(.system(size: size + 1, weight: .semibold))
                 }
-                .help("Insert heading")
+                .help("Headings")
                 Button(action: controller.inlineCode) {
                     Image(systemName: "chevron.left.slash.chevron.right")
                         .font(.system(size: size, weight: .semibold))
@@ -5500,7 +5549,8 @@ struct ContentView: View {
                     Image(systemName: "link")
                         .font(.system(size: size, weight: .semibold))
                 }
-                .help("Insert link (⇧⌘K)")
+                .help("Insert link (⌘K)")
+                .registerShortcut(name: "Insert Link", keyLabel: "K", modifiers: [.command], scope: "Markdown")
             }
             .buttonStyle(.plain)
             .padding(.horizontal, 10)
