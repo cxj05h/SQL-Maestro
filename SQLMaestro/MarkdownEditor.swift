@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import UniformTypeIdentifiers
 
 /// Controller passed into `MarkdownEditor` to expose formatting actions to toolbars.
 final class MarkdownEditorController: ObservableObject {
@@ -23,6 +24,21 @@ struct MarkdownEditor: NSViewRepresentable {
         let saveToTemplateLinks: Bool
     }
 
+    struct ImageDropInfo {
+        enum Source {
+            case paste
+            case drop
+        }
+
+        let data: Data
+        let filename: String?
+        let source: Source
+    }
+
+    struct ImageInsertion {
+        let markdown: String
+    }
+
     enum LinkRequestSource {
         case keyboard
         case toolbar
@@ -32,16 +48,27 @@ struct MarkdownEditor: NSViewRepresentable {
     var fontSize: CGFloat
     @ObservedObject var controller: MarkdownEditorController
     var onLinkRequested: ((_ selectedText: String, _ source: LinkRequestSource, _ completion: @escaping (LinkInsertion?) -> Void) -> Void)?
+    var onImageAttachment: ((ImageDropInfo) -> ImageInsertion?)?
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
     }
 
     func makeNSView(context: Context) -> NSScrollView {
-        let scrollView = NSTextView.scrollableTextView()
-        guard let textView = scrollView.documentView as? NSTextView else {
-            return scrollView
-        }
+        let textView = MarkdownTextView()
+        let scrollView = NSScrollView()
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.documentView = textView
+
+        textView.minSize = NSSize(width: 0, height: 0)
+        textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
+        textView.textContainer?.widthTracksTextView = true
+        textView.textContainerInset = NSSize(width: 8, height: 10)
 
         textView.delegate = context.coordinator
         textView.isRichText = false
@@ -64,6 +91,29 @@ struct MarkdownEditor: NSViewRepresentable {
             .foregroundColor: NSColor.systemBlue,
             .underlineStyle: NSUnderlineStyle.single.rawValue
         ]
+        textView.registerForDraggedTypes([
+            .fileURL,
+            .png,
+            .tiff,
+            .init("public.jpeg"),
+            .init("public.heic")
+        ])
+
+        let coordinator = context.coordinator
+        textView.handlePaste = { [weak coordinator] pasteboard in
+            guard let coordinator else { return false }
+            return coordinator.handleImageAttachment(from: pasteboard, source: .paste)
+        }
+
+        textView.canAcceptDrag = { [weak coordinator] pasteboard in
+            guard let coordinator else { return false }
+            return coordinator.containsImage(in: pasteboard)
+        }
+
+        textView.handleDrop = { [weak coordinator] pasteboard, location in
+            guard let coordinator else { return false }
+            return coordinator.handleDrop(pasteboard: pasteboard, at: location)
+        }
 
         context.coordinator.textView = textView
         controller.coordinator = context.coordinator
@@ -150,6 +200,61 @@ struct MarkdownEditor: NSViewRepresentable {
                 break
             }
             return false
+        }
+
+        // MARK: Image handling
+
+        func containsImage(in pasteboard: NSPasteboard) -> Bool {
+            if pasteboard.canReadObject(forClasses: [NSImage.self], options: nil) {
+                return true
+            }
+            if pasteboard.types?.contains(.fileURL) == true {
+                if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] {
+                    return urls.contains { $0.isFileURL && $0.isImageFile }
+                }
+            }
+            return false
+        }
+
+        func handleDrop(pasteboard: NSPasteboard, at location: NSPoint) -> Bool {
+            guard let textView else { return false }
+            let localPoint = textView.convert(location, from: nil)
+            let caretIndex = textView.characterIndexForInsertion(at: localPoint)
+            textView.setSelectedRange(NSRange(location: caretIndex, length: 0))
+            return handleImageAttachment(from: pasteboard, source: .drop)
+        }
+
+        func handleImageAttachment(from pasteboard: NSPasteboard, source: MarkdownEditor.ImageDropInfo.Source) -> Bool {
+            guard let (data, filename) = extractImageData(from: pasteboard) else { return false }
+            guard let handler = parent.onImageAttachment else { return false }
+            guard let insertion = handler(MarkdownEditor.ImageDropInfo(data: data, filename: filename, source: source)) else { return false }
+
+            guard let textView else { return true }
+            let range = textView.selectedRange()
+            let markdown = insertion.markdown
+            replace(range: range, with: markdown, newSelection: NSRange(location: range.location + markdown.utf16.count, length: 0))
+            return true
+        }
+
+        private func extractImageData(from pasteboard: NSPasteboard) -> (Data, String?)? {
+            if let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: nil) as? [URL] {
+                for url in urls where url.isFileURL && url.isImageFile {
+                    if let data = try? Data(contentsOf: url), let png = data.normalizedPNGData {
+                        return (png, url.lastPathComponent)
+                    }
+                }
+            }
+
+            if let items = pasteboard.pasteboardItems {
+                for item in items {
+                    for type in item.types {
+                        if let data = item.data(forType: type), let png = data.normalizedPNGData {
+                            return (png, nil)
+                        }
+                    }
+                }
+            }
+            return nil
         }
 
         // MARK: Formatting helpers
@@ -358,3 +463,70 @@ private extension String {
         return result
     }
 }
+
+private extension Data {
+    var normalizedPNGData: Data? {
+        if isPNG { return self }
+        guard let image = NSImage(data: self),
+              let tiff = image.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff),
+              let png = rep.representation(using: .png, properties: [:]) else {
+            return nil
+        }
+        return png
+    }
+
+    private var isPNG: Bool {
+        guard count >= 4 else { return false }
+        let first = self[startIndex]
+        let secondIndex = self.index(after: startIndex)
+        let second = self[secondIndex]
+        let thirdIndex = self.index(secondIndex, offsetBy: 1)
+        let third = self[thirdIndex]
+        let fourthIndex = self.index(thirdIndex, offsetBy: 1)
+        let fourth = self[fourthIndex]
+        return first == 0x89 && second == 0x50 && third == 0x4E && fourth == 0x47
+    }
+}
+
+private extension URL {
+    var isImageFile: Bool {
+        if #available(macOS 11.0, *), let type = try? resourceValues(forKeys: [.contentTypeKey]).contentType {
+            return type.conforms(to: .image)
+        }
+        let ext = pathExtension.lowercased()
+        return ["png", "jpg", "jpeg", "heic", "tif", "tiff", "gif", "bmp"].contains(ext)
+    }
+}
+    final class MarkdownTextView: NSTextView {
+        var handlePaste: ((NSPasteboard) -> Bool)?
+        var canAcceptDrag: ((NSPasteboard) -> Bool)?
+        var handleDrop: ((NSPasteboard, NSPoint) -> Bool)?
+
+        override func paste(_ sender: Any?) {
+            let pasteboard = NSPasteboard.general
+            if handlePaste?(pasteboard) == true { return }
+            super.paste(sender)
+        }
+
+        override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation {
+            if let canAccept = canAcceptDrag, canAccept(sender.draggingPasteboard) {
+                return .copy
+            }
+            return super.draggingEntered(sender)
+        }
+
+        override func prepareForDragOperation(_ sender: NSDraggingInfo) -> Bool {
+            if let canAccept = canAcceptDrag, canAccept(sender.draggingPasteboard) {
+                return true
+            }
+            return super.prepareForDragOperation(sender)
+        }
+
+        override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+            if let handler = handleDrop, handler(sender.draggingPasteboard, sender.draggingLocation) {
+                return true
+            }
+            return super.performDragOperation(sender)
+        }
+    }

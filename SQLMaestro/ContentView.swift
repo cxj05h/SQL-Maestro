@@ -491,6 +491,7 @@ struct ContentView: View {
     @State private var toastCopied: Bool = false
     @State private var toastOpenDB: Bool = false
     @State private var toastReloaded: Bool = false
+    @State private var imageAttachmentToast: String? = nil
 
     @State private var alternateFieldsLocked: Bool = false
 
@@ -737,6 +738,14 @@ struct ContentView: View {
                         .font(.system(size: fontSize))
                         .padding(.horizontal, 12).padding(.vertical, 6)
                         .background(Theme.accent.opacity(0.9)).foregroundStyle(.black)
+                        .clipShape(Capsule())
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+                if let message = imageAttachmentToast {
+                    Text(message)
+                        .font(.system(size: fontSize))
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(Theme.gold.opacity(0.9)).foregroundStyle(.black)
                         .clipShape(Capsule())
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
@@ -1230,6 +1239,63 @@ struct ContentView: View {
                 LOG("Guide image added", ctx: ["template": template.name, "fileName": newImage.fileName])
             }
 #endif
+        }
+
+        private func handleImageAttachmentToast(_ message: String) {
+            imageAttachmentToast = message
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                if imageAttachmentToast == message {
+                    imageAttachmentToast = nil
+                }
+            }
+        }
+
+        private func handleGuideEditorImageAttachment(_ info: MarkdownEditor.ImageDropInfo) -> MarkdownEditor.ImageInsertion? {
+            guard let template = selectedTemplate else {
+#if canImport(AppKit)
+                NSSound.beep()
+#endif
+                return nil
+            }
+            guard let image = templateGuideStore.addImage(data: info.data, suggestedName: info.filename, for: template) else {
+                return nil
+            }
+            touchTemplateActivity(for: template)
+            let url = templateGuideStore.imageURL(for: image, template: template)
+            handleImageAttachmentToast("Saved to Guide Images")
+            LOG("Guide image added via editor", ctx: ["template": template.name, "fileName": image.fileName])
+            let markdown = "[\(image.displayName)](\(url.absoluteString))"
+            return MarkdownEditor.ImageInsertion(markdown: markdown)
+        }
+
+        private func handleSessionEditorImageAttachment(_ info: MarkdownEditor.ImageDropInfo) -> MarkdownEditor.ImageInsertion? {
+            guard let result = saveSessionImageAttachment(data: info.data, originalName: info.filename) else {
+                return nil
+            }
+            handleImageAttachmentToast("Saved to Session Images")
+            LOG("Session image added via editor", ctx: ["session": "\(sessions.current.rawValue)", "fileName": result.image.fileName])
+            let markdown = "[\(result.image.displayName)](\(result.url.absoluteString))"
+            return MarkdownEditor.ImageInsertion(markdown: markdown)
+        }
+
+        private func saveSessionImageAttachment(data: Data, originalName: String?) -> (image: SessionImage, url: URL)? {
+            let fm = FileManager.default
+            try? fm.createDirectory(at: AppPaths.sessionImages, withIntermediateDirectories: true)
+            let sessionIdentifier = "Session\(sessions.current.rawValue)"
+            let existingImages = sessions.sessionImages[sessions.current] ?? []
+            let sequence = existingImages.count + 1
+            let fileName = "\(sessionIdentifier)_\(String(format: "%03d", sequence)).png"
+            let destination = AppPaths.sessionImages.appendingPathComponent(fileName)
+
+            do {
+                try data.write(to: destination, options: .atomic)
+                let image = SessionImage(fileName: fileName, originalPath: originalName, savedAt: Date())
+                sessions.addSessionImage(image, for: sessions.current)
+                return (image, destination)
+            } catch {
+                LOG("Failed to save session image", ctx: ["error": error.localizedDescription])
+                return nil
+            }
         }
 
         private func deleteGuideImage(_ image: TemplateGuideImage) {
@@ -2924,7 +2990,10 @@ struct ContentView: View {
                                         text: $guideNotesDraft,
                                         fontSize: fontSize * 1.5,
                                         controller: guideNotesEditor,
-                                        onLinkRequested: handleTroubleshootingLink(selectedText:source:completion:)
+                                        onLinkRequested: handleTroubleshootingLink(selectedText:source:completion:),
+                                        onImageAttachment: { info in
+                                            handleGuideEditorImageAttachment(info)
+                                        }
                                     )
                                 }
                             }
@@ -2997,7 +3066,10 @@ struct ContentView: View {
                             ),
                             onSave: saveSessionNotes,
                             onRevert: revertSessionNotes,
-                            onLinkRequested: handleSessionNotesLink(selectedText:source:completion:)
+                            onLinkRequested: handleSessionNotesLink(selectedText:source:completion:),
+                            onImageAttachment: { info in
+                                handleSessionEditorImageAttachment(info)
+                            }
                         )
                         .frame(minWidth: 300, idealWidth: 360)
                         .layoutPriority(1)
@@ -5603,6 +5675,7 @@ struct ContentView: View {
         var onSave: () -> Void
         var onRevert: () -> Void
         var onLinkRequested: (_ selectedText: String, _ source: MarkdownEditor.LinkRequestSource, _ completion: @escaping (MarkdownEditor.LinkInsertion?) -> Void) -> Void
+        var onImageAttachment: (MarkdownEditor.ImageDropInfo) -> MarkdownEditor.ImageInsertion?
 
         private var isDirty: Bool { draft != savedValue }
 
@@ -5639,7 +5712,10 @@ struct ContentView: View {
                             text: $draft,
                             fontSize: fontSize * 1.5,
                             controller: controller,
-                            onLinkRequested: onLinkRequested
+                            onLinkRequested: onLinkRequested,
+                            onImageAttachment: { info in
+                                onImageAttachment(info)
+                            }
                         )
                     }
                 }
