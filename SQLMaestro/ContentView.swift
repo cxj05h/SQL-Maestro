@@ -298,6 +298,7 @@ extension WheelNumberField {
 struct MarkdownPreviewView: View {
     var text: String
     var fontSize: CGFloat
+    var onLinkOpen: ((URL, NSEvent.ModifierFlags) -> Void)? = nil
 
     var body: some View {
         ScrollView {
@@ -316,6 +317,19 @@ struct MarkdownPreviewView: View {
                 .textSelection(.enabled)
         }
         .background(Color.clear)
+        .environment(\.openURL, OpenURLAction { url in
+#if canImport(AppKit)
+            let modifiers = NSApp.currentEvent?.modifierFlags ?? []
+            if let handler = onLinkOpen {
+                handler(url, modifiers)
+            } else {
+                NSWorkspace.shared.open(url)
+            }
+            return .handled
+#else
+            return .systemAction
+#endif
+        })
     }
 }
 
@@ -1082,6 +1096,9 @@ struct ContentView: View {
                 let newName = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !newName.isEmpty {
                     sessions.renameSessionImage(imageId: image.id, newName: newName, for: sessions.current)
+                    if let updated = sessions.sessionImages[sessions.current]?.first(where: { $0.id == image.id }) {
+                        updateSessionNoteLinks(for: sessions.current, fileName: image.fileName, newLabel: updated.displayName)
+                    }
                 }
             }
         }
@@ -1298,6 +1315,85 @@ struct ContentView: View {
             }
         }
 
+        private func openLink(_ url: URL, modifiers: NSEvent.ModifierFlags) {
+#if canImport(AppKit)
+            let wantsPreview = modifiers.contains(.command)
+            if url.isFileURL {
+                if wantsPreview {
+                    if let sessionImage = sessionImage(forFileURL: url) {
+                        previewingSessionImage = sessionImage
+                        return
+                    }
+                    if let template = selectedTemplate,
+                       let guideImage = guideImage(forFileURL: url, template: template) {
+                        previewingGuideImage = guideImage
+                        return
+                    }
+                }
+                NSWorkspace.shared.open(url)
+                return
+            }
+            NSWorkspace.shared.open(url)
+#endif
+        }
+
+        private func replaceLinkLabels(in text: String, fileURL: URL, newLabel: String) -> String {
+            let urlString = fileURL.absoluteString
+            let escapedURL = NSRegularExpression.escapedPattern(for: urlString)
+            let pattern = "\\[[^\\]]*\\]\\(\(escapedURL)\\)"
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { return text }
+            let range = NSRange(text.startIndex..<text.endIndex, in: text)
+            let replacement = "[\(NSRegularExpression.escapedTemplate(for: newLabel))](\(urlString))"
+            return regex.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: replacement)
+        }
+
+        private func updateSessionNoteLinks(for session: TicketSession, fileName: String, newLabel: String) {
+            let fileURL = AppPaths.sessionImages.appendingPathComponent(fileName)
+            if var draft = sessionNotesDrafts[session] {
+                let updated = replaceLinkLabels(in: draft, fileURL: fileURL, newLabel: newLabel)
+                if updated != draft {
+                    sessionNotesDrafts[session] = updated
+                }
+            }
+            let currentSaved = sessions.sessionNotes[session] ?? ""
+            let updatedSaved = replaceLinkLabels(in: currentSaved, fileURL: fileURL, newLabel: newLabel)
+            if updatedSaved != currentSaved {
+                sessions.sessionNotes[session] = updatedSaved
+            }
+        }
+
+        private func updateGuideNoteLinks(for template: TemplateItem, fileName: String, newLabel: String) {
+            let tempImage = TemplateGuideImage(fileName: fileName)
+            let fileURL = TemplateGuideStore.shared.imageURL(for: tempImage, template: template)
+            let updatedDraft = replaceLinkLabels(in: guideNotesDraft, fileURL: fileURL, newLabel: newLabel)
+            if updatedDraft != guideNotesDraft {
+                guideNotesDraft = updatedDraft
+            }
+            let existingStore = templateGuideStore.currentNotes(for: template)
+            let updatedStore = replaceLinkLabels(in: existingStore, fileURL: fileURL, newLabel: newLabel)
+            if updatedStore != existingStore {
+                _ = templateGuideStore.setNotes(updatedStore, for: template)
+            }
+        }
+
+        private func sessionImage(forFileURL url: URL) -> SessionImage? {
+            guard url.path.hasPrefix(AppPaths.sessionImages.path) else { return nil }
+            let fileName = url.lastPathComponent
+            for session in TicketSession.allCases {
+                if let image = sessions.sessionImages[session]?.first(where: { $0.fileName == fileName }) {
+                    return image
+                }
+            }
+            return nil
+        }
+
+        private func guideImage(forFileURL url: URL, template: TemplateItem) -> TemplateGuideImage? {
+            let images = templateGuideStore.images(for: template)
+            return images.first { image in
+                templateGuideStore.imageURL(for: image, template: template).path == url.path
+            }
+        }
+
         private func deleteGuideImage(_ image: TemplateGuideImage) {
             guard let template = selectedTemplate else { return }
             if templateGuideStore.deleteImage(image, for: template) {
@@ -1324,6 +1420,9 @@ struct ContentView: View {
                 if templateGuideStore.renameImage(image, to: newName, for: template) {
                     touchTemplateActivity(for: template)
                     LOG("Guide image renamed", ctx: ["template": template.name, "fileName": image.fileName, "newName": newName])
+                    if let updated = templateGuideStore.images(for: template).first(where: { $0.id == image.id }) {
+                        updateGuideNoteLinks(for: template, fileName: image.fileName, newLabel: updated.displayName)
+                    }
                 }
             }
 #endif
@@ -2984,7 +3083,13 @@ struct ContentView: View {
                         if let template = selectedTemplate {
                             Group {
                                 if isPreviewMode {
-                                    MarkdownPreviewView(text: guideNotesDraft, fontSize: fontSize)
+                                    MarkdownPreviewView(
+                                        text: guideNotesDraft,
+                                        fontSize: fontSize,
+                                        onLinkOpen: { url, modifiers in
+                                            openLink(url, modifiers: modifiers)
+                                        }
+                                    )
                                 } else {
                                     MarkdownEditor(
                                         text: $guideNotesDraft,
@@ -3067,6 +3172,9 @@ struct ContentView: View {
                             onSave: saveSessionNotes,
                             onRevert: revertSessionNotes,
                             onLinkRequested: handleSessionNotesLink(selectedText:source:completion:),
+                            onLinkOpen: { url, modifiers in
+                                openLink(url, modifiers: modifiers)
+                            },
                             onImageAttachment: { info in
                                 handleSessionEditorImageAttachment(info)
                             }
@@ -5675,6 +5783,7 @@ struct ContentView: View {
         var onSave: () -> Void
         var onRevert: () -> Void
         var onLinkRequested: (_ selectedText: String, _ source: MarkdownEditor.LinkRequestSource, _ completion: @escaping (MarkdownEditor.LinkInsertion?) -> Void) -> Void
+        var onLinkOpen: (URL, NSEvent.ModifierFlags) -> Void
         var onImageAttachment: (MarkdownEditor.ImageDropInfo) -> MarkdownEditor.ImageInsertion?
 
         private var isDirty: Bool { draft != savedValue }
@@ -5706,7 +5815,11 @@ struct ContentView: View {
 
                 Group {
                     if isPreview {
-                        MarkdownPreviewView(text: draft, fontSize: fontSize)
+                        MarkdownPreviewView(
+                            text: draft,
+                            fontSize: fontSize,
+                            onLinkOpen: onLinkOpen
+                        )
                     } else {
                         MarkdownEditor(
                             text: $draft,
