@@ -301,6 +301,9 @@ struct MarkdownPreviewView: View {
         ScrollView {
             Markdown(text)
                 .markdownTheme(.gitHub)
+                .markdownBlockStyle(\.blockquote) { configuration in
+                    configuration.label
+                }
                 .markdownTextStyle(\.text) {
                     FontSize(fontSize)
                 }
