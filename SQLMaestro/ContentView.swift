@@ -1245,6 +1245,13 @@ struct ContentView: View {
             var images = sessions.sessionImages[sessions.current] ?? []
             images.removeAll { $0.id == image.id }
             sessions.sessionImages[sessions.current] = images
+
+            removeSessionNoteLinks(referencing: imageURL)
+            if let template = selectedTemplate {
+                if removeGuideNoteLinks(for: template, fileURL: imageURL) {
+                    touchTemplateActivity(for: template)
+                }
+            }
             
             LOG("Session image deleted", ctx: ["fileName": image.fileName])
         }
@@ -1358,6 +1365,27 @@ struct ContentView: View {
             return regex.stringByReplacingMatches(in: text, options: [], range: range, withTemplate: replacement)
         }
 
+        private func removingImageLinks(from text: String, fileURL: URL) -> String {
+            let urlString = fileURL.absoluteString
+            let escapedURL = NSRegularExpression.escapedPattern(for: urlString)
+            let fullLinePattern = "(?m)^[ \\t]*!?\\[[^\\]]*\\]\\(" + escapedURL + "\\)[ \\t]*\\r?\\n?"
+            let inlinePattern = "!?\\[[^\\]]*\\]\\(" + escapedURL + "\\)"
+            var updated = text
+            if let lineRegex = try? NSRegularExpression(pattern: fullLinePattern) {
+                let range = NSRange(updated.startIndex..<updated.endIndex, in: updated)
+                updated = lineRegex.stringByReplacingMatches(in: updated, options: [], range: range, withTemplate: "")
+            }
+            if let inlineRegex = try? NSRegularExpression(pattern: inlinePattern) {
+                let range = NSRange(updated.startIndex..<updated.endIndex, in: updated)
+                updated = inlineRegex.stringByReplacingMatches(in: updated, options: [], range: range, withTemplate: "")
+            }
+            if let collapseRegex = try? NSRegularExpression(pattern: "\\n{3,}") {
+                let range = NSRange(updated.startIndex..<updated.endIndex, in: updated)
+                updated = collapseRegex.stringByReplacingMatches(in: updated, options: [], range: range, withTemplate: "\n\n")
+            }
+            return updated
+        }
+
         private func updateSessionNoteLinks(for session: TicketSession, fileName: String, newLabel: String) {
             let fileURL = AppPaths.sessionImages.appendingPathComponent(fileName)
             if var draft = sessionNotesDrafts[session] {
@@ -1373,6 +1401,22 @@ struct ContentView: View {
             }
         }
 
+        private func removeSessionNoteLinks(referencing fileURL: URL) {
+            for session in TicketSession.allCases {
+                if let draft = sessionNotesDrafts[session] {
+                    let cleanedDraft = removingImageLinks(from: draft, fileURL: fileURL)
+                    if cleanedDraft != draft {
+                        sessionNotesDrafts[session] = cleanedDraft
+                    }
+                }
+                let currentSaved = sessions.sessionNotes[session] ?? ""
+                let cleanedSaved = removingImageLinks(from: currentSaved, fileURL: fileURL)
+                if cleanedSaved != currentSaved {
+                    sessions.sessionNotes[session] = cleanedSaved
+                }
+            }
+        }
+
         private func updateGuideNoteLinks(for template: TemplateItem, fileName: String, newLabel: String) {
             let tempImage = TemplateGuideImage(fileName: fileName)
             let fileURL = TemplateGuideStore.shared.imageURL(for: tempImage, template: template)
@@ -1385,6 +1429,23 @@ struct ContentView: View {
             if updatedStore != existingStore {
                 _ = templateGuideStore.setNotes(updatedStore, for: template)
             }
+        }
+
+        @discardableResult
+        private func removeGuideNoteLinks(for template: TemplateItem, fileURL: URL) -> Bool {
+            var changed = false
+            let cleanedDraft = removingImageLinks(from: guideNotesDraft, fileURL: fileURL)
+            if cleanedDraft != guideNotesDraft {
+                guideNotesDraft = cleanedDraft
+                changed = true
+            }
+            let existingStore = templateGuideStore.currentNotes(for: template)
+            let cleanedStore = removingImageLinks(from: existingStore, fileURL: fileURL)
+            if cleanedStore != existingStore {
+                _ = templateGuideStore.setNotes(cleanedStore, for: template)
+                changed = true
+            }
+            return changed
         }
 
         private func sessionImage(forFileURL url: URL) -> SessionImage? {
@@ -1407,7 +1468,10 @@ struct ContentView: View {
 
         private func deleteGuideImage(_ image: TemplateGuideImage) {
             guard let template = selectedTemplate else { return }
+            let fileURL = templateGuideStore.imageURL(for: image, template: template)
             if templateGuideStore.deleteImage(image, for: template) {
+                removeGuideNoteLinks(for: template, fileURL: fileURL)
+                removeSessionNoteLinks(referencing: fileURL)
                 touchTemplateActivity(for: template)
                 LOG("Guide image deleted", ctx: ["template": template.name, "fileName": image.fileName])
             }
