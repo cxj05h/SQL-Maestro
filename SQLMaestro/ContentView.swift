@@ -813,7 +813,18 @@ struct ContentView: View {
             )
             .frame(minWidth: 760, minHeight: 520)
         }
-        
+        .sheet(item: $previewingSessionImage) { sessionImage in
+            SessionImagePreviewSheet(sessionImage: sessionImage)
+        }
+        .sheet(item: $previewingGuideImage) { guideImage in
+            if let template = selectedTemplate {
+                TemplateGuideImagePreviewSheet(template: template, guideImage: guideImage)
+            } else {
+                Text("Select a template to preview this image")
+                    .frame(minWidth: 320, minHeight: 240)
+            }
+        }
+
         .onAppear {
             LOG("App started")
             #if canImport(AppKit)
@@ -2674,11 +2685,8 @@ struct ContentView: View {
                             .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
                     )
             )
-            .sheet(item: $previewingSessionImage) { sessionImage in
-                SessionImagePreviewSheet(sessionImage: sessionImage)
-            }
         }
-        
+
         private func buildTemplateGuideImagesView() -> some View {
             VStack(alignment: .leading, spacing: 8) {
                 HStack {
@@ -2757,11 +2765,6 @@ struct ContentView: View {
                             .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
                     )
             )
-            .sheet(item: $previewingGuideImage) { guideImage in
-                if let template = selectedTemplate {
-                    TemplateGuideImagePreviewSheet(template: template, guideImage: guideImage)
-                }
-            }
         }
         
         private func buildTemplateLinksView() -> some View {
