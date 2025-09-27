@@ -3140,7 +3140,7 @@ struct ContentView: View {
                                 if isPreviewMode {
                                     MarkdownPreviewView(
                                         text: guideNotesDraft,
-                                        fontSize: fontSize,
+                                        fontSize: fontSize * 1.5,
                                         onLinkOpen: { url, modifiers in
                                             openLink(url, modifiers: modifiers)
                                         }
@@ -6132,7 +6132,7 @@ struct ContentView: View {
                     if isPreview {
                         MarkdownPreviewView(
                             text: draft,
-                            fontSize: fontSize,
+                            fontSize: fontSize * 1.5,
                             onLinkOpen: onLinkOpen
                         )
                     } else {

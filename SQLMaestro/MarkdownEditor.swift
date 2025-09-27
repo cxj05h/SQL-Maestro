@@ -266,14 +266,57 @@ struct MarkdownEditor: NSViewRepresentable {
             if range.location == NSNotFound {
                 range = NSRange(location: ns.length, length: 0)
             }
+
             let safeLocation = max(0, min(range.location, ns.length))
             let safeLength = max(0, min(range.length, ns.length - safeLocation))
-            let coreRange = NSRange(location: safeLocation, length: safeLength)
+            var coreRange = NSRange(location: safeLocation, length: safeLength)
+            let prefixLength = (prefix as NSString).length
+            let suffixLength = (suffix as NSString).length
+
             let selected = coreRange.length > 0 ? ns.substring(with: coreRange) : ""
+            let selectedNSString = selected as NSString
+
+            if coreRange.length >= prefixLength + suffixLength {
+                let startRange = NSRange(location: coreRange.location, length: prefixLength)
+                let endRange = NSRange(location: coreRange.location + coreRange.length - suffixLength, length: suffixLength)
+                let hasInlineWrapper = ns.substring(with: startRange) == prefix && ns.substring(with: endRange) == suffix
+
+                if hasInlineWrapper {
+                    let innerLocation = coreRange.location + prefixLength
+                    let innerLength = coreRange.length - prefixLength - suffixLength
+                    let innerRange = NSRange(location: innerLocation, length: innerLength)
+                    let innerText = innerLength > 0 ? ns.substring(with: innerRange) : ""
+                    let innerNSString = innerText as NSString
+                    replace(range: coreRange,
+                            with: innerText,
+                            newSelection: NSRange(location: coreRange.location, length: innerNSString.length))
+                    return
+                }
+            }
+
+            if prefixLength > 0, suffixLength > 0,
+               coreRange.location >= prefixLength,
+               coreRange.location + coreRange.length + suffixLength <= ns.length {
+                let prefixRange = NSRange(location: coreRange.location - prefixLength, length: prefixLength)
+                let suffixRange = NSRange(location: coreRange.location + coreRange.length, length: suffixLength)
+                let hasExternalWrapper = ns.substring(with: prefixRange) == prefix && ns.substring(with: suffixRange) == suffix
+
+                if hasExternalWrapper {
+                    let totalRange = NSRange(location: prefixRange.location,
+                                             length: prefixLength + coreRange.length + suffixLength)
+                    replace(range: totalRange,
+                            with: selected,
+                            newSelection: NSRange(location: prefixRange.location, length: selectedNSString.length))
+                    return
+                }
+            }
+
             let wrapped = prefix + selected + suffix
-            let caretLocation = coreRange.location + (prefix as NSString).length
-            let caretLength = selected.utf16.count
-            replace(range: coreRange, with: wrapped, newSelection: NSRange(location: caretLocation, length: caretLength))
+            let caretLocation = coreRange.location + prefixLength
+            let caretLength = selectedNSString.length
+            replace(range: coreRange,
+                    with: wrapped,
+                    newSelection: NSRange(location: caretLocation, length: caretLength))
         }
 
         func applyHeading(_ level: Int) {
@@ -360,9 +403,13 @@ struct MarkdownEditor: NSViewRepresentable {
         private func replace(range: NSRange, with string: String, newSelection: NSRange) {
             guard let textView else { return }
             suppressTextDidChange = true
+            defer { suppressTextDidChange = false }
+
+            guard textView.shouldChangeText(in: range, replacementString: string) else { return }
             textView.textStorage?.replaceCharacters(in: range, with: string)
+            textView.didChangeText()
             textView.setSelectedRange(newSelection)
-            suppressTextDidChange = false
+
             let sanitized = sanitizeMarkdown(textView.string)
             if sanitized != textView.string {
                 replaceEntireText(with: sanitized, selection: newSelection)
@@ -374,13 +421,20 @@ struct MarkdownEditor: NSViewRepresentable {
         private func replaceEntireText(with string: String, selection: NSRange? = nil) {
             guard let textView else { return }
             suppressTextDidChange = true
+            defer { suppressTextDidChange = false }
+
             let currentSelection = selection ?? textView.selectedRange()
-            textView.string = string
+            let fullRange = NSRange(location: 0, length: (textView.string as NSString).length)
+
+            if textView.shouldChangeText(in: fullRange, replacementString: string) {
+                textView.textStorage?.replaceCharacters(in: fullRange, with: string)
+                textView.didChangeText()
+            }
+
             let nsString = string as NSString
             let safeLocation = min(currentSelection.location, nsString.length)
             let safeLength = min(currentSelection.length, max(0, nsString.length - safeLocation))
             textView.setSelectedRange(NSRange(location: safeLocation, length: safeLength))
-            suppressTextDidChange = false
             parent.text = string
         }
 
