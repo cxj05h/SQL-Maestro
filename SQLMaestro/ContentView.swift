@@ -302,22 +302,54 @@ struct MarkdownPreviewView: View {
 
     var body: some View {
         ScrollView {
-            Markdown(text)
-                .markdownTheme(.gitHub)
-                .markdownBlockStyle(\.blockquote) { configuration in
-                    configuration.label
-                }
-                .markdownTextStyle(\.text) {
-                    FontSize(fontSize)
-                }
-                .markdownMargin(top: 0, bottom: 0)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 10)
-                .textSelection(.enabled)
+            previewMarkdown
         }
         .background(Color.clear)
-        .environment(\.openURL, OpenURLAction { url in
+        .environment(\.openURL, makeOpenURLAction())
+    }
+
+    private var previewMarkdown: some View {
+        Markdown(text)
+            .markdownTheme(previewTheme)
+            .markdownMargin(top: 0, bottom: 0)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 10)
+            .textSelection(.enabled)
+    }
+
+    private var previewTheme: MarkdownUI.Theme {
+        MarkdownUI.Theme.gitHub
+            .text { FontSize(fontSize) }
+            .code { MonospacedTextStyle(size: fontSize) }
+            .codeBlock { configuration in
+                codeBlock(configuration)
+            }
+    }
+
+    @ViewBuilder
+    private func codeBlock(_ configuration: CodeBlockConfiguration) -> some View {
+        ScrollView(.horizontal) {
+            configuration.label
+                .fixedSize(horizontal: false, vertical: true)
+                .relativeLineSpacing(RelativeSize.em(0.225))
+                .markdownTextStyle {
+                    FontFamilyVariant(.monospaced)
+                    FontSize(fontSize)
+                }
+                .padding(16)
+        }
+        .background(Theme.grayBG.opacity(0.35))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .overlay(
+            RoundedRectangle(cornerRadius: 6)
+                .stroke(Theme.purple.opacity(0.2), lineWidth: 1)
+        )
+        .markdownMargin(top: 0, bottom: 16)
+    }
+
+    private func makeOpenURLAction() -> OpenURLAction {
+        OpenURLAction { url in
 #if canImport(AppKit)
             let modifiers = NSApp.currentEvent?.modifierFlags ?? []
             if let handler = onLinkOpen {
@@ -329,7 +361,16 @@ struct MarkdownPreviewView: View {
 #else
             return .systemAction
 #endif
-        })
+        }
+    }
+}
+
+private struct MonospacedTextStyle: TextStyle {
+    var size: CGFloat
+
+    func _collectAttributes(in attributes: inout AttributeContainer) {
+        FontFamilyVariant(.monospaced)._collectAttributes(in: &attributes)
+        FontSize(size)._collectAttributes(in: &attributes)
     }
 }
 
