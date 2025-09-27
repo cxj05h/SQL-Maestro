@@ -348,6 +348,7 @@ private extension Notification.Name {
 
 extension Notification.Name {
     static let showKeyboardShortcuts = Notification.Name("ShowKeyboardShortcuts")
+    static let attemptAppExit = Notification.Name("AttemptAppExit")
     // `showDatabaseSettings` is declared elsewhere to avoid duplicate symbol errors.
 }
 
@@ -3322,7 +3323,8 @@ struct ContentView: View {
                     .background(TicketSessionNotificationBridge(
                         onSave: { _ = saveTicketSessionFlow() },
                         onLoad: { loadTicketSessionFlow() },
-                        onOpen: { openSessionsFolderFlow() }
+                        onOpen: { openSessionsFolderFlow() },
+                        onExit: { attemptAppExit() }
                     ))
                     .background(
                         Group {
@@ -3425,16 +3427,27 @@ struct ContentView: View {
             }
         }
 
-        private func isSessionNotesDirty(session: TicketSession) -> Bool {
-            (sessionNotesDrafts[session] ?? "") != (sessions.sessionNotes[session] ?? "")
-        }
+    private struct UnsavedFlags {
+        let guide: Bool
+        let notes: Bool
+        let sessionData: Bool
+        let links: Bool
+        let tables: Bool
 
-        private func hasSessionFieldData(for session: TicketSession) -> Bool {
-            let staticData = sessionStaticFields[session] ?? ("", "", "", "")
-            let staticValues = [staticData.orgId, staticData.acctId, staticData.mysqlDb, staticData.company]
-            if staticValues.contains(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
-                return true
-            }
+        var session: Bool { notes || sessionData }
+        var any: Bool { guide || session || links || tables }
+    }
+
+    private func isSessionNotesDirty(session: TicketSession) -> Bool {
+        (sessionNotesDrafts[session] ?? "") != (sessions.sessionNotes[session] ?? "")
+    }
+
+    private func hasSessionFieldData(for session: TicketSession) -> Bool {
+        let staticData = sessionStaticFields[session] ?? ("", "", "", "")
+        let staticValues = [staticData.orgId, staticData.acctId, staticData.mysqlDb, staticData.company]
+        if staticValues.contains(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+            return true
+        }
 
             if let sessionName = sessions.sessionNames[session]?.trimmingCharacters(in: .whitespacesAndNewlines),
                !sessionName.isEmpty,
@@ -4180,16 +4193,17 @@ struct ContentView: View {
             NSWorkspace.shared.open(AppPaths.sessions)
             LOG("Open sessions folder")
         }
-        
-        private func attemptClearCurrentSession() {
-            let guideDirty = templateGuideStore.isNotesDirty(for: selectedTemplate)
-            let notesDirty = isSessionNotesDirty(session: sessions.current)
-            let sessionFieldDirty = hasSessionFieldData(for: sessions.current)
-            let sessionDirty = notesDirty || sessionFieldDirty
-            let linksDirty = templateLinksStore.isDirty(for: selectedTemplate)
-            let dbTablesDirty = dbTablesStore.isDirty(for: sessions.current, template: selectedTemplate)
 
-            guard guideDirty || sessionDirty || linksDirty || dbTablesDirty else {
+        private func attemptClearCurrentSession() {
+            let flags = currentUnsavedFlags()
+            let guideDirty = flags.guide
+            let notesDirty = flags.notes
+            let sessionFieldDirty = flags.sessionData
+            let sessionDirty = flags.session
+            let linksDirty = flags.links
+            let dbTablesDirty = flags.tables
+
+            guard flags.any else {
                 clearCurrentSessionState()
                 return
             }
@@ -4259,12 +4273,14 @@ struct ContentView: View {
             case .clear:
                 clearCurrentSessionState()
             case .saveAll:
-                handleSaveAllBeforeClearing(
+                performSaveAll(
                     guideDirty: guideDirty,
                     sessionDirty: sessionDirty,
                     linksDirty: linksDirty,
                     dbTablesDirty: dbTablesDirty
-                )
+                ) {
+                    clearCurrentSessionState()
+                }
             case .saveGuide:
                 handleGuideSaveOnly()
             case .saveSession:
@@ -4276,6 +4292,70 @@ struct ContentView: View {
             case .cancel:
                 return
             }
+        }
+
+        private func attemptAppExit() {
+#if canImport(AppKit)
+            let flags = currentUnsavedFlags()
+            let guideDirty = flags.guide
+            let notesDirty = flags.notes
+            let sessionFieldDirty = flags.sessionData
+            let sessionDirty = flags.session
+            let linksDirty = flags.links
+            let dbTablesDirty = flags.tables
+
+            guard flags.any else {
+                NSApp.terminate(nil)
+                return
+            }
+
+            var detailLines: [String] = []
+            if guideDirty { detailLines.append("• Troubleshooting guide changes") }
+            if notesDirty { detailLines.append("• Session notes changes") }
+            if sessionFieldDirty { detailLines.append("• Session data changes") }
+            if linksDirty { detailLines.append("• Template links updates") }
+            if dbTablesDirty { detailLines.append("• DB tables updates") }
+
+            let alert = NSAlert()
+            alert.messageText = "Unsaved changes detected"
+            alert.informativeText = ([
+                "Exiting now will discard these pending edits:",
+                detailLines.joined(separator: "\n"),
+                "Choose an option before quitting SQLMaestro."
+            ].filter { !$0.isEmpty }).joined(separator: "\n")
+            alert.alertStyle = .warning
+
+            alert.addButton(withTitle: "Exit")
+            alert.addButton(withTitle: "Save All")
+            alert.addButton(withTitle: "Cancel")
+
+            let response = alert.runModal()
+            switch response {
+            case .alertFirstButtonReturn:
+                NSApp.terminate(nil)
+            case .alertSecondButtonReturn:
+                performSaveAll(
+                    guideDirty: guideDirty,
+                    sessionDirty: sessionDirty,
+                    linksDirty: linksDirty,
+                    dbTablesDirty: dbTablesDirty
+                ) {
+                    NSApp.terminate(nil)
+                }
+            default:
+                return
+            }
+#endif
+        }
+
+        private func currentUnsavedFlags() -> UnsavedFlags {
+            UnsavedFlags(
+                guide: templateGuideStore.isNotesDirty(for: selectedTemplate),
+                notes: isSessionNotesDirty(session: sessions.current),
+                sessionData: hasSessionFieldData(for: sessions.current),
+                links: templateLinksStore.isDirty(for: selectedTemplate),
+                tables: dbTablesStore.isDirty(for: sessions.current, template: selectedTemplate)
+            )
         }
 
         private func clearCurrentSessionState() {
@@ -4292,10 +4372,11 @@ struct ContentView: View {
             LOG("Session cleared", ctx: ["session": "\(sessions.current.rawValue)"])
         }
 
-        private func handleSaveAllBeforeClearing(guideDirty: Bool,
-                                                 sessionDirty: Bool,
-                                                 linksDirty: Bool,
-                                                 dbTablesDirty: Bool) {
+        private func performSaveAll(guideDirty: Bool,
+                                    sessionDirty: Bool,
+                                    linksDirty: Bool,
+                                    dbTablesDirty: Bool,
+                                    onSuccess: () -> Void) {
             var succeeded = true
 
             if guideDirty { succeeded = handleGuideSaveOnly() }
@@ -4304,7 +4385,7 @@ struct ContentView: View {
             if succeeded && dbTablesDirty { succeeded = handleTablesSaveOnly() }
 
             if succeeded {
-                clearCurrentSessionState()
+                onSuccess()
             }
         }
 
@@ -4375,11 +4456,13 @@ struct ContentView: View {
             var onSave: () -> Void
             var onLoad: () -> Void
             var onOpen: () -> Void
+            var onExit: () -> Void
             var body: some View {
                 Color.clear
                     .onReceive(NotificationCenter.default.publisher(for: .saveTicketSession)) { _ in onSave() }
                     .onReceive(NotificationCenter.default.publisher(for: .loadTicketSession)) { _ in onLoad() }
                     .onReceive(NotificationCenter.default.publisher(for: .openSessionsFolder)) { _ in onOpen() }
+                    .onReceive(NotificationCenter.default.publisher(for: .attemptAppExit)) { _ in onExit() }
             }
         }
         

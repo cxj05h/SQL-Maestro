@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 @main
 struct SQLMaestroApp: App {
     @StateObject private var templates = TemplateManager()
@@ -26,6 +27,12 @@ struct SQLMaestroApp: App {
                 Button("Keyboard Shortcuts…") {
                     NotificationCenter.default.post(name: .showKeyboardShortcuts, object: nil)
                 }
+            }
+            CommandGroup(replacing: .appTermination) {
+                Button("Quit SQLMaestro") {
+                    NotificationCenter.default.post(name: .attemptAppExit, object: nil)
+                }
+                .keyboardShortcut("q")
             }
         }
     }
