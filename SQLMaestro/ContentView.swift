@@ -497,7 +497,11 @@ private struct BeginCaptureField: NSViewRepresentable {
 
         func controlTextDidChange(_ obj: Notification) {
             if let field = obj.object as? NSTextField {
-                parent.text = field.stringValue
+                let cleaned = sanitized(field.stringValue, for: parent.focus)
+                if cleaned != field.stringValue {
+                    field.stringValue = cleaned
+                }
+                parent.text = cleaned
                 if let editor = field.currentEditor() {
                     let length = editor.string.count
                     editor.selectedRange = NSRange(location: length, length: 0)
@@ -508,12 +512,28 @@ private struct BeginCaptureField: NSViewRepresentable {
         func controlTextDidBeginEditing(_ obj: Notification) {
             parent.focusedField = parent.focus
             if let field = obj.object as? NSTextField {
+                let cleaned = sanitized(field.stringValue, for: parent.focus)
+                if cleaned != field.stringValue {
+                    field.stringValue = cleaned
+                    parent.text = cleaned
+                }
                 DispatchQueue.main.async {
                     if let editor = field.currentEditor() {
                         let length = editor.string.count
                         editor.selectedRange = NSRange(location: length, length: 0)
                     }
                 }
+            }
+        }
+
+        private func sanitized(_ text: String, for focus: BeginFieldFocus) -> String {
+            switch focus {
+            case .org:
+                return text.replacingOccurrences(of: "\\s+", with: "", options: .regularExpression)
+            case .acct:
+                return text.trimmingCharacters(in: .whitespacesAndNewlines)
+            case .extra(_):
+                return text.replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression)
             }
         }
     }
@@ -922,6 +942,7 @@ struct ContentView: View {
     @State private var companyLabel: String = ""
     @State private var draftDynamicValues: [TicketSession:[String:String]] = [:]
     @State private var sessionSelectedTemplate: [TicketSession: UUID] = [:]
+    @State private var sessionSavedSnapshots: [TicketSession: SessionSnapshot] = [:]
     @State private var openRecentsKey: String? = nil
     @State private var showScrollSettings: Bool = false
     @AppStorage("dateScrollSensitivity") private var dateScrollSensitivity: Double = 1.0  // 0.5 (slower) … 3.0 (faster)
@@ -3902,48 +3923,131 @@ struct ContentView: View {
         var any: Bool { guide || session || links || tables }
     }
 
+    private struct SessionSnapshot: Equatable {
+        struct StaticFields: Equatable {
+            var orgId: String
+            var acctId: String
+            var mysqlDb: String
+            var company: String
+
+            var hasContent: Bool {
+                [orgId, acctId, mysqlDb, company].contains { !$0.isEmpty }
+            }
+        }
+
+        struct AlternateFieldSnapshot: Equatable {
+            var name: String
+            var value: String
+
+            var hasContent: Bool {
+                !name.isEmpty || !value.isEmpty
+            }
+        }
+
+        struct ImageSnapshot: Equatable {
+            var id: UUID
+            var fileName: String
+        }
+
+        var staticFields: StaticFields
+        var sessionName: String
+        var sessionLink: String
+        var alternateFields: [AlternateFieldSnapshot]
+        var storedValues: [String: String]
+        var dbTables: [String]
+        var images: [ImageSnapshot]
+
+        var hasAnyContent: Bool {
+            staticFields.hasContent ||
+            !sessionName.isEmpty ||
+            !sessionLink.isEmpty ||
+            alternateFields.contains { $0.hasContent } ||
+            storedValues.values.contains { !$0.isEmpty } ||
+            dbTables.contains { !$0.isEmpty } ||
+            !images.isEmpty
+        }
+    }
+
+    private func captureSnapshot(for session: TicketSession) -> SessionSnapshot {
+        let staticTuple = sessionStaticFields[session]
+            ?? (session == sessions.current ? (orgId, acctId, mysqlDb, companyLabel) : ("", "", "", ""))
+
+        let staticFields = SessionSnapshot.StaticFields(
+            orgId: staticTuple.orgId.replacingOccurrences(of: "\\s+", with: "", options: .regularExpression),
+            acctId: staticTuple.acctId.trimmingCharacters(in: .whitespacesAndNewlines),
+            mysqlDb: staticTuple.mysqlDb.trimmingCharacters(in: .whitespacesAndNewlines),
+            company: staticTuple.company.trimmingCharacters(in: .whitespacesAndNewlines)
+        )
+
+        let defaultName = "#\(session.rawValue)"
+        let name = (sessions.sessionNames[session] ?? defaultName).trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedName = (name == defaultName) ? "" : name
+        let link = (sessions.sessionLinks[session] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+
+        let alternates = (sessions.sessionAlternateFields[session] ?? []).map { field in
+            SessionSnapshot.AlternateFieldSnapshot(
+                name: field.name.trimmingCharacters(in: .whitespacesAndNewlines),
+                value: field.value.trimmingCharacters(in: .whitespacesAndNewlines)
+            )
+        }
+
+        let stored = sessions.sessionValues[session]?.reduce(into: [String: String]()) { dict, entry in
+            let trimmedValue = entry.value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmedValue.isEmpty {
+                dict[entry.key] = trimmedValue
+            }
+        } ?? [:]
+
+        let dbTables: [String]
+        if session == sessions.current, let template = selectedTemplate {
+            dbTables = dbTablesStore.workingSet(for: session, template: template)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+        } else {
+            dbTables = []
+        }
+
+        let images = (sessions.sessionImages[session] ?? []).map {
+            SessionSnapshot.ImageSnapshot(id: $0.id, fileName: $0.fileName)
+        }
+
+        return SessionSnapshot(
+            staticFields: staticFields,
+            sessionName: normalizedName,
+            sessionLink: link,
+            alternateFields: alternates,
+            storedValues: stored,
+            dbTables: dbTables,
+            images: images
+        )
+    }
+
+    private func updateSavedSnapshot(for session: TicketSession) {
+        sessionSavedSnapshots[session] = captureSnapshot(for: session)
+    }
+
     private func isSessionNotesDirty(session: TicketSession) -> Bool {
         (sessionNotesDrafts[session] ?? "") != (sessions.sessionNotes[session] ?? "")
     }
 
     private func hasSessionFieldData(for session: TicketSession) -> Bool {
-        let staticData = sessionStaticFields[session] ?? ("", "", "", "")
-        let staticValues = [staticData.orgId, staticData.acctId, staticData.mysqlDb, staticData.company]
-        if staticValues.contains(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+        let currentSnapshot = captureSnapshot(for: session)
+
+        if let baseline = sessionSavedSnapshots[session] {
+            if currentSnapshot != baseline {
+                return true
+            }
+        } else if currentSnapshot.hasAnyContent {
             return true
         }
 
-            if let sessionName = sessions.sessionNames[session]?.trimmingCharacters(in: .whitespacesAndNewlines),
-               !sessionName.isEmpty,
-               sessionName != "#\(session.rawValue)" {
-                return true
-            }
-
-            if let link = sessions.sessionLinks[session]?.trimmingCharacters(in: .whitespacesAndNewlines), !link.isEmpty {
-                return true
-            }
-
-            if let images = sessions.sessionImages[session], !images.isEmpty {
-                return true
-            }
-
-            if let alternates = sessions.sessionAlternateFields[session],
-               alternates.contains(where: { !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
-                return true
-            }
-
-            if let draftValues = draftDynamicValues[session],
-               draftValues.values.contains(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
-                return true
-            }
-
-            if let storedValues = sessions.sessionValues[session],
-               storedValues.values.contains(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
-                return true
-            }
-
-            return false
+        if let draftValues = draftDynamicValues[session],
+           draftValues.values.contains(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+            return true
         }
+
+        return false
+    }
 
         private func saveSessionNotes() {
             let currentSession = sessions.current
@@ -4559,6 +4663,7 @@ struct ContentView: View {
                 let data = try enc.encode(saved)
                 try data.write(to: url, options: .atomic)
                 LOG("Ticket session saved", ctx: ["file": url.lastPathComponent])
+                updateSavedSnapshot(for: sessions.current)
                 return true
             } catch {
                 NSSound.beep()
@@ -4613,6 +4718,7 @@ struct ContentView: View {
             for (k, v) in loaded.placeholders {
                 sessions.setValue(v, for: k)
             }
+            draftDynamicValues[sessions.current] = [:]
 
             // Try to resolve template
             var matched: TemplateItem? = nil
@@ -4657,6 +4763,7 @@ struct ContentView: View {
             
             // Refresh populated SQL
             populateQuery()
+            updateSavedSnapshot(for: sessions.current)
             LOG("Ticket session loaded", ctx: ["file": url.lastPathComponent])
         } catch {
             NSSound.beep()
@@ -4775,17 +4882,17 @@ struct ContentView: View {
         private func attemptAppExit() {
 #if canImport(AppKit)
             let flags = currentUnsavedFlags()
+            guard flags.any else {
+                NSApp.terminate(nil)
+                return
+            }
+
             let guideDirty = flags.guide
             let notesDirty = flags.notes
             let sessionFieldDirty = flags.sessionData
             let sessionDirty = flags.session
             let linksDirty = flags.links
             let dbTablesDirty = flags.tables
-
-            guard flags.any else {
-                NSApp.terminate(nil)
-                return
-            }
 
             var detailLines: [String] = []
             if guideDirty { detailLines.append("• Troubleshooting guide changes") }
@@ -4847,6 +4954,7 @@ struct ContentView: View {
             sessionStaticFields[sessions.current] = ("", "", "", "")
             sessionNotesDrafts[sessions.current] = ""
             UsedTemplatesStore.shared.clearSession(sessions.current)
+            sessionSavedSnapshots.removeValue(forKey: sessions.current)
             setPaneLockState(true, source: "clearSession")
             LOG("Session cleared", ctx: ["session": "\(sessions.current.rawValue)"])
         }
