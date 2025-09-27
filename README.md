@@ -374,6 +374,32 @@ Troubleshooting Guide notes act similarly to "Session Notes" with the difference
 
 "Guide Images" are images that are linked to a specific Query Template. 
 
+## Working with Embedded Images
+
+SQLMaestro lets you capture screenshots directly into both the Session Notes and Troubleshooting Guide editors. The app stores the files immediately and keeps them organized so you can rename, preview,
+and open them whenever you need.
+
+### Pasting Images
+
+- Switch either editor into Edit mode and paste (⌘V) an image or drag a file in.
+- The image is saved right away:
+  - Session Notes attachments land in the Session Images tab for the current session.
+  - Troubleshooting Guide attachments land in the Guide Images tab for the selected template.
+- A Markdown link is inserted at the cursor so the screenshot appears in Preview mode without extra steps.
+
+### Previewing from the Markdown Pane
+
+- After pasting, flip the editor into Preview mode.
+- ⌘-click any embedded image link to open the built-in preview sheet instantly.
+- Click the link _without_ the 'cmd' button and the image will open in the default image viewer app.
+
+### Renaming Images
+
+- Each image row includes a Rename button. Enter a custom name to replace the generated filename.
+- Once renamed, the new label is reflected everywhere the image appears, including existing Markdown links.
+
+These tools make it easy to capture, organize, and reuse visual notes while keeping your session and guide documentation in sync.
+
 ## **Database Connections**
 
 The first step in troubleshooting a ticket typically involves copying the Org Id from the ticket/chat. 
