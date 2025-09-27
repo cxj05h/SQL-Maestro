@@ -283,7 +283,7 @@ private struct BeginCaptureSheet: View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Quick Capture")
                 .font(.system(size: 20, weight: .semibold))
-            Text("Paste identifiers fast, then press Tab to jump to Cancel or Save. Return adds another row.")
+            Text("Paste identifiers fast, use ⌘↩ to add rows, and press Return to Save.")
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
 
@@ -293,14 +293,16 @@ private struct BeginCaptureSheet: View {
                                   focus: .org,
                                   focusedField: $focusedField,
                                   onReturn: moveFocusAfterOrg,
-                                  onTab: cycleButtonFocus)
+                                  onTab: moveFocusAfterOrg,
+                                  onCommandReturn: triggerCommandAddRow)
 
                 BeginCaptureField(text: $acctValue,
                                   placeholder: "Account ID",
                                   focus: .acct,
                                   focusedField: $focusedField,
                                   onReturn: moveFocusAfterAcct,
-                                  onTab: cycleButtonFocus)
+                                  onTab: moveFocusAfterAcct,
+                                  onCommandReturn: triggerCommandAddRow)
 
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach($extraValues) { $entry in
@@ -309,7 +311,8 @@ private struct BeginCaptureSheet: View {
                                           focus: .extra(entry.id),
                                           focusedField: $focusedField,
                                           onReturn: { moveFocusAfterExtra(entry.id) },
-                                          onTab: { handleTabFromExtra(entry.id) })
+                                          onTab: { handleTabFromExtra(entry.id) },
+                                          onCommandReturn: triggerCommandAddRow)
                     }
                     if extraValues.isEmpty {
                         Text("Press Return to add more fields.")
@@ -347,6 +350,16 @@ private struct BeginCaptureSheet: View {
         .onChange(of: focusedField) { _, _ in
             focusedButton = nil
         }
+        .overlay(
+            Button(action: triggerCommandAddRow) {
+                EmptyView()
+            }
+            .keyboardShortcut(.return, modifiers: [.command])
+            .buttonStyle(.plain)
+            .frame(width: 0, height: 0)
+            .opacity(0.0001)
+            .allowsHitTesting(false)
+        )
     }
 
     private func ensureSeedEntry() {
@@ -385,36 +398,31 @@ private struct BeginCaptureSheet: View {
         guard let idx = extraValues.firstIndex(where: { $0.id == id }) else { return }
         focusedButton = nil
         if idx == extraValues.indices.last {
-            extraValues.append(BeginCaptureEntry())
-            focusedField = .extra(extraValues.last?.id ?? id)
+            let newEntry = appendNewExtraRow()
+            focusedField = .extra(newEntry.id)
         } else {
             let nextId = extraValues[extraValues.index(after: idx)].id
             focusedField = .extra(nextId)
         }
     }
 
-    private func handleTabFromExtra(_ id: UUID) {
-        guard let idx = extraValues.firstIndex(where: { $0.id == id }) else {
-            cycleButtonFocus()
-            return
-        }
+    private func handleTabFromExtra(_: UUID) {
+        focusedField = nil
+        cycleButtonFocus()
+    }
 
-        let value = extraValues[idx].value.trimmingCharacters(in: .whitespacesAndNewlines)
-        if value.isEmpty {
-            cycleButtonFocus()
-            return
-        }
+    @discardableResult
+    private func appendNewExtraRow() -> BeginCaptureEntry {
+        let entry = BeginCaptureEntry()
+        extraValues.append(entry)
+        return entry
+    }
 
+    private func triggerCommandAddRow() {
+        ensureSeedEntry()
         focusedButton = nil
-
-        if idx == extraValues.indices.last {
-            let newEntry = BeginCaptureEntry()
-            extraValues.append(newEntry)
-            focusedField = .extra(newEntry.id)
-        } else {
-            let nextId = extraValues[extraValues.index(after: idx)].id
-            focusedField = .extra(nextId)
-        }
+        let entry = appendNewExtraRow()
+        focusedField = .extra(entry.id)
     }
 }
 
@@ -425,6 +433,7 @@ private struct BeginCaptureField: NSViewRepresentable {
     @Binding var focusedField: BeginFieldFocus?
     var onReturn: () -> Void
     var onTab: () -> Void
+    var onCommandReturn: () -> Void = {}
 
     func makeCoordinator() -> Coordinator {
         Coordinator(self)
@@ -445,6 +454,9 @@ private struct BeginCaptureField: NSViewRepresentable {
         field.onTab = {
             onTab()
         }
+        field.onCommandReturn = {
+            onCommandReturn()
+        }
         return field
     }
 
@@ -458,6 +470,9 @@ private struct BeginCaptureField: NSViewRepresentable {
         }
         nsView.onTab = {
             onTab()
+        }
+        nsView.onCommandReturn = {
+            onCommandReturn()
         }
         if focusedField == focus {
             let currentEditor = nsView.currentEditor()
@@ -483,17 +498,30 @@ private struct BeginCaptureField: NSViewRepresentable {
         func controlTextDidChange(_ obj: Notification) {
             if let field = obj.object as? NSTextField {
                 parent.text = field.stringValue
+                if let editor = field.currentEditor() {
+                    let length = editor.string.count
+                    editor.selectedRange = NSRange(location: length, length: 0)
+                }
             }
         }
 
         func controlTextDidBeginEditing(_ obj: Notification) {
             parent.focusedField = parent.focus
+            if let field = obj.object as? NSTextField {
+                DispatchQueue.main.async {
+                    if let editor = field.currentEditor() {
+                        let length = editor.string.count
+                        editor.selectedRange = NSRange(location: length, length: 0)
+                    }
+                }
+            }
         }
     }
 
     final class BeginTextField: NSTextField {
         var onReturn: (() -> Void)?
         var onTab: (() -> Void)?
+        var onCommandReturn: (() -> Void)?
 
         override init(frame frameRect: NSRect) {
             super.init(frame: frameRect)
@@ -508,6 +536,11 @@ private struct BeginCaptureField: NSViewRepresentable {
         override func keyDown(with event: NSEvent) {
             switch event.keyCode {
             case 36: // Return
+                if event.modifierFlags.contains(.command) {
+                    window?.makeFirstResponder(nil)
+                    onCommandReturn?()
+                    return
+                }
                 window?.makeFirstResponder(nil)
                 onReturn?()
             case 48: // Tab
@@ -515,6 +548,25 @@ private struct BeginCaptureField: NSViewRepresentable {
                 onTab?()
             default:
                 super.keyDown(with: event)
+            }
+        }
+
+        override func selectText(_ sender: Any?) {
+            super.selectText(sender)
+            guard sender is NSApplication else { return }
+            DispatchQueue.main.async { [weak self] in
+                if let editor = self?.currentEditor() {
+                    let length = editor.string.count
+                    editor.selectedRange = NSRange(location: length, length: 0)
+                }
+            }
+        }
+
+        override func textDidChange(_ notification: Notification) {
+            super.textDidChange(notification)
+            if let editor = currentEditor() {
+                let length = editor.string.count
+                editor.selectedRange = NSRange(location: length, length: 0)
             }
         }
     }
@@ -1924,7 +1976,7 @@ struct ContentView: View {
                     .tint(Theme.pink)
                     .controlSize(.large)
                     .keyboardShortcut("b", modifiers: [.control, .shift])
-                    .registerShortcut(name: "Begin Capture", keyLabel: "⌃⇧B", modifiers: [.control, .shift], scope: "Global")
+                    .registerShortcut(name: "Begin Capture", keyLabel: "B", modifiers: [.control, .shift], scope: "Global")
                 }
 
                 HStack(alignment: .top) {
