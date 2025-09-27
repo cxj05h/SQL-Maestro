@@ -875,7 +875,7 @@ struct ContentView: View {
     @State private var toastReloaded: Bool = false
     @State private var imageAttachmentToast: String? = nil
 
-    @State private var alternateFieldsLocked: Bool = false
+    @State private var alternateFieldsLocked: Bool = true
 
     @State private var fontSize: CGFloat = 13
     @State private var hoverRecentKey: String? = nil
@@ -1149,7 +1149,7 @@ struct ContentView: View {
                 EmptyView()
             }
             .keyboardShortcut("e", modifiers: [.command])
-            .registerShortcut(name: "Toggle Edit/Preview Notes", keyLabel: "E", modifiers: [.command], scope: "Global")
+            .registerShortcut(name: "Toggle Edit/Preview & Locks", keyLabel: "E", modifiers: [.command], scope: "Global")
             .frame(width: 0, height: 0)
             .buttonStyle(.plain)
             .opacity(0.0001)
@@ -2712,7 +2712,10 @@ struct ContentView: View {
                     
                     Spacer()
                     
-                    Toggle(isOn: $dbTablesLocked) {
+                    Toggle(isOn: Binding(
+                        get: { dbTablesLocked },
+                        set: { newValue in setPaneLockState(newValue, source: "dbToggle") }
+                    )) {
                         HStack(spacing: 4) {
                             Image(systemName: dbTablesLocked ? "lock.fill" : "lock.open.fill")
                                 .font(.system(size: fontSize - 2))
@@ -2951,7 +2954,10 @@ struct ContentView: View {
                     
                     Spacer()
                     
-                    Toggle(isOn: $alternateFieldsLocked) {
+                    Toggle(isOn: Binding(
+                        get: { alternateFieldsLocked },
+                        set: { newValue in setPaneLockState(newValue, source: "altToggle") }
+                    )) {
                         HStack(spacing: 4) {
                             Image(systemName: alternateFieldsLocked ? "lock.fill" : "lock.open.fill")
                                 .font(.system(size: fontSize - 2))
@@ -4093,7 +4099,7 @@ struct ContentView: View {
             guard newSession != sessions.current else { return }
             commitDraftsForCurrentSession()
             let previousSession = sessions.current
-            
+
             // Save current session's static fields
             sessionStaticFields[sessions.current] = (orgId, acctId, mysqlDb, companyLabel)
             
@@ -4123,12 +4129,17 @@ struct ContentView: View {
                 guideNotesDraft = ""
             }
             
+            setPaneLockState(true, source: "sessionSwitch")
             LOG("Session switched", ctx: ["from": "\(previousSession.rawValue)", "to": "\(newSession.rawValue)"])
         }
 
         private func togglePreviewShortcut() {
             setPreviewMode(!isPreviewMode)
-            LOG("Cmd+E synced preview", ctx: ["state": isPreviewMode ? "preview" : "edit"])
+            setPaneLockState(!dbTablesLocked, source: "cmd+e")
+            LOG("Cmd+E toggled preview + locks", ctx: [
+                "preview": isPreviewMode ? "preview" : "edit",
+                "locked": dbTablesLocked ? "1" : "0"
+            ])
         }
 
         private func loadTemplate(_ t: TemplateItem) {
@@ -4227,6 +4238,15 @@ struct ContentView: View {
             if !preview, showTroubleshootingGuide {
                 DispatchQueue.main.async { guideNotesEditor.focus() }
             }
+        }
+
+        private func setPaneLockState(_ locked: Bool, source: String = "manual") {
+            dbTablesLocked = locked
+            alternateFieldsLocked = locked
+            LOG("Pane lock state updated", ctx: [
+                "state": locked ? "locked" : "unlocked",
+                "source": source
+            ])
         }
 
 #if canImport(AppKit)
@@ -4827,6 +4847,7 @@ struct ContentView: View {
             sessionStaticFields[sessions.current] = ("", "", "", "")
             sessionNotesDrafts[sessions.current] = ""
             UsedTemplatesStore.shared.clearSession(sessions.current)
+            setPaneLockState(true, source: "clearSession")
             LOG("Session cleared", ctx: ["session": "\(sessions.current.rawValue)"])
         }
 
