@@ -309,7 +309,7 @@ private struct BeginCaptureSheet: View {
                                           focus: .extra(entry.id),
                                           focusedField: $focusedField,
                                           onReturn: { moveFocusAfterExtra(entry.id) },
-                                          onTab: cycleButtonFocus)
+                                          onTab: { handleTabFromExtra(entry.id) })
                     }
                     if extraValues.isEmpty {
                         Text("Press Return to add more fields.")
@@ -344,6 +344,9 @@ private struct BeginCaptureSheet: View {
             ensureSeedEntry()
             focusedField = .org
         }
+        .onChange(of: focusedField) { _, _ in
+            focusedButton = nil
+        }
     }
 
     private func ensureSeedEntry() {
@@ -353,6 +356,7 @@ private struct BeginCaptureSheet: View {
     }
 
     private func cycleButtonFocus() {
+        focusedField = nil
         switch focusedButton {
         case .cancel:
             focusedButton = .save
@@ -366,10 +370,12 @@ private struct BeginCaptureSheet: View {
 
     private func moveFocusAfterOrg() {
         focusedField = .acct
+        focusedButton = nil
     }
 
     private func moveFocusAfterAcct() {
         ensureSeedEntry()
+        focusedButton = nil
         if let first = extraValues.first {
             focusedField = .extra(first.id)
         }
@@ -377,9 +383,34 @@ private struct BeginCaptureSheet: View {
 
     private func moveFocusAfterExtra(_ id: UUID) {
         guard let idx = extraValues.firstIndex(where: { $0.id == id }) else { return }
+        focusedButton = nil
         if idx == extraValues.indices.last {
             extraValues.append(BeginCaptureEntry())
             focusedField = .extra(extraValues.last?.id ?? id)
+        } else {
+            let nextId = extraValues[extraValues.index(after: idx)].id
+            focusedField = .extra(nextId)
+        }
+    }
+
+    private func handleTabFromExtra(_ id: UUID) {
+        guard let idx = extraValues.firstIndex(where: { $0.id == id }) else {
+            cycleButtonFocus()
+            return
+        }
+
+        let value = extraValues[idx].value.trimmingCharacters(in: .whitespacesAndNewlines)
+        if value.isEmpty {
+            cycleButtonFocus()
+            return
+        }
+
+        focusedButton = nil
+
+        if idx == extraValues.indices.last {
+            let newEntry = BeginCaptureEntry()
+            extraValues.append(newEntry)
+            focusedField = .extra(newEntry.id)
         } else {
             let nextId = extraValues[extraValues.index(after: idx)].id
             focusedField = .extra(nextId)
@@ -428,9 +459,16 @@ private struct BeginCaptureField: NSViewRepresentable {
         nsView.onTab = {
             onTab()
         }
-        if focusedField == focus, nsView.window?.firstResponder !== nsView {
-            DispatchQueue.main.async {
-                nsView.window?.makeFirstResponder(nsView)
+        if focusedField == focus {
+            let currentEditor = nsView.currentEditor()
+            if nsView.window?.firstResponder !== currentEditor {
+                DispatchQueue.main.async {
+                    nsView.window?.makeFirstResponder(nsView)
+                    if let editor = nsView.currentEditor() {
+                        let length = editor.string.count
+                        editor.selectedRange = NSRange(location: length, length: 0)
+                    }
+                }
             }
         }
     }
@@ -456,6 +494,16 @@ private struct BeginCaptureField: NSViewRepresentable {
     final class BeginTextField: NSTextField {
         var onReturn: (() -> Void)?
         var onTab: (() -> Void)?
+
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+            isEditable = true
+            isSelectable = true
+        }
+
+        required init?(coder: NSCoder) {
+            super.init(coder: coder)
+        }
 
         override func keyDown(with event: NSEvent) {
             switch event.keyCode {
@@ -1868,12 +1916,13 @@ struct ContentView: View {
                         startBeginCapture()
                     } label: {
                         Text("Begin")
-                            .font(.system(size: fontSize, weight: .semibold))
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
+                            .font(.system(size: fontSize + 4, weight: .bold))
+                            .padding(.horizontal, 20)
+                            .padding(.vertical, 10)
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(Theme.pink)
+                    .controlSize(.large)
                     .keyboardShortcut("b", modifiers: [.control, .shift])
                     .registerShortcut(name: "Begin Capture", keyLabel: "⌃⇧B", modifiers: [.control, .shift], scope: "Global")
                 }
