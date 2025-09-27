@@ -5,6 +5,7 @@ enum AppPaths {
         .appendingPathComponent("SQLMaestro", isDirectory: true)
 
     static let templates = appSupport.appendingPathComponent("templates", isDirectory: true)
+    static let templateIdentities = templates.appendingPathComponent("template-identities.json", conformingTo: .json)
     static let backups = appSupport.appendingPathComponent("backups", isDirectory: true)
     static let backupZips = backups.appendingPathComponent("zips", isDirectory: true)
     static let logs = appSupport.appendingPathComponent("logs", isDirectory: true)

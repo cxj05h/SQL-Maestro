@@ -4755,7 +4755,10 @@ struct ContentView: View {
             if let t = matched {
                 loadTemplate(t)
                 if !loaded.dbTables.isEmpty {
-                    dbTablesStore.setWorkingSet(loaded.dbTables, for: sessions.current, template: t)
+                    dbTablesStore.setWorkingSet(loaded.dbTables,
+                                                for: sessions.current,
+                                                template: t,
+                                                markDirty: false)
                 }
             } else {
                 LOG("Saved session template not found; restored values only", ctx: ["templateName": loaded.templateName ?? "?"])

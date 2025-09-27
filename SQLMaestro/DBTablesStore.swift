@@ -19,13 +19,16 @@ final class DBTablesStore: ObservableObject {
         return working[session]?[t.id] ?? []
     }
 
-    func setWorkingSet(_ tables: [String], for session: TicketSession, template: TemplateItem?) {
+    func setWorkingSet(_ tables: [String],
+                       for session: TicketSession,
+                       template: TemplateItem?,
+                       markDirty: Bool = true) {
         guard let t = template else { return }
         var s = working[session] ?? [:]
         // Keep raw list (allow blank rows while editing)
         s[t.id] = tables
         working[session] = s
-        setDirty(true, for: session, templateId: t.id)
+        setDirty(markDirty, for: session, templateId: t.id)
     }
 
     func isDirty(for session: TicketSession, template: TemplateItem?) -> Bool {

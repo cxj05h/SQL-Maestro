@@ -1,11 +1,19 @@
 import Foundation
 
 struct TemplateItem: Identifiable, Hashable {
-    let id = UUID()
+    let id: UUID
     let name: String            // filename without extension
     let url: URL
     let rawSQL: String
     let placeholders: [String]  // e.g., ["Org-id", "sig-id"]
+
+    init(id: UUID, name: String, url: URL, rawSQL: String, placeholders: [String]) {
+        self.id = id
+        self.name = name
+        self.url = url
+        self.rawSQL = rawSQL
+        self.placeholders = placeholders
+    }
 }
 
 struct MappingEntry: Codable {

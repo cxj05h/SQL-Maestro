@@ -17,7 +17,12 @@ final class TemplateManager: ObservableObject {
         for url in files where url.pathExtension.lowercased() == "sql" {
             if let raw = try? String(contentsOf: url, encoding: .utf8) {
                 let phs = extractPlaceholders(from: raw)
-                items.append(TemplateItem(name: url.deletingPathExtension().lastPathComponent, url: url, rawSQL: raw, placeholders: phs))
+                let id = TemplateIdentityStore.shared.id(for: url)
+                items.append(TemplateItem(id: id,
+                                          name: url.deletingPathExtension().lastPathComponent,
+                                          url: url,
+                                          rawSQL: raw,
+                                          placeholders: phs))
             }
         }
         self.templates = items.sorted{ $0.name.lowercased() < $1.name.lowercased() }
@@ -140,6 +145,7 @@ final class TemplateManager: ObservableObject {
         try FileManager.default.moveItem(at: originalURL, to: dest)
         LOG("Template renamed", ctx: ["old": originalURL.lastPathComponent, "new": dest.lastPathComponent])
 
+        TemplateIdentityStore.shared.handleTemplateRenamed(from: originalURL, to: dest)
         DBTablesStore.shared.handleTemplateRenamed(from: originalURL, to: dest)
         TemplateLinksStore.shared.handleTemplateRenamed(from: originalURL, to: dest)
 
