@@ -529,4 +529,34 @@ private extension URL {
             }
             return super.performDragOperation(sender)
         }
+
+        override func viewWillMove(toWindow newWindow: NSWindow?) {
+            if newWindow == nil {
+                clearUndoRegistrations()
+            }
+            super.viewWillMove(toWindow: newWindow)
+        }
+
+        override func viewWillMove(toSuperview newSuperview: NSView?) {
+            if newSuperview == nil {
+                clearUndoRegistrations()
+            }
+            super.viewWillMove(toSuperview: newSuperview)
+        }
+
+        private func clearUndoRegistrations() {
+            var seenManagers: Set<ObjectIdentifier> = []
+            let managers = [undoManager, window?.undoManager].compactMap { $0 }
+
+            for manager in managers {
+                let identifier = ObjectIdentifier(manager)
+                if seenManagers.contains(identifier) { continue }
+                seenManagers.insert(identifier)
+
+                manager.removeAllActions(withTarget: self)
+                if let storage = textStorage {
+                    manager.removeAllActions(withTarget: storage)
+                }
+            }
+        }
     }
