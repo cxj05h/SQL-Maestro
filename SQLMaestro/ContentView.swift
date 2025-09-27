@@ -686,20 +686,7 @@ struct ContentView: View {
                         .disabled(selectedTemplate == nil)
                         
                         Button("Clear Session #\(sessions.current.rawValue)") {
-                            commitDraftsForCurrentSession()
-                            sessions.clearAllFieldsForCurrentSession()
-                            orgId = ""
-                            acctId = ""
-                            mysqlDb = ""
-                            companyLabel = ""
-                            draftDynamicValues[sessions.current] = [:]
-                            sessionStaticFields[sessions.current] = ("", "", "", "")
-                            sessionNotesDrafts[sessions.current] = ""
-                        
-                            // NEW: also clear used templates
-                            UsedTemplatesStore.shared.clearSession(sessions.current)
-                            
-                            LOG("All fields cleared (including static + used templates)", ctx: ["session": "\(sessions.current.rawValue)"])
+                            attemptClearCurrentSession()
                         }
                         .buttonStyle(.bordered)
                         .tint(Theme.aqua)
@@ -3302,7 +3289,7 @@ struct ContentView: View {
                         Divider()
                         if sessions.current == s {
                             Button("Clear This Session") {
-                                promptClearCurrentSession()
+                                attemptClearCurrentSession()
                             }
                         } else {
                             Button("Switch to This Session") {
@@ -3333,7 +3320,7 @@ struct ContentView: View {
                 // Invisible bridge view to receive menu notifications and register KB shortcuts for Help sheet
                 Color.clear.frame(width: 0, height: 0)
                     .background(TicketSessionNotificationBridge(
-                        onSave: { saveTicketSessionFlow() },
+                        onSave: { _ = saveTicketSessionFlow() },
                         onLoad: { loadTicketSessionFlow() },
                         onOpen: { openSessionsFolderFlow() }
                     ))
@@ -3440,6 +3427,45 @@ struct ContentView: View {
 
         private func isSessionNotesDirty(session: TicketSession) -> Bool {
             (sessionNotesDrafts[session] ?? "") != (sessions.sessionNotes[session] ?? "")
+        }
+
+        private func hasSessionFieldData(for session: TicketSession) -> Bool {
+            let staticData = sessionStaticFields[session] ?? ("", "", "", "")
+            let staticValues = [staticData.orgId, staticData.acctId, staticData.mysqlDb, staticData.company]
+            if staticValues.contains(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+                return true
+            }
+
+            if let sessionName = sessions.sessionNames[session]?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !sessionName.isEmpty,
+               sessionName != "#\(session.rawValue)" {
+                return true
+            }
+
+            if let link = sessions.sessionLinks[session]?.trimmingCharacters(in: .whitespacesAndNewlines), !link.isEmpty {
+                return true
+            }
+
+            if let images = sessions.sessionImages[session], !images.isEmpty {
+                return true
+            }
+
+            if let alternates = sessions.sessionAlternateFields[session],
+               alternates.contains(where: { !$0.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !$0.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+                return true
+            }
+
+            if let draftValues = draftDynamicValues[session],
+               draftValues.values.contains(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+                return true
+            }
+
+            if let storedValues = sessions.sessionValues[session],
+               storedValues.values.contains(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+                return true
+            }
+
+            return false
         }
 
         private func saveSessionNotes() {
@@ -3969,7 +3995,8 @@ struct ContentView: View {
             return name.components(separatedBy: invalid).joined(separator: "_")
         }
         
-        private func saveTicketSessionFlow() {
+        @discardableResult
+        private func saveTicketSessionFlow() -> Bool {
             let fm = FileManager.default
             try? fm.createDirectory(at: AppPaths.sessions, withIntermediateDirectories: true)
             
@@ -3981,7 +4008,7 @@ struct ContentView: View {
                 title: "Save Ticket Session",
                 message: "Type a name for this ticket session file (no extension needed)",
                 defaultValue: suggested
-            )?.trimmingCharacters(in: .whitespacesAndNewlines), !rawName.isEmpty else { return }
+            )?.trimmingCharacters(in: .whitespacesAndNewlines), !rawName.isEmpty else { return false }
             
             let base = sanitizeFileName(rawName)
             var url = AppPaths.sessions.appendingPathComponent(base, conformingTo: .json)
@@ -3996,7 +4023,7 @@ struct ContentView: View {
                 overwrite.alertStyle = .warning
                 overwrite.addButton(withTitle: "Overwrite")
                 overwrite.addButton(withTitle: "Cancel")
-                guard overwrite.runModal() == .alertFirstButtonReturn else { return }
+                guard overwrite.runModal() == .alertFirstButtonReturn else { return false }
             }
             
             // Snapshot current UI/session state
@@ -4041,10 +4068,12 @@ struct ContentView: View {
                 let data = try enc.encode(saved)
                 try data.write(to: url, options: .atomic)
                 LOG("Ticket session saved", ctx: ["file": url.lastPathComponent])
+                return true
             } catch {
                 NSSound.beep()
                 showAlert(title: "Save Failed", message: error.localizedDescription)
                 LOG("Ticket session save failed", ctx: ["error": error.localizedDescription])
+                return false
             }
         }
         
@@ -4152,57 +4181,193 @@ struct ContentView: View {
             LOG("Open sessions folder")
         }
         
-        private func promptClearCurrentSession() {
-            let hasNotes = !(sessions.sessionNotes[sessions.current] ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        private func attemptClearCurrentSession() {
+            let guideDirty = templateGuideStore.isNotesDirty(for: selectedTemplate)
+            let notesDirty = isSessionNotesDirty(session: sessions.current)
+            let sessionFieldDirty = hasSessionFieldData(for: sessions.current)
+            let sessionDirty = notesDirty || sessionFieldDirty
+            let linksDirty = templateLinksStore.isDirty(for: selectedTemplate)
+            let dbTablesDirty = dbTablesStore.isDirty(for: sessions.current, template: selectedTemplate)
+
+            guard guideDirty || sessionDirty || linksDirty || dbTablesDirty else {
+                clearCurrentSessionState()
+                return
+            }
+
+            var detailLines: [String] = []
+            if guideDirty { detailLines.append("• Troubleshooting guide changes") }
+            if notesDirty { detailLines.append("• Session notes changes") }
+            if sessionFieldDirty { detailLines.append("• Session data changes") }
+            if linksDirty { detailLines.append("• Template links updates") }
+            if dbTablesDirty { detailLines.append("• DB tables updates") }
+
             let alert = NSAlert()
-            alert.messageText = "Save this session before clearing?"
-            alert.informativeText = "Session #\(sessions.current.rawValue) will be reset."
-            alert.alertStyle = .informational
-            if hasNotes {
-                // Default = Yes (Save) when notes exist
-                alert.addButton(withTitle: "Yes, Save")
-                alert.addButton(withTitle: "No, Don’t Save")
-                alert.addButton(withTitle: "Cancel")
-            } else {
-                // Default = No (Don’t Save) otherwise
-                alert.addButton(withTitle: "No, Don’t Save")
-                alert.addButton(withTitle: "Yes, Save")
-                alert.addButton(withTitle: "Cancel")
+            alert.messageText = "Unsaved changes detected"
+            alert.informativeText = ([
+                "Session #\(sessions.current.rawValue) has pending edits:",
+                detailLines.joined(separator: "\n"),
+                "Choose how to proceed before clearing."
+            ].filter { !$0.isEmpty }).joined(separator: "\n")
+            alert.alertStyle = .warning
+
+            enum PendingAction {
+                case clear
+                case saveAll
+                case saveGuide
+                case saveSession
+                case saveLinks
+                case saveTables
+                case cancel
             }
+
+            var actions: [PendingAction] = []
+
+            alert.addButton(withTitle: "Clear Session")
+            actions.append(.clear)
+
+            alert.addButton(withTitle: "Save All")
+            actions.append(.saveAll)
+
+            if guideDirty {
+                alert.addButton(withTitle: "Save Guide")
+                actions.append(.saveGuide)
+            }
+
+            if sessionDirty {
+                alert.addButton(withTitle: "Save Session")
+                actions.append(.saveSession)
+            }
+
+            if linksDirty {
+                alert.addButton(withTitle: "Save Links")
+                actions.append(.saveLinks)
+            }
+
+            if dbTablesDirty {
+                alert.addButton(withTitle: "Save DB Tables")
+                actions.append(.saveTables)
+            }
+
+            alert.addButton(withTitle: "Cancel")
+            actions.append(.cancel)
+
             let response = alert.runModal()
-            if hasNotes {
-                switch response {
-                case .alertFirstButtonReturn: // Yes, Save
-                    saveTicketSessionFlow()
-                    fallthrough
-                case .alertSecondButtonReturn: // No, Don’t Save
-                    sessions.clearAllFieldsForCurrentSession()
-                    sessions.sessionNotes[sessions.current] = ""
-                    sessionNotesDrafts[sessions.current] = ""
-                    sessionStaticFields[sessions.current] = ("", "", "", "")
-                    LOG("Session cleared via prompt", ctx: ["session": "\(sessions.current.rawValue)"])
-                default:
-                    return
-                }
-            } else {
-                switch response {
-                case .alertFirstButtonReturn: // No, Don’t Save
-                    sessions.clearAllFieldsForCurrentSession()
-                    sessions.sessionNotes[sessions.current] = ""
-                    sessionNotesDrafts[sessions.current] = ""
-                    sessionStaticFields[sessions.current] = ("", "", "", "")
-                    LOG("Session cleared via prompt", ctx: ["session": "\(sessions.current.rawValue)"])
-                case .alertSecondButtonReturn: // Yes, Save
-                    saveTicketSessionFlow()
-                    sessions.clearAllFieldsForCurrentSession()
-                    sessions.sessionNotes[sessions.current] = ""
-                    sessionNotesDrafts[sessions.current] = ""
-                    sessionStaticFields[sessions.current] = ("", "", "", "")
-                    LOG("Session cleared after save via prompt", ctx: ["session": "\(sessions.current.rawValue)"])
-                default:
-                    return
-                }
+            let index = Int(response.rawValue) - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
+            guard index >= 0 && index < actions.count else { return }
+
+            switch actions[index] {
+            case .clear:
+                clearCurrentSessionState()
+            case .saveAll:
+                handleSaveAllBeforeClearing(
+                    guideDirty: guideDirty,
+                    sessionDirty: sessionDirty,
+                    linksDirty: linksDirty,
+                    dbTablesDirty: dbTablesDirty
+                )
+            case .saveGuide:
+                handleGuideSaveOnly()
+            case .saveSession:
+                handleSessionSaveOnly()
+            case .saveLinks:
+                handleLinksSaveOnly()
+            case .saveTables:
+                handleTablesSaveOnly()
+            case .cancel:
+                return
             }
+        }
+
+        private func clearCurrentSessionState() {
+            commitDraftsForCurrentSession()
+            sessions.clearAllFieldsForCurrentSession()
+            orgId = ""
+            acctId = ""
+            mysqlDb = ""
+            companyLabel = ""
+            draftDynamicValues[sessions.current] = [:]
+            sessionStaticFields[sessions.current] = ("", "", "", "")
+            sessionNotesDrafts[sessions.current] = ""
+            UsedTemplatesStore.shared.clearSession(sessions.current)
+            LOG("Session cleared", ctx: ["session": "\(sessions.current.rawValue)"])
+        }
+
+        private func handleSaveAllBeforeClearing(guideDirty: Bool,
+                                                 sessionDirty: Bool,
+                                                 linksDirty: Bool,
+                                                 dbTablesDirty: Bool) {
+            var succeeded = true
+
+            if guideDirty { succeeded = handleGuideSaveOnly() }
+            if succeeded && sessionDirty { succeeded = handleSessionSaveOnly() }
+            if succeeded && linksDirty { succeeded = handleLinksSaveOnly() }
+            if succeeded && dbTablesDirty { succeeded = handleTablesSaveOnly() }
+
+            if succeeded {
+                clearCurrentSessionState()
+            }
+        }
+
+        @discardableResult
+        private func handleGuideSaveOnly() -> Bool {
+            guard let template = selectedTemplate else { return true }
+            guard templateGuideStore.isNotesDirty(for: template) else { return true }
+            if templateGuideStore.saveNotes(for: template) {
+                guideNotesDraft = templateGuideStore.currentNotes(for: template)
+                touchTemplateActivity(for: template)
+                return true
+            }
+#if canImport(AppKit)
+            NSSound.beep()
+#endif
+            showAlert(title: "Save Failed", message: "Could not save troubleshooting guide changes.")
+            return false
+        }
+
+        @discardableResult
+        private func handleSessionSaveOnly() -> Bool {
+            let session = sessions.current
+            let previousSaved = sessions.sessionNotes[session] ?? ""
+            let draft = sessionNotesDrafts[session] ?? ""
+            if draft != previousSaved {
+                saveSessionNotes()
+            }
+            commitDraftsForCurrentSession()
+            if saveTicketSessionFlow() {
+                return true
+            } else {
+                sessions.sessionNotes[session] = previousSaved
+                sessionNotesDrafts[session] = draft
+                return false
+            }
+        }
+
+        @discardableResult
+        private func handleLinksSaveOnly() -> Bool {
+            guard let template = selectedTemplate else { return true }
+            guard templateLinksStore.isDirty(for: template) else { return true }
+            if templateLinksStore.saveSidecar(for: template) {
+                return true
+            }
+#if canImport(AppKit)
+            NSSound.beep()
+#endif
+            showAlert(title: "Save Failed", message: "Could not save template links.")
+            return false
+        }
+
+        @discardableResult
+        private func handleTablesSaveOnly() -> Bool {
+            guard let template = selectedTemplate else { return true }
+            guard dbTablesStore.isDirty(for: sessions.current, template: template) else { return true }
+            if dbTablesStore.saveSidecar(for: sessions.current, template: template) {
+                return true
+            }
+#if canImport(AppKit)
+            NSSound.beep()
+#endif
+            showAlert(title: "Save Failed", message: "Could not save DB tables.")
+            return false
         }
         
         // A tiny invisible view that listens for the menu notifications
