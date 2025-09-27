@@ -1,5 +1,11 @@
 # **SQL Maestro is a tool designed to help organize your workflow while troublshooting a ticket.**
 
+## Quick Begin Capture (Org/Acct + ad-hoc IDs)
+
+Use the new **Begin** button in the Static Info header – or press **⌃⇧B** from anywhere on macOS – to pop open a lightweight capture window without picking a query template first. Paste the customer’s **Org ID** and **Account ID** into the first two fields, press **Return** to move between them, and keep hitting **Return** to add as many extra blank rows as you need for other identifiers. When you’re done, press **Tab** to highlight **Cancel** (Tab twice highlights **Save**), then hit **Return** to confirm.
+
+Saving immediately fills the current session’s Org/Acct static fields and drops every additional value into the Alternate Fields list as unnamed rows you can label later. All captured values stay with the session, so they travel with you no matter which query template you decide to load next.
+
 Having a helper like Maestro provides a kind of "wokrstation" for organizing the important or relevant IDs, resource names, times/dates, screenshots, db tables, KB or Zendesk links, and a place to create a guide for challenging cases that require multiple steps/checks, etc.
 
 Instead of needing to hold everything in your mind, on Clipy, on a sticky note etc., this Maestro becomes the AIO for any information about any ticket at any time. 

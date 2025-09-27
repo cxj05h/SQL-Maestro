@@ -247,6 +247,231 @@ struct WheelNumberField: View {
     }
 }
 
+// MARK: – Quick capture (Begin) workflow support types
+private struct BeginCaptureEntry: Identifiable, Equatable {
+    let id: UUID
+    var value: String
+
+    init(id: UUID = UUID(), value: String = "") {
+        self.id = id
+        self.value = value
+    }
+}
+
+private enum BeginFieldFocus: Hashable {
+    case org
+    case acct
+    case extra(UUID)
+}
+
+private enum BeginButtonFocus: Hashable {
+    case cancel
+    case save
+}
+
+private struct BeginCaptureSheet: View {
+    @Binding var orgValue: String
+    @Binding var acctValue: String
+    @Binding var extraValues: [BeginCaptureEntry]
+    var onSave: () -> Void
+    var onCancel: () -> Void
+
+    @State private var focusedField: BeginFieldFocus? = .org
+    @FocusState private var focusedButton: BeginButtonFocus?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Quick Capture")
+                .font(.system(size: 20, weight: .semibold))
+            Text("Paste identifiers fast, then press Tab to jump to Cancel or Save. Return adds another row.")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+
+            VStack(spacing: 10) {
+                BeginCaptureField(text: $orgValue,
+                                  placeholder: "Org ID",
+                                  focus: .org,
+                                  focusedField: $focusedField,
+                                  onReturn: moveFocusAfterOrg,
+                                  onTab: cycleButtonFocus)
+
+                BeginCaptureField(text: $acctValue,
+                                  placeholder: "Account ID",
+                                  focus: .acct,
+                                  focusedField: $focusedField,
+                                  onReturn: moveFocusAfterAcct,
+                                  onTab: cycleButtonFocus)
+
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach($extraValues) { $entry in
+                        BeginCaptureField(text: $entry.value,
+                                          placeholder: "Additional value",
+                                          focus: .extra(entry.id),
+                                          focusedField: $focusedField,
+                                          onReturn: { moveFocusAfterExtra(entry.id) },
+                                          onTab: cycleButtonFocus)
+                    }
+                    if extraValues.isEmpty {
+                        Text("Press Return to add more fields.")
+                            .font(.system(size: 11))
+                            .foregroundStyle(.tertiary)
+                    }
+                }
+            }
+
+            HStack {
+                Spacer()
+                Button("Cancel") {
+                    onCancel()
+                }
+                .buttonStyle(.bordered)
+                .keyboardShortcut(.cancelAction)
+                .focusable(true)
+                .focused($focusedButton, equals: .cancel)
+
+                Button("Save") {
+                    onSave()
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .focusable(true)
+                .focused($focusedButton, equals: .save)
+            }
+        }
+        .padding(20)
+        .frame(minWidth: 420)
+        .onAppear {
+            ensureSeedEntry()
+            focusedField = .org
+        }
+    }
+
+    private func ensureSeedEntry() {
+        if extraValues.isEmpty {
+            extraValues = [BeginCaptureEntry()]
+        }
+    }
+
+    private func cycleButtonFocus() {
+        switch focusedButton {
+        case .cancel:
+            focusedButton = .save
+        case .save:
+            focusedButton = .cancel
+        default:
+            focusedButton = .cancel
+        }
+        focusedField = nil
+    }
+
+    private func moveFocusAfterOrg() {
+        focusedField = .acct
+    }
+
+    private func moveFocusAfterAcct() {
+        ensureSeedEntry()
+        if let first = extraValues.first {
+            focusedField = .extra(first.id)
+        }
+    }
+
+    private func moveFocusAfterExtra(_ id: UUID) {
+        guard let idx = extraValues.firstIndex(where: { $0.id == id }) else { return }
+        if idx == extraValues.indices.last {
+            extraValues.append(BeginCaptureEntry())
+            focusedField = .extra(extraValues.last?.id ?? id)
+        } else {
+            let nextId = extraValues[extraValues.index(after: idx)].id
+            focusedField = .extra(nextId)
+        }
+    }
+}
+
+private struct BeginCaptureField: NSViewRepresentable {
+    @Binding var text: String
+    var placeholder: String
+    var focus: BeginFieldFocus
+    @Binding var focusedField: BeginFieldFocus?
+    var onReturn: () -> Void
+    var onTab: () -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+
+    func makeNSView(context: Context) -> BeginTextField {
+        let field = BeginTextField()
+        field.isBordered = true
+        field.placeholderString = placeholder
+        field.font = .systemFont(ofSize: 14)
+        field.drawsBackground = true
+        field.backgroundColor = NSColor.textBackgroundColor
+        field.focusRingType = .default
+        field.delegate = context.coordinator
+        field.onReturn = {
+            onReturn()
+        }
+        field.onTab = {
+            onTab()
+        }
+        return field
+    }
+
+    func updateNSView(_ nsView: BeginTextField, context: Context) {
+        nsView.placeholderString = placeholder
+        if nsView.stringValue != text {
+            nsView.stringValue = text
+        }
+        nsView.onReturn = {
+            onReturn()
+        }
+        nsView.onTab = {
+            onTab()
+        }
+        if focusedField == focus, nsView.window?.firstResponder !== nsView {
+            DispatchQueue.main.async {
+                nsView.window?.makeFirstResponder(nsView)
+            }
+        }
+    }
+
+    final class Coordinator: NSObject, NSTextFieldDelegate {
+        var parent: BeginCaptureField
+
+        init(_ parent: BeginCaptureField) {
+            self.parent = parent
+        }
+
+        func controlTextDidChange(_ obj: Notification) {
+            if let field = obj.object as? NSTextField {
+                parent.text = field.stringValue
+            }
+        }
+
+        func controlTextDidBeginEditing(_ obj: Notification) {
+            parent.focusedField = parent.focus
+        }
+    }
+
+    final class BeginTextField: NSTextField {
+        var onReturn: (() -> Void)?
+        var onTab: (() -> Void)?
+
+        override func keyDown(with event: NSEvent) {
+            switch event.keyCode {
+            case 36: // Return
+                window?.makeFirstResponder(nil)
+                onReturn?()
+            case 48: // Tab
+                window?.makeFirstResponder(nil)
+                onTab?()
+            default:
+                super.keyDown(with: event)
+            }
+        }
+    }
+}
+
 // Satisfy references used by the scroll-wheel redirection logic.
 extension WheelNumberField {
     // Native NSTextField subclass that exposes key + wheel events via closures.
@@ -391,6 +616,7 @@ extension Notification.Name {
     static let showKeyboardShortcuts = Notification.Name("ShowKeyboardShortcuts")
     static let attemptAppExit = Notification.Name("AttemptAppExit")
     // `showDatabaseSettings` is declared elsewhere to avoid duplicate symbol errors.
+    static let beginQuickCaptureRequested = Notification.Name("BeginQuickCaptureRequested")
 }
 
 // Central registry for keyboard shortcuts used across the app
@@ -569,7 +795,12 @@ struct ContentView: View {
     @State private var showTemplateEditor: Bool = false // (no longer controls presentation)
     @State private var editorTemplate: TemplateItem? = nil
     @State private var editorText: String = ""
-    
+
+    @State private var showBeginCaptureSheet: Bool = false
+    @State private var beginOrgDraft: String = ""
+    @State private var beginAcctDraft: String = ""
+    @State private var beginExtraDrafts: [BeginCaptureEntry] = []
+
     
     @FocusState private var isSearchFocused: Bool
     @FocusState private var isListFocused: Bool
@@ -807,6 +1038,9 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .showKeyboardShortcuts)) { _ in
             showShortcutsSheet = true
         }
+        .onReceive(NotificationCenter.default.publisher(for: .beginQuickCaptureRequested)) { _ in
+            startBeginCapture()
+        }
         .onReceive(NotificationCenter.default.publisher(for: .showDatabaseSettings)) { _ in
             showDatabaseSettings = true
         }
@@ -821,6 +1055,18 @@ struct ContentView: View {
             .opacity(0.0001)
             .allowsHitTesting(false)
             )
+        .sheet(isPresented: $showBeginCaptureSheet) {
+            BeginCaptureSheet(orgValue: $beginOrgDraft,
+                              acctValue: $beginAcctDraft,
+                              extraValues: $beginExtraDrafts,
+                              onSave: {
+                                  applyBeginCaptureValues()
+                                  showBeginCaptureSheet = false
+                              },
+                              onCancel: {
+                                  showBeginCaptureSheet = false
+                              })
+        }
         .sheet(isPresented: $showShortcutsSheet) {
             KeyboardShortcutsSheet(onClose: { showShortcutsSheet = false })
         }
@@ -1613,10 +1859,25 @@ struct ContentView: View {
         // MARK: — Static fields (now with dropdown history)
         private var staticFields: some View {
             VStack(alignment: .leading, spacing: 8) {
-                Text("Static Info")
-                    .font(.system(size: fontSize + 4, weight: .semibold))
-                    .foregroundStyle(Theme.purple)
-                
+                HStack {
+                    Text("Static Info")
+                        .font(.system(size: fontSize + 4, weight: .semibold))
+                        .foregroundStyle(Theme.purple)
+                    Spacer()
+                    Button {
+                        startBeginCapture()
+                    } label: {
+                        Text("Begin")
+                            .font(.system(size: fontSize, weight: .semibold))
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 6)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.pink)
+                    .keyboardShortcut("b", modifiers: [.control, .shift])
+                    .registerShortcut(name: "Begin Capture", keyLabel: "⌃⇧B", modifiers: [.control, .shift], scope: "Global")
+                }
+
                 HStack(alignment: .top) {
                     fieldWithDropdown(
                         label: "Org-ID",
@@ -1837,6 +2098,61 @@ struct ContentView: View {
                     }
                 }
             }
+        }
+
+        private func startBeginCapture() {
+            beginOrgDraft = orgId
+            beginAcctDraft = acctId
+            beginExtraDrafts = [BeginCaptureEntry()]
+            showBeginCaptureSheet = true
+            LOG("Quick capture opened", ctx: ["session": "\(sessions.current.rawValue)"])
+        }
+
+        private func applyBeginCaptureValues() {
+            let trimmedOrg = beginOrgDraft.replacingOccurrences(of: "\\s+", with: "", options: .regularExpression)
+            let trimmedAcct = beginAcctDraft.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            if trimmedOrg != beginOrgDraft { beginOrgDraft = trimmedOrg }
+            orgId = trimmedOrg
+            sessions.setValue(trimmedOrg, for: "Org-ID")
+
+            if let match = mapping.lookup(orgId: trimmedOrg) {
+                mysqlDb = match.mysqlDb
+                companyLabel = match.companyName ?? ""
+            } else {
+                companyLabel = ""
+            }
+
+            acctId = trimmedAcct
+            sessions.setValue(trimmedAcct, for: "Acct-ID")
+
+            sessionStaticFields[sessions.current] = (trimmedOrg, trimmedAcct, mysqlDb, companyLabel)
+
+            let extraValues = beginExtraDrafts
+                .map { $0.value.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+
+            if !extraValues.isEmpty {
+                var existing = sessions.sessionAlternateFields[sessions.current] ?? []
+                for value in extraValues {
+                    let newField = AlternateField(name: "", value: value)
+                    existing.append(newField)
+                    LOG("Quick capture alternate", ctx: [
+                        "session": "\(sessions.current.rawValue)",
+                        "value": value
+                    ])
+                }
+                sessions.sessionAlternateFields[sessions.current] = existing
+            }
+
+            LOG("Quick capture saved", ctx: [
+                "session": "\(sessions.current.rawValue)",
+                "org": trimmedOrg,
+                "acct": trimmedAcct,
+                "extras": "\(extraValues.count)"
+            ])
+
+            beginExtraDrafts = [BeginCaptureEntry()]
         }
         
         // Suggest tables using the global catalog (substring/fuzzy provided by the catalog)
