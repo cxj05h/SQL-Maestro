@@ -922,6 +922,7 @@ struct ContentView: View {
     @State private var previewingSessionImage: SessionImage? = nil
     @State private var previewingGuideImage: TemplateGuideImage? = nil
     @State private var showTroubleshootingGuide: Bool = false
+    @State private var showGuideNotesPopout: Bool = false
     @State private var guideNotesDraft: String = ""
     @State private var hoveredTemplateLinkID: UUID? = nil
     @State private var tagEditorTemplate: TemplateItem?
@@ -1188,6 +1189,66 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showDatabaseSettings) {
             DatabaseSettingsSheet(userConfig: userConfig)
+        }
+        .sheet(isPresented: $showGuideNotesPopout) {
+            GuideAndNotesPopoutSheet(
+                fontSize: fontSize,
+                selectedTemplate: selectedTemplate,
+                guideText: $guideNotesDraft,
+                guideDirty: templateGuideStore.isNotesDirty(for: selectedTemplate),
+                guideController: guideNotesEditor,
+                isPreview: Binding(
+                    get: { isPreviewMode },
+                    set: { setPreviewMode($0) }
+                ),
+                onGuideSave: {
+                    guard let template = selectedTemplate else { return }
+                    if templateGuideStore.saveNotes(for: template) {
+                        guideNotesDraft = templateGuideStore.currentNotes(for: template)
+                        touchTemplateActivity(for: template)
+                    }
+                },
+                onGuideRevert: {
+                    guard let template = selectedTemplate else { return }
+                    guideNotesDraft = templateGuideStore.revertNotes(for: template)
+                },
+                onGuideTextChanged: { newVal in
+                    guard let template = selectedTemplate else { return }
+                    if templateGuideStore.setNotes(newVal, for: template) {
+                        touchTemplateActivity(for: template)
+                    }
+                },
+                onGuideLinkRequested: handleTroubleshootingLink(selectedText:source:completion:),
+                onGuideImageAttachment: { info in
+                    handleGuideEditorImageAttachment(info)
+                },
+                onGuideLinkOpen: { url, modifiers in
+                    openLink(url, modifiers: modifiers)
+                },
+                session: sessions.current,
+                sessionDraft: Binding(
+                    get: { sessionNotesDrafts[sessions.current] ?? "" },
+                    set: { sessionNotesDrafts[sessions.current] = $0 }
+                ),
+                sessionSavedValue: sessions.sessionNotes[sessions.current] ?? "",
+                sessionController: sessionNotesEditor,
+                onSessionSave: saveSessionNotes,
+                onSessionRevert: revertSessionNotes,
+                onSessionLinkRequested: handleSessionNotesLink(selectedText:source:completion:),
+                onSessionImageAttachment: { info in
+                    handleSessionEditorImageAttachment(info)
+                },
+                onSessionLinkOpen: { url, modifiers in
+                    openLink(url, modifiers: modifiers)
+                },
+                onHide: {
+                    showGuideNotesPopout = false
+                },
+                onTogglePreview: {
+                    togglePreviewShortcut()
+                }
+            )
+            .frame(minWidth: 1100, minHeight: 720)
         }
         .sheet(item: $tagEditorTemplate) { template in
             TemplateTagEditorSheet(
@@ -3799,12 +3860,28 @@ struct ContentView: View {
                             .font(.system(size: fontSize - 1))
                         }
 
-                    MarkdownToolbar(iconSize: fontSize + 2, isEnabled: !isPreviewMode, controller: guideNotesEditor)
-                    PreviewModeToggle(isPreview: Binding(
-                        get: { isPreviewMode },
-                        set: { setPreviewMode($0) }
-                    ))
+                        MarkdownToolbar(iconSize: fontSize + 2, isEnabled: !isPreviewMode, controller: guideNotesEditor)
+                        PreviewModeToggle(isPreview: Binding(
+                            get: { isPreviewMode },
+                            set: { setPreviewMode($0) }
+                        ))
                     }
+
+                    Button(showGuideNotesPopout ? "Hide Popout" : "Pop Out Editors") {
+                        if showGuideNotesPopout {
+                            showGuideNotesPopout = false
+                        } else {
+                            if let template = selectedTemplate {
+                                templateGuideStore.prepare(for: template)
+                                guideNotesDraft = templateGuideStore.currentNotes(for: template)
+                            }
+                            showGuideNotesPopout = true
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.accent)
+                    .font(.system(size: fontSize - 1))
+                    .help("Open the troubleshooting guide and session notes in a larger window")
 
                     Spacer(minLength: 12)
 
@@ -7363,7 +7440,302 @@ struct ContentView: View {
             .frame(maxWidth: .infinity)
         }
     }
-    
+
+#if canImport(AppKit)
+    private struct SheetWindowConfigurator: NSViewRepresentable {
+        let minSize: CGSize
+        let preferredSize: CGSize
+        let sizeStorageKey: String
+
+        func makeCoordinator() -> Coordinator {
+            Coordinator(minSize: minSize, preferredSize: preferredSize, storageKey: sizeStorageKey)
+        }
+
+        func makeNSView(context: Context) -> NSView {
+            let view = NSView(frame: .zero)
+            DispatchQueue.main.async {
+                context.coordinator.configureIfNeeded(for: view)
+            }
+            return view
+        }
+
+        func updateNSView(_ nsView: NSView, context: Context) {
+            DispatchQueue.main.async {
+                context.coordinator.configureIfNeeded(for: nsView)
+            }
+        }
+
+        final class Coordinator: NSObject, NSWindowDelegate {
+            private weak var window: NSWindow?
+            private let minSize: CGSize
+            private let preferredSize: CGSize
+            private let storageKey: String
+            private var didApplyInitialSize = false
+
+            init(minSize: CGSize, preferredSize: CGSize, storageKey: String) {
+                self.minSize = minSize
+                self.preferredSize = preferredSize
+                self.storageKey = storageKey
+            }
+
+            func configureIfNeeded(for view: NSView) {
+                guard let window = view.window else { return }
+                if self.window === window { return }
+
+                self.window = window
+                window.delegate = self
+                window.styleMask.insert([.titled, .resizable])
+                window.minSize = minSize
+
+                if let saved = savedSize {
+                    window.setContentSize(saved)
+                } else if !didApplyInitialSize {
+                    window.setContentSize(preferredSize)
+                }
+                didApplyInitialSize = true
+
+                window.makeKeyAndOrderFront(nil)
+                NSApp.activate(ignoringOtherApps: true)
+            }
+
+            func windowDidEndLiveResize(_ notification: Notification) {
+                saveCurrentSize()
+            }
+
+            func windowDidMove(_ notification: Notification) {
+                saveCurrentSize()
+            }
+
+            func windowWillClose(_ notification: Notification) {
+                saveCurrentSize()
+                window = nil
+            }
+
+            private var savedSize: CGSize? {
+                let defaults = UserDefaults.standard
+                let width = defaults.double(forKey: "\(storageKey).width")
+                let height = defaults.double(forKey: "\(storageKey).height")
+                guard width > 0, height > 0 else { return nil }
+                return CGSize(width: max(minSize.width, width),
+                              height: max(minSize.height, height))
+            }
+
+            private func saveCurrentSize() {
+                guard let size = window?.contentView?.frame.size else { return }
+                let defaults = UserDefaults.standard
+                defaults.set(Double(size.width), forKey: "\(storageKey).width")
+                defaults.set(Double(size.height), forKey: "\(storageKey).height")
+            }
+        }
+    }
+
+    private struct KeyboardShortcutOverlay: View {
+        let onTrigger: () -> Void
+
+        var body: some View {
+            Button(action: onTrigger) {
+                EmptyView()
+            }
+            .keyboardShortcut("e", modifiers: [.command])
+            .buttonStyle(.plain)
+            .opacity(0.0001)
+            .frame(width: 0, height: 0)
+            .allowsHitTesting(false)
+        }
+    }
+#else
+    private struct SheetWindowConfigurator: View {
+        let minSize: CGSize
+        let preferredSize: CGSize
+        let sizeStorageKey: String
+
+        var body: some View { EmptyView() }
+    }
+
+    private struct KeyboardShortcutOverlay: View {
+        let onTrigger: () -> Void
+
+        var body: some View { EmptyView() }
+    }
+#endif
+
+    // MARK: – Guide + Session Notes Popout
+    struct GuideAndNotesPopoutSheet: View {
+        var fontSize: CGFloat
+        var selectedTemplate: TemplateItem?
+        @Binding var guideText: String
+        var guideDirty: Bool
+        @ObservedObject var guideController: MarkdownEditorController
+        @Binding var isPreview: Bool
+        let onGuideSave: () -> Void
+        let onGuideRevert: () -> Void
+        let onGuideTextChanged: (String) -> Void
+        let onGuideLinkRequested: (_ selectedText: String, _ source: MarkdownEditor.LinkRequestSource, _ completion: @escaping (MarkdownEditor.LinkInsertion?) -> Void) -> Void
+        let onGuideImageAttachment: (MarkdownEditor.ImageDropInfo) -> MarkdownEditor.ImageInsertion?
+        let onGuideLinkOpen: (URL, NSEvent.ModifierFlags) -> Void
+
+        var session: TicketSession
+        @Binding var sessionDraft: String
+        var sessionSavedValue: String
+        @ObservedObject var sessionController: MarkdownEditorController
+        let onSessionSave: () -> Void
+        let onSessionRevert: () -> Void
+        let onSessionLinkRequested: (_ selectedText: String, _ source: MarkdownEditor.LinkRequestSource, _ completion: @escaping (MarkdownEditor.LinkInsertion?) -> Void) -> Void
+        let onSessionImageAttachment: (MarkdownEditor.ImageDropInfo) -> MarkdownEditor.ImageInsertion?
+        let onSessionLinkOpen: (URL, NSEvent.ModifierFlags) -> Void
+        let onHide: () -> Void
+        let onTogglePreview: () -> Void
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .center, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Guide & Session Notes")
+                            .font(.system(size: fontSize + 4, weight: .semibold))
+                            .foregroundStyle(Theme.aqua)
+                        if let template = selectedTemplate {
+                            Text(template.name)
+                                .font(.system(size: fontSize - 1, weight: .medium))
+                                .foregroundStyle(.secondary)
+                        } else {
+                            Text("No template selected")
+                                .font(.system(size: fontSize - 2))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                    Spacer()
+                    Button("Hide") {
+                        onHide()
+                    }
+                    .buttonStyle(.bordered)
+                    .keyboardShortcut(.cancelAction)
+                    .font(.system(size: fontSize - 1))
+                }
+
+                HSplitView {
+                    guideColumn
+                        .frame(minWidth: 620, idealWidth: 700, maxWidth: .infinity, maxHeight: .infinity)
+                        .layoutPriority(2)
+
+                    SessionNotesInline(
+                        fontSize: fontSize,
+                        session: session,
+                        draft: $sessionDraft,
+                        savedValue: sessionSavedValue,
+                        controller: sessionController,
+                        isPreview: $isPreview,
+                        onSave: onSessionSave,
+                        onRevert: onSessionRevert,
+                        onLinkRequested: onSessionLinkRequested,
+                        onLinkOpen: onSessionLinkOpen,
+                        onImageAttachment: onSessionImageAttachment
+                    )
+                    .frame(minWidth: 440, idealWidth: 500, maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(minHeight: 320)
+                    .layoutPriority(1)
+                }
+                .frame(minHeight: 420, maxHeight: .infinity)
+            }
+            .padding(20)
+            .frame(minWidth: 1100, minHeight: 720)
+            .background(
+                SheetWindowConfigurator(
+                    minSize: CGSize(width: 1100, height: 720),
+                    preferredSize: CGSize(width: 1220, height: 800),
+                    sizeStorageKey: "GuideNotesPopoutSize"
+                )
+            )
+            .overlay(
+                KeyboardShortcutOverlay(onTrigger: onTogglePreview)
+            )
+        }
+
+        @ViewBuilder
+        private var guideColumn: some View {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text("Troubleshooting Guide")
+                        .font(.system(size: fontSize - 1, weight: .semibold))
+                        .foregroundStyle(Theme.aqua)
+
+                    if guideDirty {
+                        Button("Save Guide") {
+                            onGuideSave()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Theme.purple)
+                        .font(.system(size: fontSize - 1))
+
+                        Button("Revert") {
+                            onGuideRevert()
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(Theme.pink)
+                        .font(.system(size: fontSize - 1))
+                    }
+
+                    MarkdownToolbar(iconSize: fontSize + 2, isEnabled: !isPreview, controller: guideController)
+                    PreviewModeToggle(isPreview: $isPreview)
+
+                    Spacer()
+                }
+
+                Group {
+                    if selectedTemplate != nil {
+                        Group {
+                            if isPreview {
+                                MarkdownPreviewView(
+                                    text: guideText,
+                                    fontSize: fontSize * 1.5,
+                                    onLinkOpen: onGuideLinkOpen
+                                )
+                            } else {
+                                MarkdownEditor(
+                                    text: $guideText,
+                                    fontSize: fontSize * 1.5,
+                                    controller: guideController,
+                                    onLinkRequested: onGuideLinkRequested,
+                                    onImageAttachment: { info in
+                                        onGuideImageAttachment(info)
+                                    }
+                                )
+                            }
+                        }
+                        .frame(minHeight: 280)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Theme.grayBG.opacity(0.25))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
+                                )
+                        )
+                        .onChange(of: guideText) { _, newValue in
+                            onGuideTextChanged(newValue)
+                        }
+                    } else {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Select a template to view its troubleshooting guide")
+                                .font(.system(size: fontSize - 1))
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Theme.grayBG.opacity(0.25))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
+                                )
+                        )
+                        .frame(minHeight: 280)
+                    }
+                }
+            }
+        }
+    }
+
     // MARK: - Template Link Row
     struct TemplateLinkRow: View {
         let link: TemplateLink
