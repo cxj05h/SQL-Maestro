@@ -2304,6 +2304,12 @@ struct ContentView: View {
             case 124: // Right arrow
                 selector = usesShift ? #selector(NSResponder.moveWordRightAndModifySelection(_:))
                                       : #selector(NSResponder.moveWordRight(_:))
+            case 125: // Down arrow
+                selector = usesShift ? Selector(("moveParagraphForwardAndModifySelection:"))
+                                      : Selector(("moveParagraphForward:"))
+            case 126: // Up arrow
+                selector = usesShift ? Selector(("moveParagraphBackwardAndModifySelection:"))
+                                      : Selector(("moveParagraphBackward:"))
             default:
                 selector = nil
             }
