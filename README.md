@@ -1,4 +1,4 @@
-# **SQL Maestro is a tool designed to help organize your workflow while troublshooting a ticket.**
+# **SQL Maestro is a tool designed to help organize your workflow while troubleshooting a ticket.**
 
 Having a helper like Maestro provides a kind of "wokrstation" for organizing the important or relevant IDs, resource names, times/dates, screenshots, db tables, KB or Zendesk links, and a place to create a guide for challenging cases that require multiple steps/checks, etc.
 
@@ -6,9 +6,23 @@ Instead of needing to hold everything in your mind, on Clipy, on a sticky note, 
 
 ## Quick Begin Capture (Org/Acct + ad-hoc IDs)
 
-Use the new **Begin** button in the Static Info header – or press **⌃⇧B** from anywhere on macOS – to pop open a lightweight capture window without picking a query template first. Paste the customer’s **Org ID** and **Account ID** into the first two fields, press **Tab** to move between them. To add additional rows for Alternate Fields for other identifiers, hit **Cmd+Return**. When you’re done, press **Enter** to **Save**.
+Use the new **Begin** button in the Static Info header – or press **⌃⇧B** from anywhere on macOS – to pop open a lightweight capture window without picking a query template first. Paste the customer’s **Org ID** and **Account ID** into the first two fields, press **Tab** to move between them. **To add additional rows for Alternate Fields** for other identifiers, hit **Cmd+Return**. When you’re done, press **Enter** to **Save**.
+
+This feature was added to make it easier to record important resource information before determining which troubleshooting route to take. That's why the Alternate Fields are Query Template neutral, meaning they persist across Query Template changes. Read more about Alternate Fields below. 
+
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/Quick-capture2.png)
 
 Saving immediately fills the current session’s Org/Acct static fields and drops every additional value into the Alternate Fields list as unnamed rows you can label later. All captured values stay with the session, so they travel with you no matter which query template you decide to load next.
+
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/Quick-capture1.png)
+
+Fill in the data you want to be saved:
+
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/QuickCapture-enter-value.png)
+
+OrgID field will populate to Org. ID Static Field, Account ID will populate to Acct.ID Field and the "Additional Value" values will populate the Alternate Field pane with however many you added (no whitespace allowed here)
+
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/quickcapture-value-entered.png)
 
 # UI & Features
 ## **Query Templates**
@@ -130,6 +144,30 @@ The divider button is used to help organize the queries and inserts a:
 `---|-----------------**- xxxxxxxxx -**---------------------|`
 
 Make sure to save (cmd + s) or the 'Save' button if you make any changes to the template. 
+
+### Query Template Tagging
+
+Templates can now carry one or more tags saved in separate .tags.json sidecar files. Tags are normalized (lowercase, hyphen-separated) automatically, and persist across renames and reloads.
+
+- **Adding Tags** – In the templates sidebar, right-click a template and choose “Add Tags.” Enter comma-separated names (no need to type #). Each confirmed tag appears as a colored chip; remove chips by clicking the x. Press **Save** to persist or **Cancel** to discard.
+
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/Tagging-Add-Tag.png)
+
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/Tagging-Add-Tags-UI.png)
+
+- **Viewing Tags** – When a template is active, its tags appear beneath the “Active Template” label. “Tags:” uses the standard grey caption style, while each `#tag` is pink and slightly larger for readability.
+
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/Tagging-Template-Main.png)
+
+- **Tag Explorer** – Click any tag beside the active template (or from search results) to open a modal listing every template that shares that tag. Selecting a row loads that template immediately.
+
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/Tagging-Enter-QT.png)
+
+- **Searching by Tag** – Typing `#` followed by text in the template search box switches the sidebar into tag-search mode. The results list shows matching tags, along with how many templates carry each one. Click a result to open the tag explorer modal.
+
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/Tagging-Search.png)
+
+- **Cleanup** – Deleting a template removes its tag sidecar file automatically; renaming a template migrates its tags to the new filename.
 
 ### Query Template Change History
 
@@ -345,15 +383,16 @@ There are a few helpful KB shortcuts that work in the main screen of the app.
 
 ### Saving Images
 
-You may also add images that are currently copied to your clipboard by hitting the "Paste Images" button while focused in any Query Template.
+You can save images to either the Troubleshooting Guide or the Session (Ses) Images in the Session & Template pane, either by using the button "Paste" (per tab: Guide Images/Ses Images) or via the notes text editor for each. See more about that below. 
 
-![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-12.56.30-1.png)
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/sessiontemplateimageguide1.png)
 
-The only way to persist an image is if you save it with a Ticket Session.
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/sessiontemplateimageguide2.png)
 
 **Note!!**: 
 
 - Press cmd + left-click to show a preview of the image
+- The only way to persist an image is if you **save** it with a Ticket Session.
 
 ### Links
 
@@ -378,7 +417,7 @@ Drag an image or paste an image into this text field, and it will automatically 
 
 Deleting the image from the "Session and Template" pane will remove it from the text editor.
 
-![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-12.58.20.png)
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/Session-Images-Rename.png)
 
 ## **Troubleshooting Guide and Images**
 
@@ -389,6 +428,8 @@ Troubleshooting Guide notes act similarly to "Session Notes" with the difference
 Drag an image or paste an image into this text field and it will automatically be added to "Guide Images". This will create a hyperlink to the locally saved image location, so you can cmd+click the image link to open or preview the image. You can rename the image link name from the "Session & Template" pane > "Rename" and the hyperlink name will update as well.  
 
 Deleting the image from the "Session and Template" pane will remove it from the text editor.
+
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/Guide-Image-Rename.png)
 
 ## Working with Embedded Images
 
