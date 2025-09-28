@@ -269,41 +269,68 @@ struct MarkdownEditor: NSViewRepresentable {
 
             let safeLocation = max(0, min(range.location, ns.length))
             let safeLength = max(0, min(range.length, ns.length - safeLocation))
-            var coreRange = NSRange(location: safeLocation, length: safeLength)
+            let coreRange = NSRange(location: safeLocation, length: safeLength)
             let prefixLength = (prefix as NSString).length
             let suffixLength = (suffix as NSString).length
 
-            let selected = coreRange.length > 0 ? ns.substring(with: coreRange) : ""
+            let inlineFormatting = prefix.rangeOfCharacter(from: .newlines) == nil &&
+                                   suffix.rangeOfCharacter(from: .newlines) == nil
+
+            var effectiveRange = coreRange
+            var trailingWhitespace = ""
+
+            if inlineFormatting, effectiveRange.length > 0 {
+                let whitespaceSet = CharacterSet.whitespacesAndNewlines
+                let selectedFull = ns.substring(with: effectiveRange) as NSString
+                var trimCount = 0
+                var index = selectedFull.length - 1
+
+                while index >= 0 {
+                    let unicodeValue = UnicodeScalar(UInt32(selectedFull.character(at: index)))
+                    guard let unicodeValue, whitespaceSet.contains(unicodeValue) else { break }
+                    trimCount += 1
+                    index -= 1
+                }
+
+                if trimCount > 0 {
+                    trailingWhitespace = selectedFull.substring(from: selectedFull.length - trimCount)
+                    let newLength = max(0, effectiveRange.length - trimCount)
+                    effectiveRange = NSRange(location: effectiveRange.location, length: newLength)
+                }
+            }
+
+            let selected = effectiveRange.length > 0 ? ns.substring(with: effectiveRange) : ""
             let selectedNSString = selected as NSString
 
-            if coreRange.length >= prefixLength + suffixLength {
-                let startRange = NSRange(location: coreRange.location, length: prefixLength)
-                let endRange = NSRange(location: coreRange.location + coreRange.length - suffixLength, length: suffixLength)
+            if effectiveRange.length >= prefixLength + suffixLength {
+                let startRange = NSRange(location: effectiveRange.location, length: prefixLength)
+                let endRange = NSRange(location: effectiveRange.location + effectiveRange.length - suffixLength, length: suffixLength)
                 let hasInlineWrapper = ns.substring(with: startRange) == prefix && ns.substring(with: endRange) == suffix
 
                 if hasInlineWrapper {
-                    let innerLocation = coreRange.location + prefixLength
-                    let innerLength = coreRange.length - prefixLength - suffixLength
+                    let innerLocation = effectiveRange.location + prefixLength
+                    let innerLength = effectiveRange.length - prefixLength - suffixLength
                     let innerRange = NSRange(location: innerLocation, length: innerLength)
                     let innerText = innerLength > 0 ? ns.substring(with: innerRange) : ""
                     let innerNSString = innerText as NSString
+                    let replacement = innerText + trailingWhitespace
                     replace(range: coreRange,
-                            with: innerText,
+                            with: replacement,
                             newSelection: NSRange(location: coreRange.location, length: innerNSString.length))
                     return
                 }
             }
 
             if prefixLength > 0, suffixLength > 0,
-               coreRange.location >= prefixLength,
-               coreRange.location + coreRange.length + suffixLength <= ns.length {
-                let prefixRange = NSRange(location: coreRange.location - prefixLength, length: prefixLength)
-                let suffixRange = NSRange(location: coreRange.location + coreRange.length, length: suffixLength)
+               effectiveRange.location >= prefixLength,
+               effectiveRange.location + effectiveRange.length + suffixLength <= ns.length {
+                let prefixRange = NSRange(location: effectiveRange.location - prefixLength, length: prefixLength)
+                let suffixRange = NSRange(location: effectiveRange.location + effectiveRange.length, length: suffixLength)
                 let hasExternalWrapper = ns.substring(with: prefixRange) == prefix && ns.substring(with: suffixRange) == suffix
 
                 if hasExternalWrapper {
                     let totalRange = NSRange(location: prefixRange.location,
-                                             length: prefixLength + coreRange.length + suffixLength)
+                                             length: prefixLength + effectiveRange.length + suffixLength)
                     replace(range: totalRange,
                             with: selected,
                             newSelection: NSRange(location: prefixRange.location, length: selectedNSString.length))
@@ -312,10 +339,11 @@ struct MarkdownEditor: NSViewRepresentable {
             }
 
             let wrapped = prefix + selected + suffix
+            let replacement = wrapped + trailingWhitespace
             let caretLocation = coreRange.location + prefixLength
             let caretLength = selectedNSString.length
             replace(range: coreRange,
-                    with: wrapped,
+                    with: replacement,
                     newSelection: NSRange(location: caretLocation, length: caretLength))
         }
 
