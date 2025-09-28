@@ -6264,10 +6264,15 @@ struct ContentView: View {
             var body: some View {
                 let baseWidth: CGFloat = 480
                 let baseHeight: CGFloat = 360
-                let widthRange: CGFloat = 720
-                let heightRange: CGFloat = 540
+                let widthRange: CGFloat = 936
+                let heightRange: CGFloat = 702
+                let chromeHeight: CGFloat = 220
+
                 let resolvedWidth = baseWidth + CGFloat(sliderValue) * widthRange
-                let resolvedHeight = baseHeight + CGFloat(sliderValue) * heightRange
+                let maxHeightForSlider = baseHeight + CGFloat(sliderValue) * heightRange
+                let aspectRatio = (displayedImage?.size.width ?? 0) > 0 ? (displayedImage!.size.height / displayedImage!.size.width) : 0.75
+                let imageHeightForWidth = resolvedWidth * aspectRatio
+                let resolvedHeight = max(baseHeight, min(maxHeightForSlider, imageHeightForWidth + chromeHeight))
 
                 return VStack(alignment: .leading, spacing: 16) {
                     Text(sessionImage.displayName)
@@ -6384,10 +6389,15 @@ struct ContentView: View {
             var body: some View {
                 let baseWidth: CGFloat = 480
                 let baseHeight: CGFloat = 360
-                let widthRange: CGFloat = 720
-                let heightRange: CGFloat = 540
+                let widthRange: CGFloat = 936
+                let heightRange: CGFloat = 702
+                let chromeHeight: CGFloat = 220
+
                 let resolvedWidth = baseWidth + CGFloat(sliderValue) * widthRange
-                let resolvedHeight = baseHeight + CGFloat(sliderValue) * heightRange
+                let maxHeightForSlider = baseHeight + CGFloat(sliderValue) * heightRange
+                let aspectRatio = (displayedImage?.size.width ?? 0) > 0 ? (displayedImage!.size.height / displayedImage!.size.width) : 0.75
+                let imageHeightForWidth = resolvedWidth * aspectRatio
+                let resolvedHeight = max(baseHeight, min(maxHeightForSlider, imageHeightForWidth + chromeHeight))
 
                 return VStack(alignment: .leading, spacing: 16) {
                     Text(guideImage.displayName)
