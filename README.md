@@ -20,7 +20,7 @@ Fill in the data you want to be saved:
 
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/QuickCapture-enter-value.png)
 
-OrgID field will populate to Org. ID Static Field, Account ID will populate to Acct.ID Field and the "Additional Value" values will populate the Alternate Field pane with however many you added (no whitespace allowed here)
+The "Additional Value" values will populate the Alternate Field pane with however many you added (no whitespace allowed here):
 
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/quickcapture-value-entered.png)
 
