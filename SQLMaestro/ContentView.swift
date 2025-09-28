@@ -1271,7 +1271,10 @@ struct ContentView: View {
 #if os(macOS)
             if keyEventMonitor == nil {
                 keyEventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { event in
-                    return handleDBSuggestKeyEvent(event)
+                    guard let routed = handleWordwiseSelection(event) else {
+                        return nil
+                    }
+                    return handleDBSuggestKeyEvent(routed)
                 }
             }
 #endif
@@ -2283,6 +2286,45 @@ struct ContentView: View {
         }
         
 #if os(macOS)
+        /// Routes Option(/Shift)+Arrow to the active text responder so word-wise moves always work.
+        private func handleWordwiseSelection(_ event: NSEvent) -> NSEvent? {
+            guard event.type == .keyDown else { return event }
+
+            // Filter to Option+Left/Right (with optional Shift); avoid mixing with Command/Control combos.
+            let modifiers = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+            guard modifiers.contains(.option), !modifiers.contains(.command), !modifiers.contains(.control) else { return event }
+
+            let usesShift = modifiers.contains(.shift)
+            let selector: Selector?
+
+            switch event.keyCode {
+            case 123: // Left arrow
+                selector = usesShift ? #selector(NSResponder.moveWordLeftAndModifySelection(_:))
+                                      : #selector(NSResponder.moveWordLeft(_:))
+            case 124: // Right arrow
+                selector = usesShift ? #selector(NSResponder.moveWordRightAndModifySelection(_:))
+                                      : #selector(NSResponder.moveWordRight(_:))
+            default:
+                selector = nil
+            }
+
+            guard let command = selector else { return event }
+
+            // Try the current first responder first.
+            if let responder = NSApp.keyWindow?.firstResponder, responder.tryToPerform(command, with: nil) {
+                return nil
+            }
+
+            // Fallback to the window's field editor (used by NSTextField instances).
+            if let window = NSApp.keyWindow,
+               let fieldEditor = window.fieldEditor(false, for: nil),
+               fieldEditor.tryToPerform(command, with: nil) {
+                return nil
+            }
+
+            return event
+        }
+
         /// Handle ↑/↓ to move through suggestions, Return/Enter to accept, Esc to close.
         private func handleDBSuggestKeyEvent(_ event: NSEvent) -> NSEvent? {
             guard let row = focusedDBTableRow else { return event }
