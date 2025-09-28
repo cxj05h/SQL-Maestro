@@ -6237,6 +6237,16 @@ struct ContentView: View {
 
         private struct SessionImagePreviewSheet: View {
             let sessionImage: SessionImage
+            private let displayedImage: NSImage?
+            @State private var sliderValue: Double
+            @Environment(\.dismiss) private var dismiss
+
+            init(sessionImage: SessionImage) {
+                self.sessionImage = sessionImage
+                let url = AppPaths.sessionImages.appendingPathComponent(sessionImage.fileName)
+                self.displayedImage = NSImage(contentsOf: url)
+                self._sliderValue = State(initialValue: ImagePreviewSizing.defaultSliderValue(for: self.displayedImage))
+            }
 
             private var imageURL: URL {
                 AppPaths.sessionImages.appendingPathComponent(sessionImage.fileName)
@@ -6247,18 +6257,23 @@ struct ContentView: View {
             }
 
             var body: some View {
-                VStack(alignment: .leading, spacing: 16) {
+                let minSize = ImagePreviewSizing.minSize(for: displayedImage)
+                let preferredSize = ImagePreviewSizing.size(for: displayedImage, slider: sliderValue)
+                let sliderEnabled = ImagePreviewSizing.hasAdjustableRange(for: displayedImage)
+
+                return VStack(alignment: .leading, spacing: 16) {
                     Text(sessionImage.displayName)
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(Theme.purple)
 
                     ScrollView {
-                        Group {
-                            if let nsImage = NSImage(contentsOf: imageURL) {
+                        VStack(spacing: 0) {
+                            if let nsImage = displayedImage {
                                 Image(nsImage: nsImage)
                                     .resizable()
+                                    .interpolation(.high)
                                     .aspectRatio(contentMode: .fit)
-                                    .frame(maxWidth: 640)
+                                    .frame(maxWidth: .infinity)
                                     .cornerRadius(10)
                                     .shadow(color: .black.opacity(0.12), radius: 10, x: 0, y: 6)
                             } else {
@@ -6278,9 +6293,31 @@ struct ContentView: View {
                                 .padding(.vertical, 40)
                             }
                         }
-                        .frame(maxWidth: .infinity)
+                        .frame(maxWidth: .infinity, alignment: .center)
                     }
                     .frame(maxHeight: .infinity)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 6) {
+                            Text("Window Size")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                        }
+
+                        HStack(spacing: 8) {
+                            Image(systemName: "arrow.down.right.and.arrow.up.left")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                            Slider(value: $sliderValue, in: ImagePreviewSizing.sliderRange)
+                                .disabled(!sliderEnabled)
+                                .help("Adjust preview size")
+                            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .opacity(sliderEnabled ? 1.0 : 0.45)
+                    }
 
                     HStack(spacing: 8) {
                         Text(imageURL.lastPathComponent)
@@ -6288,6 +6325,12 @@ struct ContentView: View {
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
                         Spacer()
+                        Button("Close") {
+                            dismiss()
+                        }
+                        .buttonStyle(.bordered)
+                        .font(.system(size: 12))
+
                         Button("Open") {
                             NSWorkspace.shared.open(imageURL)
                             LOG("Session image preview open", ctx: ["fileName": sessionImage.fileName])
@@ -6302,13 +6345,38 @@ struct ContentView: View {
                     }
                 }
                 .padding(20)
-                .frame(minWidth: 420, minHeight: 360)
+                .frame(minWidth: minSize.width,
+                       minHeight: minSize.height)
+                .background(
+                    ResizableSheetConfigurator(
+                        preferredSize: preferredSize,
+                        minSize: minSize,
+                        onSizeApplied: { newSize in
+                            let resolved = ImagePreviewSizing.sliderValue(for: newSize, image: displayedImage)
+                            if abs(sliderValue - resolved) > 0.0005 {
+                                sliderValue = resolved
+                            }
+                        }
+                    )
+                )
             }
         }
 
         private struct TemplateGuideImagePreviewSheet: View {
             let template: TemplateItem
             let guideImage: TemplateGuideImage
+
+            private let displayedImage: NSImage?
+            @State private var sliderValue: Double
+            @Environment(\.dismiss) private var dismiss
+
+            init(template: TemplateItem, guideImage: TemplateGuideImage) {
+                self.template = template
+                self.guideImage = guideImage
+                let url = TemplateGuideStore.shared.imageURL(for: guideImage, template: template)
+                self.displayedImage = NSImage(contentsOf: url)
+                self._sliderValue = State(initialValue: ImagePreviewSizing.defaultSliderValue(for: self.displayedImage))
+            }
 
             private var imageURL: URL {
                 TemplateGuideStore.shared.imageURL(for: guideImage, template: template)
@@ -6319,18 +6387,23 @@ struct ContentView: View {
             }
 
             var body: some View {
-                VStack(alignment: .leading, spacing: 16) {
+                let minSize = ImagePreviewSizing.minSize(for: displayedImage)
+                let preferredSize = ImagePreviewSizing.size(for: displayedImage, slider: sliderValue)
+                let sliderEnabled = ImagePreviewSizing.hasAdjustableRange(for: displayedImage)
+
+                return VStack(alignment: .leading, spacing: 16) {
                     Text(guideImage.displayName)
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(Theme.purple)
 
                     ScrollView {
-                        Group {
-                            if let nsImage = NSImage(contentsOf: imageURL) {
+                        VStack(spacing: 0) {
+                            if let nsImage = displayedImage {
                                 Image(nsImage: nsImage)
                                     .resizable()
+                                    .interpolation(.high)
                                     .aspectRatio(contentMode: .fit)
-                                    .frame(maxWidth: 640)
+                                    .frame(maxWidth: .infinity)
                                     .cornerRadius(10)
                                     .shadow(color: .black.opacity(0.12), radius: 10, x: 0, y: 6)
                             } else {
@@ -6350,9 +6423,31 @@ struct ContentView: View {
                                 .padding(.vertical, 40)
                             }
                         }
-                        .frame(maxWidth: .infinity)
+                        .frame(maxWidth: .infinity, alignment: .center)
                     }
                     .frame(maxHeight: .infinity)
+
+                    VStack(alignment: .leading, spacing: 6) {
+                        HStack(spacing: 6) {
+                            Text("Window Size")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                        }
+
+                        HStack(spacing: 8) {
+                            Image(systemName: "arrow.down.right.and.arrow.up.left")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                            Slider(value: $sliderValue, in: ImagePreviewSizing.sliderRange)
+                                .disabled(!sliderEnabled)
+                                .help("Adjust preview size")
+                            Image(systemName: "arrow.up.left.and.arrow.down.right")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundStyle(.secondary)
+                        }
+                        .opacity(sliderEnabled ? 1.0 : 0.45)
+                    }
 
                     HStack(spacing: 8) {
                         Text(imageURL.lastPathComponent)
@@ -6360,6 +6455,12 @@ struct ContentView: View {
                             .foregroundStyle(.secondary)
                             .textSelection(.enabled)
                         Spacer()
+                        Button("Close") {
+                            dismiss()
+                        }
+                        .buttonStyle(.bordered)
+                        .font(.system(size: 12))
+
                         Button("Open") {
                             NSWorkspace.shared.open(imageURL)
                         }
@@ -6372,7 +6473,20 @@ struct ContentView: View {
                     }
                 }
                 .padding(20)
-                .frame(minWidth: 420, minHeight: 360)
+                .frame(minWidth: minSize.width,
+                       minHeight: minSize.height)
+                .background(
+                    ResizableSheetConfigurator(
+                        preferredSize: preferredSize,
+                        minSize: minSize,
+                        onSizeApplied: { newSize in
+                            let resolved = ImagePreviewSizing.sliderValue(for: newSize, image: displayedImage)
+                            if abs(sliderValue - resolved) > 0.0005 {
+                                sliderValue = resolved
+                            }
+                        }
+                    )
+                )
             }
         }
         private func handleImagePaste() {
@@ -6944,6 +7058,210 @@ struct ContentView: View {
             hoveredLinkID == link.id && linkTooltip != nil
         }
     }
+
+#if canImport(AppKit)
+    private enum ImagePreviewSizing {
+        static let sliderRange: ClosedRange<Double> = 0.0...1.0
+
+        static func minSize(for image: NSImage?) -> CGSize {
+            guard let image, image.size.width > 0, image.size.height > 0 else {
+                return CGSize(width: 420, height: 320)
+            }
+
+            let width = max(420, image.size.width * 0.45)
+            let height = max(320, image.size.height * 0.45)
+            return CGSize(width: width, height: height)
+        }
+
+        static func maxSize(for image: NSImage?) -> CGSize {
+            let minSize = minSize(for: image)
+            guard let image, image.size.width > 0, image.size.height > 0 else {
+                let fallback = fallbackMaxSize()
+                return CGSize(width: max(minSize.width, fallback.width),
+                              height: max(minSize.height, fallback.height))
+            }
+
+            var width = image.size.width * 3.0
+            var height = image.size.height * 3.0
+
+            if let screen = NSScreen.main {
+                width = min(width, screen.visibleFrame.width * 0.95)
+                height = min(height, screen.visibleFrame.height * 0.95)
+            }
+
+            width = max(width, minSize.width * 1.05)
+            height = max(height, minSize.height * 1.05)
+
+            return CGSize(width: width, height: height)
+        }
+
+        static func preferredSize(for image: NSImage?) -> CGSize {
+            let minSize = minSize(for: image)
+            let maxSize = maxSize(for: image)
+
+            guard let image, image.size.width > 0, image.size.height > 0 else {
+                let fallback = fallbackPreferredSize()
+                return CGSize(
+                    width: max(minSize.width, min(fallback.width, maxSize.width)),
+                    height: max(minSize.height, min(fallback.height, maxSize.height))
+                )
+            }
+
+            var width = image.size.width * 0.9
+            var height = image.size.height * 0.9
+
+            if let screen = NSScreen.main {
+                width = min(width, screen.visibleFrame.width * 0.85)
+                height = min(height, screen.visibleFrame.height * 0.85)
+            }
+
+            width = max(minSize.width, min(width, maxSize.width))
+            height = max(minSize.height, min(height, maxSize.height))
+
+            return CGSize(width: width, height: height)
+        }
+
+        static func size(for image: NSImage?, slider: Double) -> CGSize {
+            let minSize = minSize(for: image)
+            let maxSize = maxSize(for: image)
+            let clamped = clamp(slider, to: sliderRange)
+            let factor = CGFloat(clamped)
+
+            let width = minSize.width + (maxSize.width - minSize.width) * factor
+            let height = minSize.height + (maxSize.height - minSize.height) * factor
+            return CGSize(width: width, height: height)
+        }
+
+        static func defaultSliderValue(for image: NSImage?) -> Double {
+            let minSize = minSize(for: image)
+            let maxSize = maxSize(for: image)
+            let preferred = preferredSize(for: image)
+
+            let widthRatio = normalized(value: preferred.width, lower: minSize.width, upper: maxSize.width)
+            let heightRatio = normalized(value: preferred.height, lower: minSize.height, upper: maxSize.height)
+            let average = (widthRatio + heightRatio) / 2
+            return clamp(Double(average), to: sliderRange)
+        }
+
+        static func sliderValue(for size: CGSize, image: NSImage?) -> Double {
+            let minSize = minSize(for: image)
+            let maxSize = maxSize(for: image)
+
+            let widthRatio = normalized(value: size.width, lower: minSize.width, upper: maxSize.width)
+            let heightRatio = normalized(value: size.height, lower: minSize.height, upper: maxSize.height)
+            let average = (widthRatio + heightRatio) / 2
+            return clamp(Double(average), to: sliderRange)
+        }
+
+        static func hasAdjustableRange(for image: NSImage?) -> Bool {
+            let minSize = minSize(for: image)
+            let maxSize = maxSize(for: image)
+            return (maxSize.width - minSize.width) > 24 || (maxSize.height - minSize.height) > 24
+        }
+
+        private static func fallbackPreferredSize() -> CGSize {
+            let defaultSize = CGSize(width: 960, height: 680)
+            guard let screen = NSScreen.main else { return defaultSize }
+            let visible = screen.visibleFrame.size
+            let width = min(defaultSize.width, visible.width * 0.85)
+            let height = min(defaultSize.height, visible.height * 0.85)
+            return CGSize(width: max(420, width), height: max(320, height))
+        }
+
+        private static func fallbackMaxSize() -> CGSize {
+            guard let screen = NSScreen.main else {
+                return CGSize(width: 1280, height: 960)
+            }
+            return CGSize(
+                width: max(540, screen.visibleFrame.width * 0.95),
+                height: max(420, screen.visibleFrame.height * 0.95)
+            )
+        }
+
+        private static func normalized(value: CGFloat, lower: CGFloat, upper: CGFloat) -> CGFloat {
+            guard upper > lower else { return 0 }
+            return (value - lower) / (upper - lower)
+        }
+
+        private static func clamp<T: Comparable>(_ value: T, to range: ClosedRange<T>) -> T {
+            min(range.upperBound, max(range.lowerBound, value))
+        }
+    }
+
+    private struct ResizableSheetConfigurator: NSViewRepresentable {
+        var preferredSize: CGSize
+        var minSize: CGSize
+        var onSizeApplied: ((CGSize) -> Void)? = nil
+
+        final class Coordinator {
+            var lastAppliedSize: CGSize?
+            var lastMinSize: CGSize?
+        }
+
+        func makeCoordinator() -> Coordinator { Coordinator() }
+
+        func makeNSView(context: Context) -> ConfigurableView {
+            let view = ConfigurableView()
+            view.configure = { window in
+                guard let window else { return }
+                configure(window: window, coordinator: context.coordinator)
+            }
+            return view
+        }
+
+        func updateNSView(_ nsView: ConfigurableView, context: Context) {
+            nsView.configure = { window in
+                guard let window else { return }
+                configure(window: window, coordinator: context.coordinator)
+            }
+
+            if let window = nsView.window {
+                configure(window: window, coordinator: context.coordinator)
+            }
+        }
+
+        private func configure(window: NSWindow, coordinator: Coordinator) {
+            window.styleMask.insert(.resizable)
+
+            if coordinator.lastMinSize != minSize {
+                window.minSize = minSize
+                coordinator.lastMinSize = minSize
+            }
+
+            let targetSize = CGSize(
+                width: max(minSize.width, preferredSize.width),
+                height: max(minSize.height, preferredSize.height)
+            )
+
+            if coordinator.lastAppliedSize != targetSize {
+                NSAnimationContext.beginGrouping()
+                NSAnimationContext.current.duration = 0
+                window.setContentSize(targetSize)
+                NSAnimationContext.endGrouping()
+                coordinator.lastAppliedSize = targetSize
+            }
+
+            if let handler = onSizeApplied {
+                let appliedContentSize = window.contentLayoutRect.size
+                handler(appliedContentSize)
+            }
+        }
+
+        final class ConfigurableView: NSView {
+            var configure: ((NSWindow?) -> Void)?
+
+            override func viewDidMoveToWindow() {
+                super.viewDidMoveToWindow()
+                configure?(window)
+            }
+
+            override func layout() {
+                super.layout()
+                configure?(window)
+            }
+        }
+    }
+#endif
 
     private struct LinkTooltipBubble: View {
         let text: String
