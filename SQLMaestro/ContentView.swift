@@ -644,6 +644,7 @@ struct MarkdownPreviewView: View {
     var text: String
     var fontSize: CGFloat
     var onLinkOpen: ((URL, NSEvent.ModifierFlags) -> Void)? = nil
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         ScrollView {
@@ -664,9 +665,17 @@ struct MarkdownPreviewView: View {
     }
 
     private var previewTheme: MarkdownUI.Theme {
-        MarkdownUI.Theme.gitHub
+        let inlineFill: Color
+
+        if colorScheme == .dark {
+            inlineFill = Color(nsColor: NSColor(calibratedWhite: 0.22, alpha: 1.0))
+        } else {
+            inlineFill = Color(nsColor: NSColor(calibratedWhite: 0.9, alpha: 1.0))
+        }
+
+        return MarkdownUI.Theme.gitHub
             .text { FontSize(fontSize) }
-            .code { MonospacedTextStyle(size: fontSize) }
+            .code { InlineCodeTextStyle(fontSize: fontSize, fill: inlineFill) }
             .codeBlock { configuration in
                 codeBlock(configuration)
             }
@@ -716,6 +725,18 @@ private struct MonospacedTextStyle: TextStyle {
     func _collectAttributes(in attributes: inout AttributeContainer) {
         FontFamilyVariant(.monospaced)._collectAttributes(in: &attributes)
         FontSize(size)._collectAttributes(in: &attributes)
+    }
+}
+
+private struct InlineCodeTextStyle: TextStyle {
+    var fontSize: CGFloat
+    var fill: Color
+
+    func _collectAttributes(in attributes: inout AttributeContainer) {
+        FontFamilyVariant(.monospaced)._collectAttributes(in: &attributes)
+        FontSize(fontSize)._collectAttributes(in: &attributes)
+        BackgroundColor(fill)._collectAttributes(in: &attributes)
+        attributes.foregroundColor = Color.primary
     }
 }
 

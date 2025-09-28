@@ -690,6 +690,7 @@ private final class MarkdownLayoutManager: NSLayoutManager {
 
             return rects
         }
+
     }
 
     final class MarkdownTextView: NSTextView {
@@ -774,4 +775,5 @@ private final class MarkdownLayoutManager: NSLayoutManager {
                 }
             }
         }
+
     }
