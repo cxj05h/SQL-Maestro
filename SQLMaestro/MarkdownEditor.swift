@@ -552,7 +552,140 @@ private extension URL {
         return ["png", "jpg", "jpeg", "heic", "tif", "tiff", "gif", "bmp"].contains(ext)
     }
 }
+
+private final class MarkdownLayoutManager: NSLayoutManager {
+        private static let trimmingSet = CharacterSet.whitespacesAndNewlines
+
+        override func fillBackgroundRectArray(_ rectArray: UnsafePointer<NSRect>,
+                                              count rectCount: Int,
+                                              forCharacterRange charRange: NSRange,
+                                              color: NSColor) {
+            guard let textContainer = textContainers.first,
+                  let textView = textContainer.textView,
+                  let textStorage = textStorage else {
+                super.fillBackgroundRectArray(rectArray,
+                                               count: rectCount,
+                                               forCharacterRange: charRange,
+                                               color: color)
+                return
+            }
+
+            let selectedRanges = textView.selectedRanges.map { $0.rangeValue }
+            var intersectionFound = false
+            var trimmedRects: [NSRect] = []
+
+            for selection in selectedRanges {
+                let intersection = NSIntersectionRange(selection, charRange)
+                guard intersection.length > 0 else { continue }
+                intersectionFound = true
+                trimmedRects.append(contentsOf: makeTrimmedRects(for: intersection,
+                                                                  textStorage: textStorage,
+                                                                  textContainer: textContainer))
+            }
+
+            guard intersectionFound else {
+                super.fillBackgroundRectArray(rectArray,
+                                               count: rectCount,
+                                               forCharacterRange: charRange,
+                                               color: color)
+                return
+            }
+
+            guard !trimmedRects.isEmpty else {
+                return
+            }
+
+            let origin = textView.textContainerOrigin
+            color.setFill()
+            for rect in trimmedRects {
+                let adjusted = NSRect(x: rect.origin.x + origin.x,
+                                      y: rect.origin.y + origin.y,
+                                      width: rect.width,
+                                      height: rect.height)
+                NSBezierPath(rect: adjusted).fill()
+            }
+        }
+
+        private func makeTrimmedRects(for characterRange: NSRange,
+                                      textStorage: NSTextStorage,
+                                      textContainer: NSTextContainer) -> [NSRect] {
+            guard characterRange.length > 0 else { return [] }
+
+            let nsString = textStorage.string as NSString
+            var rects: [NSRect] = []
+            var cursor = characterRange.location
+            let upperBound = characterRange.location + characterRange.length
+
+            while cursor < upperBound {
+                var lineStart = 0
+                var lineEnd = 0
+                var contentsEnd = 0
+                nsString.getLineStart(&lineStart,
+                                      end: &lineEnd,
+                                      contentsEnd: &contentsEnd,
+                                      for: NSRange(location: cursor, length: 0))
+
+                let segmentStart = max(cursor, lineStart)
+                let segmentEnd = min(upperBound, lineEnd)
+
+                if segmentStart < segmentEnd {
+                    var visibleEnd = contentsEnd
+                    while visibleEnd > lineStart,
+                          let scalar = UnicodeScalar(UInt32(nsString.character(at: visibleEnd - 1))),
+                          MarkdownLayoutManager.trimmingSet.contains(scalar) {
+                        visibleEnd -= 1
+                    }
+
+                    let clampedEnd = min(segmentEnd, visibleEnd)
+                    if clampedEnd > segmentStart {
+                        let trimmedRange = NSRange(location: segmentStart,
+                                                   length: clampedEnd - segmentStart)
+                        let glyphRange = glyphRange(forCharacterRange: trimmedRange,
+                                                    actualCharacterRange: nil)
+
+                        if glyphRange.length > 0 {
+                            enumerateEnclosingRects(forGlyphRange: glyphRange,
+                                                    withinSelectedGlyphRange: glyphRange,
+                                                    in: textContainer) { rect, _ in
+                                rects.append(rect)
+                            }
+                        }
+                    }
+                }
+
+                if segmentEnd < lineEnd, segmentEnd < upperBound {
+                    cursor = segmentEnd
+                } else {
+                    cursor = lineEnd
+                }
+            }
+
+            return rects
+        }
+    }
+
     final class MarkdownTextView: NSTextView {
+        convenience init() {
+            self.init(frame: .zero, textContainer: nil)
+        }
+
+        override init(frame frameRect: NSRect, textContainer: NSTextContainer?) {
+            if let container = textContainer {
+                super.init(frame: frameRect, textContainer: container)
+            } else {
+                let storage = NSTextStorage()
+                let layoutManager = MarkdownLayoutManager()
+                let container = NSTextContainer()
+                layoutManager.addTextContainer(container)
+                storage.addLayoutManager(layoutManager)
+                super.init(frame: frameRect, textContainer: container)
+            }
+        }
+
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) has not been implemented")
+        }
+
         var handlePaste: ((NSPasteboard) -> Bool)?
         var canAcceptDrag: ((NSPasteboard) -> Bool)?
         var handleDrop: ((NSPasteboard, NSPoint) -> Bool)?
