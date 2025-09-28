@@ -930,6 +930,12 @@ struct ContentView: View {
         let tag: String
         var id: String { tag }
     }
+    struct TagSearchResult: Identifiable {
+        let tag: String
+        let templates: [TemplateItem]
+        var id: String { tag }
+        var count: Int { templates.count }
+    }
     @State private var sessionNotesDrafts: [TicketSession: String] = [:]
     @StateObject private var sessionNotesEditor = MarkdownEditorController()
     @StateObject private var guideNotesEditor = MarkdownEditorController()
@@ -1340,10 +1346,17 @@ struct ContentView: View {
 
     @ViewBuilder
     private var templatesFooter: some View {
-    if !searchText.isEmpty {
-    Text("\(filteredTemplates.count) of \(templates.templates.count) templates")
-    .font(.system(size: fontSize - 2))
-    .foregroundStyle(.secondary)
+    if !trimmedSearchText.isEmpty {
+        if isTagSearch {
+            let count = tagSearchResults.count
+            Text("\(count) matching tag\(count == 1 ? "" : "s")")
+                .font(.system(size: fontSize - 2))
+                .foregroundStyle(.secondary)
+        } else {
+            Text("\(filteredTemplates.count) of \(templates.templates.count) templates")
+                .font(.system(size: fontSize - 2))
+                .foregroundStyle(.secondary)
+        }
     }
     }
 
@@ -1382,14 +1395,14 @@ struct ContentView: View {
         if !tags.isEmpty {
             HStack(spacing: 8) {
                 Text("Tags:")
-                    .font(.system(size: fontSize - 2))
+                    .font(.system(size: fontSize - 1))
                     .foregroundStyle(.secondary)
                 ForEach(tags, id: \.self) { tag in
                     Button {
                         showTemplates(for: tag)
                     } label: {
                         Text("#\(tag)")
-                            .font(.system(size: fontSize - 2))
+                            .font(.system(size: fontSize - 1))
                             .foregroundStyle(Theme.pink)
                             .lineLimit(1)
                     }
@@ -1438,36 +1451,67 @@ struct ContentView: View {
 
     @ViewBuilder
     private var templatesList: some View {
-    List(filteredTemplates, id: \.id, selection: Binding(
-        get: { selectedTemplate?.id },
-        set: { newValue in
-            if let id = newValue,
-               let found = templates.templates.first(where: { $0.id == id }) {
-                selectTemplate(found)
-            } else {
-                selectTemplate(nil)
-            }
+        if isTagSearch {
+            tagSearchList
+        } else {
+            templateSearchList
         }
-    )) { template in
-    templateRow(template)
     }
-    .animation(nil, value: selectedTemplate?.id)
-    .listStyle(.plain)
-    .scrollContentBackground(.hidden)
-    .onKeyPress(.return) {
-    if !filteredTemplates.isEmpty {
-    if selectedTemplate == nil { selectTemplate(filteredTemplates.first) }
-    if let selected = selectedTemplate {
-    loadTemplate(selected)
-    return .handled
+
+    private var templateSearchList: some View {
+        List(filteredTemplates, id: \.id, selection: Binding(
+            get: { selectedTemplate?.id },
+            set: { newValue in
+                if let id = newValue,
+                   let found = templates.templates.first(where: { $0.id == id }) {
+                    selectTemplate(found)
+                } else {
+                    selectTemplate(nil)
+                }
+            }
+        )) { template in
+            templateRow(template)
+        }
+        .animation(nil, value: selectedTemplate?.id)
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
+        .onKeyPress(.return) {
+            if !filteredTemplates.isEmpty {
+                if selectedTemplate == nil { selectTemplate(filteredTemplates.first) }
+                if let selected = selectedTemplate {
+                    loadTemplate(selected)
+                    return .handled
+                }
+                return .handled
+            }
+            return .ignored
+        }
+        .onKeyPress(.upArrow) { navigateTemplate(direction: -1); return .handled }
+        .onKeyPress(.downArrow) { navigateTemplate(direction: 1); return .handled }
+        .focused($isListFocused)
     }
-    return .handled
-    }
-    return .ignored
-    }
-    .onKeyPress(.upArrow) { navigateTemplate(direction: -1); return .handled }
-    .onKeyPress(.downArrow) { navigateTemplate(direction: 1); return .handled }
-    .focused($isListFocused)
+
+    private var tagSearchList: some View {
+        List(tagSearchResults) { result in
+            Button {
+                showTemplates(for: result.tag)
+            } label: {
+                HStack(spacing: 10) {
+                    Text("#\(result.tag)")
+                        .font(.system(size: fontSize))
+                        .foregroundStyle(Theme.pink)
+                    Spacer()
+                    Text("\(result.count)")
+                        .font(.system(size: fontSize - 3, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 4)
+            }
+            .buttonStyle(.plain)
+            .contentShape(Rectangle())
+        }
+        .listStyle(.plain)
+        .scrollContentBackground(.hidden)
     }
 
     @ViewBuilder
@@ -1961,6 +2005,14 @@ struct ContentView: View {
             string.replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression)
         }
         
+        private var trimmedSearchText: String {
+            searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+
+        private var isTagSearch: Bool {
+            trimmedSearchText.hasPrefix("#")
+        }
+
         private func normalizedSearchText(_ string: String) -> String {
             string.lowercased()
                 .components(separatedBy: CharacterSet.alphanumerics.inverted)
@@ -1981,18 +2033,9 @@ struct ContentView: View {
         
         private var filteredTemplates: [TemplateItem] {
             let baseList: [TemplateItem]
-            let trimmedSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-            if trimmedSearch.isEmpty {
+            let trimmedSearch = trimmedSearchText
+            if trimmedSearch.isEmpty || isTagSearch {
                 baseList = templates.templates
-            } else if trimmedSearch.hasPrefix("#") {
-                let rawQuery = String(trimmedSearch.dropFirst())
-                if let normalizedTag = TemplateTagsStore.sanitize(rawQuery), !normalizedTag.isEmpty {
-                    baseList = templates.templates.filter { template in
-                        templateTagsStore.tags(for: template).contains(where: { $0.contains(normalizedTag) })
-                    }
-                } else {
-                    baseList = templates.templates.filter { !templateTagsStore.tags(for: $0).isEmpty }
-                }
             } else {
                 let query = normalizedSearchText(trimmedSearch)
                 if query.isEmpty {
@@ -2015,6 +2058,40 @@ struct ContentView: View {
                     return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
                 }
             }
+        }
+
+        private var tagSearchResults: [TagSearchResult] {
+            guard isTagSearch else { return [] }
+            let rawQuery = String(trimmedSearchText.dropFirst())
+            let normalized = TemplateTagsStore.sanitize(rawQuery)
+            let fallback = rawQuery.lowercased().replacingOccurrences(of: " ", with: "-")
+
+            var buckets: [String: [TemplateItem]] = [:]
+            for template in templates.templates {
+                let tags = templateTagsStore.tags(for: template)
+                for tag in tags {
+                    let matches: Bool
+                    if let normalized = normalized, !normalized.isEmpty {
+                        matches = tag.contains(normalized)
+                    } else if !fallback.isEmpty {
+                        matches = tag.contains(fallback)
+                    } else {
+                        matches = true
+                    }
+                    if matches {
+                        buckets[tag, default: []].append(template)
+                    }
+                }
+            }
+
+            return buckets
+                .map { TagSearchResult(tag: $0.key, templates: $0.value) }
+                .sorted { lhs, rhs in
+                    if lhs.count != rhs.count {
+                        return lhs.count > rhs.count
+                    }
+                    return lhs.tag.localizedCaseInsensitiveCompare(rhs.tag) == .orderedAscending
+                }
         }
 #if os(macOS)
         @discardableResult
@@ -2506,6 +2583,7 @@ struct ContentView: View {
             }
         }
         private func navigateTemplate(direction: Int) {
+            guard !isTagSearch else { return }
             guard !filteredTemplates.isEmpty else { return }
             
             if let currentIndex = filteredTemplates.firstIndex(where: { $0.id == selectedTemplate?.id }) {
