@@ -1075,47 +1075,7 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.bottom, 12)
                 
-                ZStack {
-                    // Left-aligned action buttons row
-                    HStack {
-                        Button("Populate Query") { populateQuery() }
-                            .buttonStyle(.borderedProminent)
-                            .tint(Theme.pink)
-                            .keyboardShortcut(.return, modifiers: [.command])
-                            .font(.system(size: fontSize))
-                            .registerShortcut(name: "Populate Query", key: .return, modifiers: [.command], scope: "Global")
-                        
-                        Button(showTroubleshootingGuide ? "Hide Guide" : "Troubleshooting Guide") {
-                            if let template = selectedTemplate {
-                                templateGuideStore.prepare(for: template)
-                                guideNotesDraft = templateGuideStore.currentNotes(for: template)
-                                if !showTroubleshootingGuide {
-                                    setPreviewMode(true)
-                                }
-                                withAnimation { showTroubleshootingGuide.toggle() }
-                            }
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(Theme.accent)
-                        .font(.system(size: fontSize))
-                        .disabled(selectedTemplate == nil)
-                        
-                        Button("Clear Session #\(sessions.current.rawValue)") {
-                            attemptClearCurrentSession()
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(Theme.aqua)
-                        .keyboardShortcut("k", modifiers: [.command, .shift])
-                        .font(.system(size: fontSize))
-                        .registerShortcut(name: "Clear Session", keyLabel: "K", modifiers: [.command, .shift], scope: "Global")
-                        
-                        Spacer()
-                    }
-                    
-                    // Centered session buttons overlay
-                    sessionButtons
-                        .frame(maxWidth: .infinity, alignment: .center)
-                }
+                sessionToolbar
                 
                 outputView
                 
@@ -3061,6 +3021,9 @@ struct ContentView: View {
                           : "Alternate fields are editable. Check to lock for easy copying.")
                 }
                 
+                let minPaneHeight = max(160, fontSize * 8)
+                let maxPaneHeight = max(220, fontSize * 11)
+
                 ScrollView {
                     VStack(alignment: .leading, spacing: 6) {
                         ForEach(sessions.sessionAlternateFields[sessions.current] ?? [], id: \.id) { field in
@@ -3071,7 +3034,7 @@ struct ContentView: View {
                                               selectedTemplate: selectedTemplate,
                                               draftDynamicValues: $draftDynamicValues) // ✅ pass it in
                         }
-                        
+
                         if !alternateFieldsLocked {
                             Button {
                                 let newField = AlternateField(name: "", value: "")
@@ -3087,6 +3050,7 @@ struct ContentView: View {
                                 }
                             }
                             .buttonStyle(.plain)
+                            .font(.system(size: fontSize - 1, weight: .medium))
                             .padding(.top, 4)
                         } else {
                             VStack(alignment: .leading, spacing: 2) {
@@ -3101,9 +3065,9 @@ struct ContentView: View {
                         }
                     }
                     .padding(6)
-                    .frame(maxWidth: .infinity, minHeight: 160, alignment: .topLeading)
+                    .frame(maxWidth: .infinity, minHeight: minPaneHeight, alignment: .topLeading)
                 }
-                .frame(minHeight: 160, maxHeight: 220)
+                .frame(minHeight: minPaneHeight, maxHeight: maxPaneHeight)
                 .background(
                     RoundedRectangle(cornerRadius: 8)
                         .fill(Theme.grayBG.opacity(0.25))
@@ -3510,9 +3474,9 @@ struct ContentView: View {
                     // 🔒 Locked mode: styled like dynamic fields (label above, value inside field look)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(editingName.isEmpty ? "unnamed" : editingName)
-                            .font(.system(size: 11))
+                            .font(.system(size: max(fontSize - 4, 11)))
                             .foregroundStyle(.secondary)
-                        
+
                         Text(editingValue.isEmpty ? "empty" : editingValue)
                             .font(.system(size: fontSize))
                             .foregroundStyle(editingValue.isEmpty ? .secondary : .primary)
@@ -3538,19 +3502,21 @@ struct ContentView: View {
                     // ✏️ Editable mode: name + value side by side
                     HStack(spacing: 6) {
                         TextField("Name", text: $editingName)
+                            .font(.system(size: fontSize - 1))
                             .textFieldStyle(.roundedBorder)
                             .onSubmit { commitChanges() }
                             .onChange(of: editingName) { _, newVal in
                                 commitChanges(newName: newVal, newValue: editingValue)
                             }
-                        
+
                         TextField("Value", text: $editingValue)
+                            .font(.system(size: fontSize))
                             .textFieldStyle(.roundedBorder)
                             .onSubmit { commitChanges() }
                             .onChange(of: editingValue) { _, newVal in
                                 commitChanges(newName: editingName, newValue: newVal)
                             }
-                        
+
                         Button {
                             if let idx = sessions.sessionAlternateFields[session]?.firstIndex(where: { $0.id == field.id }) {
                                 sessions.sessionAlternateFields[session]?.remove(at: idx)
@@ -3561,6 +3527,7 @@ struct ContentView: View {
                             }
                         } label: {
                             Image(systemName: "minus.circle")
+                                .font(.system(size: max(fontSize - 4, 12)))
                                 .foregroundStyle(.red)
                         }
                         .buttonStyle(.plain)
@@ -3799,6 +3766,68 @@ struct ContentView: View {
 
         }
         
+        @ViewBuilder
+        private var sessionToolbar: some View {
+            Group {
+                if #available(macOS 13.0, *) {
+                    ViewThatFits(in: .horizontal) {
+                        HStack(alignment: .center, spacing: 16) {
+                            sessionActionButtons
+                            Spacer(minLength: 12)
+                            sessionButtons
+                            Spacer(minLength: 12)
+                        }
+                        VStack(alignment: .leading, spacing: 12) {
+                            sessionActionButtons
+                            sessionButtons
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
+                } else {
+                    VStack(alignment: .leading, spacing: 12) {
+                        sessionActionButtons
+                        sessionButtons
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+        }
+
+        private var sessionActionButtons: some View {
+            HStack(spacing: 12) {
+                Button("Populate Query") { populateQuery() }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.pink)
+                    .keyboardShortcut(.return, modifiers: [.command])
+                    .font(.system(size: fontSize))
+                    .registerShortcut(name: "Populate Query", key: .return, modifiers: [.command], scope: "Global")
+
+                Button(showTroubleshootingGuide ? "Hide Guide" : "Troubleshooting Guide") {
+                    if let template = selectedTemplate {
+                        templateGuideStore.prepare(for: template)
+                        guideNotesDraft = templateGuideStore.currentNotes(for: template)
+                        if !showTroubleshootingGuide {
+                            setPreviewMode(true)
+                        }
+                        withAnimation { showTroubleshootingGuide.toggle() }
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.accent)
+                .font(.system(size: fontSize))
+                .disabled(selectedTemplate == nil)
+
+                Button("Clear Session #\(sessions.current.rawValue)") {
+                    attemptClearCurrentSession()
+                }
+                .buttonStyle(.bordered)
+                .tint(Theme.aqua)
+                .keyboardShortcut("k", modifiers: [.command, .shift])
+                .font(.system(size: fontSize))
+                .registerShortcut(name: "Clear Session", keyLabel: "K", modifiers: [.command, .shift], scope: "Global")
+            }
+        }
+
         // Session buttons with proper functionality
         private var sessionButtons: some View {
             HStack(spacing: 12) {
