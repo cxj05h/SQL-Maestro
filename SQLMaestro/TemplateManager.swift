@@ -148,6 +148,7 @@ final class TemplateManager: ObservableObject {
         TemplateIdentityStore.shared.handleTemplateRenamed(from: originalURL, to: dest)
         DBTablesStore.shared.handleTemplateRenamed(from: originalURL, to: dest)
         TemplateLinksStore.shared.handleTemplateRenamed(from: originalURL, to: dest)
+        TemplateTagsStore.shared.handleTemplateRenamed(from: originalURL, to: dest)
 
         Task { @MainActor in
             TemplateGuideStore.shared.handleTemplateRenamed(from: originalURL, to: dest)

@@ -903,6 +903,7 @@ struct ContentView: View {
     @ObservedObject private var dbTablesStore = DBTablesStore.shared
     @ObservedObject private var dbTablesCatalog = DBTablesCatalog.shared
     @ObservedObject private var templateLinksStore = TemplateLinksStore.shared
+    @ObservedObject private var templateTagsStore = TemplateTagsStore.shared
     @ObservedObject private var templateGuideStore = TemplateGuideStore.shared
     @ObservedObject private var usedTemplates = UsedTemplatesStore.shared
     @State private var selectedTemplate: TemplateItem?
@@ -923,6 +924,12 @@ struct ContentView: View {
     @State private var showTroubleshootingGuide: Bool = false
     @State private var guideNotesDraft: String = ""
     @State private var hoveredTemplateLinkID: UUID? = nil
+    @State private var tagEditorTemplate: TemplateItem?
+    @State private var tagExplorerContext: TagExplorerContext?
+    struct TagExplorerContext: Identifiable {
+        let tag: String
+        var id: String { tag }
+    }
     @State private var sessionNotesDrafts: [TicketSession: String] = [:]
     @StateObject private var sessionNotesEditor = MarkdownEditorController()
     @StateObject private var guideNotesEditor = MarkdownEditorController()
@@ -1029,6 +1036,9 @@ struct ContentView: View {
                             Text(selectedTemplate?.name ?? "No template loaded")
                                 .font(.system(size: fontSize + 3, weight: .medium))
                                 .foregroundStyle(Theme.gold)
+                            if let template = selectedTemplate {
+                                activeTemplateTags(for: template)
+                            }
                         }
                     }
                     .padding(.horizontal, 12)
@@ -1172,6 +1182,34 @@ struct ContentView: View {
         }
         .sheet(isPresented: $showDatabaseSettings) {
             DatabaseSettingsSheet(userConfig: userConfig)
+        }
+        .sheet(item: $tagEditorTemplate) { template in
+            TemplateTagEditorSheet(
+                template: template,
+                existingTags: templateTagsStore.tags(for: template),
+                onSave: { newTags in
+                    persistTags(newTags, for: template)
+                    tagEditorTemplate = nil
+                },
+                onCancel: {
+                    tagEditorTemplate = nil
+                }
+            )
+            .frame(minWidth: 460)
+        }
+        .sheet(item: $tagExplorerContext) { context in
+            TemplateTagExplorerSheet(
+                tag: context.tag,
+                templates: templates.templates,
+                onSelect: { template in
+                    selectTemplate(template)
+                    loadTemplate(template)
+                    tagExplorerContext = nil
+                },
+                onClose: {
+                    tagExplorerContext = nil
+                }
+            )
         }
         .sheet(item: $editorTemplate) { t in
             TemplateInlineEditorSheet(
@@ -1339,6 +1377,31 @@ struct ContentView: View {
     }
 
     @ViewBuilder
+    private func activeTemplateTags(for template: TemplateItem) -> some View {
+        let tags = templateTagsStore.tags(for: template)
+        if !tags.isEmpty {
+            HStack(spacing: 8) {
+                Text("Tags:")
+                    .font(.system(size: fontSize - 2))
+                    .foregroundStyle(.secondary)
+                ForEach(tags, id: \.self) { tag in
+                    Button {
+                        showTemplates(for: tag)
+                    } label: {
+                        Text("#\(tag)")
+                            .font(.system(size: fontSize - 2))
+                            .foregroundStyle(Theme.pink)
+                            .lineLimit(1)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Show templates tagged #\(tag)")
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+    }
+
+    @ViewBuilder
     private var templatesSearch: some View {
     HStack {
     Image(systemName: "magnifyingglass")
@@ -1456,6 +1519,7 @@ struct ContentView: View {
     .contextMenu {
     Button("Open in VS Code") { openInVSCode(template.url) }
     Button("Edit in App") { editTemplateInline(template) }
+    Button("Add Tags") { startAddTags(for: template) }
     Button("Open JSON") { openTemplateJSON(template) }
     Button("Show in Finder") { revealTemplateInFinder(template) }
     Divider()
@@ -1917,10 +1981,20 @@ struct ContentView: View {
         
         private var filteredTemplates: [TemplateItem] {
             let baseList: [TemplateItem]
-            if searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            let trimmedSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmedSearch.isEmpty {
                 baseList = templates.templates
+            } else if trimmedSearch.hasPrefix("#") {
+                let rawQuery = String(trimmedSearch.dropFirst())
+                if let normalizedTag = TemplateTagsStore.sanitize(rawQuery), !normalizedTag.isEmpty {
+                    baseList = templates.templates.filter { template in
+                        templateTagsStore.tags(for: template).contains(where: { $0.contains(normalizedTag) })
+                    }
+                } else {
+                    baseList = templates.templates.filter { !templateTagsStore.tags(for: $0).isEmpty }
+                }
             } else {
-                let query = normalizedSearchText(searchText)
+                let query = normalizedSearchText(trimmedSearch)
                 if query.isEmpty {
                     baseList = templates.templates
                 } else {
@@ -2358,8 +2432,22 @@ struct ContentView: View {
             }
         }
 #endif
-        
-        
+
+
+        private func startAddTags(for template: TemplateItem) {
+            templateTagsStore.ensureLoaded(template)
+            tagEditorTemplate = template
+        }
+
+        private func persistTags(_ tags: [String], for template: TemplateItem) {
+            templateTagsStore.setTags(tags, for: template)
+            templateTagsStore.saveSidecar(for: template)
+        }
+
+        private func showTemplates(for tag: String) {
+            tagExplorerContext = TagExplorerContext(tag: tag)
+        }
+
         private func openTemplateJSON(_ item: TemplateItem) {
             // Sidecar file naming convention: "<base>.tables.json"
             let jsonURL = item.url.deletingPathExtension()
@@ -2393,6 +2481,7 @@ struct ContentView: View {
                     // Delete the file from disk
                     try FileManager.default.removeItem(at: item.url)
                     LOG("Template file removed", ctx: ["file": item.url.path])
+                    TemplateTagsStore.shared.removeSidecar(for: item)
                     
                     // Clear selection if we just deleted the selected item
                     if selectedTemplate?.id == item.id {
@@ -4285,6 +4374,7 @@ struct ContentView: View {
                 // Hydrate template links from sidecar
                 _ = templateLinksStore.loadSidecar(for: t)
                 LOG("Template links hydrated", ctx: ["template": t.name])
+                templateTagsStore.ensureLoaded(t)
                 templateGuideStore.prepare(for: t)
                 guideNotesDraft = templateGuideStore.currentNotes(for: t)
             } else {
@@ -4321,6 +4411,7 @@ struct ContentView: View {
                 // NEW: hydrate DB tables for this session/template
                 _ = DBTablesStore.shared.loadSidecar(for: newSession, template: found)
                 LOG("DBTables sidecar hydrated (session switch)", ctx: ["template": found.name, "session": "\(newSession.rawValue)"])
+                templateTagsStore.ensureLoaded(found)
                 templateGuideStore.prepare(for: found)
                 guideNotesDraft = templateGuideStore.currentNotes(for: found)
             } else {
@@ -4356,6 +4447,7 @@ struct ContentView: View {
             // Hydrate template links from sidecar
             _ = templateLinksStore.loadSidecar(for: t)
             LOG("Template links hydrated", ctx: ["template": t.name])
+            templateTagsStore.ensureLoaded(t)
             templateGuideStore.prepare(for: t)
             guideNotesDraft = templateGuideStore.currentNotes(for: t)
         }
@@ -5397,6 +5489,241 @@ struct ContentView: View {
         }
         
         // Inline Template Editor Sheet
+        struct TemplateTagEditorSheet: View {
+            let template: TemplateItem
+            let onSave: ([String]) -> Void
+            let onCancel: () -> Void
+
+            @State private var inputText: String = ""
+            @State private var draftTags: [String]
+            @State private var errorMessage: String? = nil
+            @FocusState private var isFieldFocused: Bool
+
+            init(template: TemplateItem,
+                 existingTags: [String],
+                 onSave: @escaping ([String]) -> Void,
+                 onCancel: @escaping () -> Void) {
+                self.template = template
+                self.onSave = onSave
+                self.onCancel = onCancel
+                _draftTags = State(initialValue: existingTags)
+            }
+
+            private var tagFieldBinding: Binding<String> {
+                Binding(
+                    get: { inputText },
+                    set: { newValue in
+                        updateBuffer(newValue)
+                    }
+                )
+            }
+
+            var body: some View {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Add Tags")
+                            .font(.title3)
+                            .fontWeight(.semibold)
+                        Text("Separate tags with commas. We'll add the '#' prefix automatically.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    VStack(alignment: .leading, spacing: 12) {
+                        TextField("test-tag, another-tag", text: tagFieldBinding)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.system(size: 14))
+                            .focused($isFieldFocused)
+                            .onSubmit(commitCurrentEntry)
+                            .overlay(alignment: .trailing) {
+                                if !inputText.isEmpty {
+                                    Button(action: { inputText = "" }) {
+                                        Image(systemName: "xmark.circle.fill")
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .buttonStyle(.borderless)
+                                    .padding(.trailing, 8)
+                                }
+                            }
+                            .tint(Theme.pink)
+
+                        if let message = errorMessage {
+                            Text(message)
+                                .font(.caption)
+                                .foregroundStyle(Color.red)
+                        }
+
+                        if draftTags.isEmpty {
+                            Text("No tags yet. Type a name and hit comma or return to confirm the tag.")
+                                .font(.footnote)
+                                .foregroundStyle(.secondary)
+                                .padding(.vertical, 12)
+                                .frame(maxWidth: .infinity, alignment: .center)
+                                .background(Theme.pink.opacity(0.08))
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                        } else {
+                            ScrollView {
+                                LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], alignment: .leading, spacing: 8) {
+                                    ForEach(draftTags, id: \.self) { tag in
+                                        HStack(spacing: 6) {
+                                            Text("#\(tag)")
+                                                .font(.system(size: 13, weight: .semibold))
+                                                .foregroundStyle(Theme.pink)
+                                            Button {
+                                                removeTag(tag)
+                                            } label: {
+                                                Image(systemName: "xmark.circle.fill")
+                                                    .font(.system(size: 12, weight: .semibold))
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                            .buttonStyle(.plain)
+                                            .accessibilityLabel("Remove tag #\(tag)")
+                                        }
+                                        .padding(.horizontal, 12)
+                                        .padding(.vertical, 8)
+                                        .background(Theme.pink.opacity(0.15))
+                                        .clipShape(Capsule())
+                                        .overlay(
+                                            Capsule()
+                                                .stroke(Theme.pink.opacity(0.25), lineWidth: 1)
+                                        )
+                                    }
+                                }
+                                .padding(.vertical, 4)
+                            }
+                            .frame(minHeight: 80, maxHeight: 200)
+                        }
+                    }
+
+                    Spacer(minLength: 8)
+
+                    HStack {
+                        Button("Cancel") {
+                            onCancel()
+                        }
+                        .keyboardShortcut(.cancelAction)
+
+                        Spacer()
+
+                        Button("Save") {
+                            commitCurrentEntry()
+                            onSave(draftTags)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Theme.pink)
+                        .keyboardShortcut(.defaultAction)
+                    }
+                }
+                .padding(24)
+                .frame(minWidth: 480, minHeight: 320)
+                .onAppear {
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+                        isFieldFocused = true
+                    }
+                }
+            }
+
+            private func updateBuffer(_ newValue: String) {
+                guard newValue.contains(",") else {
+                    inputText = newValue
+                    return
+                }
+
+                var parts = newValue.components(separatedBy: ",")
+                let trailing = parts.removeLast()
+                for part in parts {
+                    addTag(part)
+                }
+                inputText = trailing
+            }
+
+            private func commitCurrentEntry() {
+                guard !inputText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+                addTag(inputText)
+                inputText = ""
+            }
+
+            private func addTag(_ raw: String) {
+                let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { return }
+                guard let normalized = TemplateTagsStore.sanitize(trimmed) else {
+                    errorMessage = "Tags must include letters or numbers."
+                    return
+                }
+                errorMessage = nil
+                if !draftTags.contains(normalized) {
+                    draftTags.append(normalized)
+                }
+            }
+
+            private func removeTag(_ tag: String) {
+                draftTags.removeAll { $0 == tag }
+            }
+        }
+
+        struct TemplateTagExplorerSheet: View {
+            let tag: String
+            let templates: [TemplateItem]
+            let onSelect: (TemplateItem) -> Void
+            let onClose: () -> Void
+
+            @ObservedObject private var tagsStore = TemplateTagsStore.shared
+
+            private var matchingTemplates: [TemplateItem] {
+                templates
+                    .filter { tagsStore.tags(for: $0).contains(tag) }
+                    .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+            }
+
+            var body: some View {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Templates tagged #\(tag)")
+                            .font(.title3)
+                            .fontWeight(.semibold)
+                        Text("\(matchingTemplates.count) template\(matchingTemplates.count == 1 ? "" : "s") found")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    if matchingTemplates.isEmpty {
+                        Text("No templates currently use this tag.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    } else {
+                        List(matchingTemplates) { template in
+                            Button {
+                                onSelect(template)
+                            } label: {
+                                HStack {
+                                    Text(template.name)
+                                        .font(.system(size: 14))
+                                    Spacer()
+                                    Image(systemName: "arrow.right.circle.fill")
+                                        .foregroundStyle(Theme.pink)
+                                }
+                                .padding(.vertical, 4)
+                            }
+                            .buttonStyle(.plain)
+                        }
+                        .frame(minHeight: 220, maxHeight: 260)
+                        .listStyle(.inset)
+                    }
+
+                    HStack {
+                        Spacer()
+                        Button("Close") {
+                            onClose()
+                        }
+                        .keyboardShortcut(.cancelAction)
+                    }
+                }
+                .padding(24)
+                .frame(minWidth: 420, minHeight: 320)
+            }
+        }
+
         struct TemplateInlineEditorSheet: View {
             let template: TemplateItem
             @Binding var text: String

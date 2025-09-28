@@ -84,6 +84,13 @@ final class TemplateIdentityStore {
             }
             seen.insert(model.templateId)
         }
+        if let data = try? Data(contentsOf: url.templateTagsSidecarURL()),
+           let model = try? decoder.decode(TemplateTags.self, from: data) {
+            if candidate == nil {
+                candidate = model.templateId
+            }
+            seen.insert(model.templateId)
+        }
 
         if seen.count > 1 {
             LOG("TemplateIdentityStore migrate mismatch", ctx: ["path": url.lastPathComponent])
