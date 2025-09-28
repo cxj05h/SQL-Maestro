@@ -328,14 +328,16 @@ There are a few helpful KB shortcuts that work in the main screen of the app.
 
 | KB Shortcut | Action                                                                                                                                                                                        |
 | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Cmd + K     | Clear Session (clears all values in all fields in that session)                                                                                                                               |
-| Cmd + Enter | Populates the values in Dynamic and Static Fields into the Query Template in focus                                                                                                            |
+| Cmd + Shift + K     | Clear Session (clears all values in all fields in that session)           																											  |
+| Ctl + Shift + B | Global shortcut for "Quick Capture"
+| Cmd + Enter | Populates the values in Dynamic and Static Fields into the Query Template in focus/ Saves Dynamic Field values into field "recents"                                                                                                           |
+| Cmd + Left-Click | Click on an image in the "Session & Template" pane--either Ses. Images or Guide Images, or click the hyperlink in Guide Notes or in Session Notes where the image resides in those notes to view the image in "preview" mode |
 | Cmd + F     | Jumps to "Search Queries" text field                                                                                                                                                          |
-| Cmd + E     | Toggle Ticket Session "Edit" or "Preview" mode                                                                                                                                                |
+| Cmd + E     | Toggle Ticket Session "Edit" or "Preview" mode  / Toggle locked panes                                                                                                                                              |
 | Cmd + 1     | Jump to Ticket Session 1                                                                                                                                                                      |
 | Cmd + 2     | Jump to Ticket Session 2                                                                                                                                                                      |
 | Cmd + 3     | Jump to Ticket Session 3                                                                                                                                                                      |
-| Cmd + R     | Reload Queries (used to manually reload the Query Templates if changes were made; however, this action is done automatically after saving a query template if done from the in-app editor) |
+| Cmd + R     | Reload Queries (used to manually reload the Query Templates if changes were made; however, this action is done automatically after saving a query template if done from the in-app editor)    |
 | Cmd + L     | Load Ticket Session                                                                                                                                                                           |
 | Cmd + S     | Save Ticket Session                                                                                                                                                                           |
 
@@ -372,6 +374,10 @@ Freeform notes that are specific to a ticket session.
 
 These notes are also saved in Ticket Sessions
 
+Drag an image or paste an image into this text field, and it will automatically be added to "Ses Images". This will create a hyperlink to the locally saved image location, so you can cmd+click the image link to open or preview the image. You can rename the image link name from the "Session & Template" pane > "Rename" and the hyperlink name will update as well. 
+
+Deleting the image from the "Session and Template" pane will remove it from the text editor.
+
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-12.58.20.png)
 
 ## **Troubleshooting Guide and Images**
@@ -379,6 +385,10 @@ These notes are also saved in Ticket Sessions
 Troubleshooting Guide notes act similarly to "Session Notes" with the difference being they are specific to a Query Template.
 
 "Guide Images" are images that are linked to a specific Query Template. 
+
+Drag an image or paste an image into this text field and it will automatically be added to "Guide Images". This will create a hyperlink to the locally saved image location, so you can cmd+click the image link to open or preview the image. You can rename the image link name from the "Session & Template" pane > "Rename" and the hyperlink name will update as well.  
+
+Deleting the image from the "Session and Template" pane will remove it from the text editor.
 
 ## Working with Embedded Images
 
