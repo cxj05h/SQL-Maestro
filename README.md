@@ -419,6 +419,8 @@ Deleting the image from the "Session and Template" pane will remove it from the 
 
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/Session-Images-Rename.png)
 
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/gif-for-images.gif)
+
 ## **Troubleshooting Guide and Images**
 
 Troubleshooting Guide notes act similarly to "Session Notes" with the difference being they are specific to a Query Template.
