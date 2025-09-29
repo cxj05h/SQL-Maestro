@@ -1200,6 +1200,7 @@ struct ContentView: View {
             DatabaseSettingsSheet(userConfig: userConfig)
         }
         .sheet(isPresented: $showGuideNotesPopout) {
+            let activeSession = sessions.current
             GuideAndNotesPopoutSheet(
                 fontSize: fontSize,
                 selectedTemplate: selectedTemplate,
@@ -1234,12 +1235,17 @@ struct ContentView: View {
                 onGuideLinkOpen: { url, modifiers in
                     openLink(url, modifiers: modifiers)
                 },
-                session: sessions.current,
+                session: activeSession,
                 sessionDraft: Binding(
-                    get: { sessionNotesDrafts[sessions.current] ?? "" },
-                    set: { sessionNotesDrafts[sessions.current] = $0 }
+                    get: { sessionNotesDrafts[activeSession] ?? "" },
+                    set: { newValue in
+                        setSessionNotesDraft(newValue,
+                                             for: activeSession,
+                                             source: "editor-popout-inline",
+                                             logChange: false)
+                    }
                 ),
-                sessionSavedValue: sessions.sessionNotes[sessions.current] ?? "",
+                sessionSavedValue: sessions.sessionNotes[activeSession] ?? "",
                 sessionController: sessionNotesEditor,
                 onSessionSave: saveSessionNotes,
                 onSessionRevert: revertSessionNotes,
@@ -1250,6 +1256,13 @@ struct ContentView: View {
                 onSessionLinkOpen: { url, modifiers in
                     openLink(url, modifiers: modifiers)
                 },
+                onSessionDraftChanged: { session, newValue in
+                    if sessionNotesDrafts[session] == newValue { return }
+                    setSessionNotesDraft(newValue,
+                                         for: session,
+                                         source: "editor-popout",
+                                         logChange: false)
+                },
                 onHide: {
                     showGuideNotesPopout = false
                 },
@@ -1257,6 +1270,7 @@ struct ContentView: View {
                     togglePreviewShortcut()
                 }
             )
+            .id(activeSession)
             .frame(minWidth: 1100, minHeight: 720)
         }
         .sheet(item: $tagEditorTemplate) { template in
@@ -1328,7 +1342,8 @@ struct ContentView: View {
                 draftDynamicValues[s] = [:]
                 sessionStaticFields[s] = ("", "", "", "")
                 UsedTemplatesStore.shared.clearSession(s)
-                sessionNotesDrafts[s] = sessions.sessionNotes[s] ?? ""
+                let initialNotes = sessions.sessionNotes[s] ?? ""
+                setSessionNotesDraft(initialNotes, for: s, source: "onAppear")
             }
             orgId = ""
             acctId = ""
@@ -1386,12 +1401,36 @@ struct ContentView: View {
             }
         }
         .onChange(of: sessions.current) { _, newSession in
-            sessionNotesDrafts[newSession] = sessions.sessionNotes[newSession] ?? ""
+            let saved = sessions.sessionNotes[newSession] ?? ""
+            if !isSessionNotesDirty(session: newSession) {
+                setSessionNotesDraft(saved, for: newSession, source: "onChange.current")
+            } else {
+                let draftValue = sessionNotesDrafts[newSession] ?? ""
+                let draftChars = draftValue.count
+                LOG("Session notes draft preserved", ctx: [
+                    "session": "\(newSession.rawValue)",
+                    "draftChars": "\(draftChars)",
+                    "savedChars": "\(saved.count)",
+                    "sample": String(draftValue.prefix(80).replacingOccurrences(of: "\n", with: "⏎")),
+                    "source": "onChange.current"
+                ])
+            }
         }
         .onReceive(sessions.$sessionNotes) { newValue in
             for session in TicketSession.allCases {
                 if !isSessionNotesDirty(session: session) {
-                    sessionNotesDrafts[session] = newValue[session] ?? ""
+                    setSessionNotesDraft(newValue[session] ?? "",
+                                         for: session,
+                                         source: "onReceive.sessionNotes")
+                } else {
+                    let draftValue = sessionNotesDrafts[session] ?? ""
+                    LOG("Session notes live draft ignored", ctx: [
+                        "session": "\(session.rawValue)",
+                        "draftChars": "\(draftValue.count)",
+                        "savedChars": "\((newValue[session] ?? "").count)",
+                        "sample": String(draftValue.prefix(80).replacingOccurrences(of: "\n", with: "⏎")),
+                        "source": "onReceive.sessionNotes"
+                    ])
                 }
             }
         }
@@ -1957,7 +1996,7 @@ struct ContentView: View {
             if var draft = sessionNotesDrafts[session] {
                 let updated = replaceLinkLabels(in: draft, fileURL: fileURL, newLabel: newLabel)
                 if updated != draft {
-                    sessionNotesDrafts[session] = updated
+                    setSessionNotesDraft(updated, for: session, source: "updateLinks")
                 }
             }
             let currentSaved = sessions.sessionNotes[session] ?? ""
@@ -1972,7 +2011,7 @@ struct ContentView: View {
                 if let draft = sessionNotesDrafts[session] {
                     let cleanedDraft = removingImageLinks(from: draft, fileURL: fileURL)
                     if cleanedDraft != draft {
-                        sessionNotesDrafts[session] = cleanedDraft
+                        setSessionNotesDraft(cleanedDraft, for: session, source: "removeLinks")
                     }
                 }
                 let currentSaved = sessions.sessionNotes[session] ?? ""
@@ -2102,6 +2141,15 @@ struct ContentView: View {
         // Commit any non-empty draft values for the CURRENT session to global history
         private func commitDraftsForCurrentSession() {
             let cur = sessions.current
+            let initialDraft = sessionNotesDrafts[cur] ?? ""
+            let savedValue = sessions.sessionNotes[cur] ?? ""
+            LOG("Commit drafts begin", ctx: [
+                "session": "\(cur.rawValue)",
+                "notesChars": "\(initialDraft.count)",
+                "savedChars": "\(savedValue.count)",
+                "notesDirty": initialDraft == savedValue ? "clean" : "dirty",
+                "sample": String(initialDraft.prefix(80).replacingOccurrences(of: "\n", with: "⏎"))
+            ])
             let bucket = draftDynamicValues[cur] ?? [:]
             for (ph, val) in bucket {
                 let trimmed = val.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -2109,8 +2157,56 @@ struct ContentView: View {
                 sessions.setValue(trimmed, for: ph)
                 LOG("Draft committed", ctx: ["session": "\(cur.rawValue)", "ph": ph, "value": trimmed])
             }
+
+            if let liveNotes = sessionNotesEditor.currentText() {
+                // Keep the in-memory draft in sync with what the editor currently shows.
+                if sessionNotesDrafts[cur] != liveNotes {
+                    setSessionNotesDraft(liveNotes, for: cur, source: "commitDrafts")
+                } else {
+                    LOG("Session notes draft unchanged", ctx: [
+                        "session": "\(cur.rawValue)",
+                        "chars": "\(liveNotes.count)",
+                        "source": "commitDrafts"
+                    ])
+                }
+            } else {
+                LOG("Session notes editor unavailable", ctx: [
+                    "session": "\(cur.rawValue)",
+                    "source": "commitDrafts"
+                ])
+            }
+
+            let finalDraft = sessionNotesDrafts[cur] ?? ""
+            LOG("Commit drafts end", ctx: [
+                "session": "\(cur.rawValue)",
+                "notesChars": "\(finalDraft.count)",
+                "savedChars": "\(savedValue.count)",
+                "notesDirty": finalDraft == savedValue ? "clean" : "dirty",
+                "sample": String(finalDraft.prefix(80).replacingOccurrences(of: "\n", with: "⏎"))
+            ])
         }
-        
+
+        private func setSessionNotesDraft(_ value: String,
+                                          for session: TicketSession,
+                                          source: String,
+                                          logChange: Bool = true) {
+            let previous = sessionNotesDrafts[session] ?? ""
+            sessionNotesDrafts[session] = value
+            guard logChange else { return }
+
+            let saved = sessions.sessionNotes[session] ?? ""
+            let sample = value.prefix(80).replacingOccurrences(of: "\n", with: "⏎")
+            LOG("Session notes draft updated", ctx: [
+                "session": "\(session.rawValue)",
+                "chars": "\(value.count)",
+                "delta": "\(value.count - previous.count)",
+                "savedChars": "\(saved.count)",
+                "dirty": value == saved ? "clean" : "dirty",
+                "sample": String(sample),
+                "source": source
+            ])
+        }
+
         private var filteredTemplates: [TemplateItem] {
             let baseList: [TemplateItem]
             let trimmedSearch = trimmedSearchText
@@ -4004,6 +4100,7 @@ struct ContentView: View {
                     }
                 }
 
+                let activeSession = sessions.current
                 if showNotesSidebar {
                     HSplitView {
                         leftPane
@@ -4011,12 +4108,24 @@ struct ContentView: View {
 
                         SessionNotesInline(
                             fontSize: fontSize,
-                            session: sessions.current,
+                            session: activeSession,
                             draft: Binding(
-                                get: { sessionNotesDrafts[sessions.current] ?? "" },
-                                set: { sessionNotesDrafts[sessions.current] = $0 }
+                                get: { sessionNotesDrafts[activeSession] ?? "" },
+                                set: { newValue in
+                                    let session = activeSession
+                                    if sessionNotesDrafts[session] == newValue { return }
+                                    LOG("Session notes binding set", ctx: [
+                                        "session": "\(session.rawValue)",
+                                        "chars": "\(newValue.count)",
+                                        "sample": String(newValue.prefix(80).replacingOccurrences(of: "\n", with: "⏎")),
+                                        "source": "editor-inline"
+                                    ])
+                                    setSessionNotesDraft(newValue,
+                                                        for: session,
+                                                        source: "editor-inline")
+                                }
                             ),
-                            savedValue: sessions.sessionNotes[sessions.current] ?? "",
+                            savedValue: sessions.sessionNotes[activeSession] ?? "",
                             controller: sessionNotesEditor,
                             isPreview: Binding(
                                 get: { isPreviewMode },
@@ -4032,6 +4141,7 @@ struct ContentView: View {
                                 handleSessionEditorImageAttachment(info)
                             }
                         )
+                        .id(activeSession)
                         .frame(minWidth: 300, idealWidth: 360)
                         .layoutPriority(1)
                     }
@@ -4434,7 +4544,7 @@ struct ContentView: View {
         private func revertSessionNotes() {
             let currentSession = sessions.current
             let saved = sessions.sessionNotes[currentSession] ?? ""
-            sessionNotesDrafts[currentSession] = saved
+            setSessionNotesDraft(saved, for: currentSession, source: "revertSessionNotes")
             LOG("Session notes reverted", ctx: ["session": "\(currentSession.rawValue)"])
         }
 
@@ -4577,14 +4687,32 @@ struct ContentView: View {
         // Function to handle session switching
         private func switchToSession(_ newSession: TicketSession) {
             guard newSession != sessions.current else { return }
-            commitDraftsForCurrentSession()
             let previousSession = sessions.current
+            let previousDraft = sessionNotesDrafts[previousSession] ?? ""
+            let previousSaved = sessions.sessionNotes[previousSession] ?? ""
+            LOG("Session switch requested", ctx: [
+                "from": "\(previousSession.rawValue)",
+                "to": "\(newSession.rawValue)",
+                "fromNotesChars": "\(previousDraft.count)",
+                "fromNotesDirty": previousDraft == previousSaved ? "clean" : "dirty",
+                "sample": String(previousDraft.prefix(80).replacingOccurrences(of: "\n", with: "⏎"))
+            ])
+            commitDraftsForCurrentSession()
 
             // Save current session's static fields
             sessionStaticFields[sessions.current] = (orgId, acctId, mysqlDb, companyLabel)
             
             // Switch to new session
             sessions.setCurrent(newSession)
+            let incomingDraft = sessionNotesDrafts[newSession] ?? ""
+            let incomingSaved = sessions.sessionNotes[newSession] ?? ""
+            LOG("Session switch applied", ctx: [
+                "from": "\(previousSession.rawValue)",
+                "to": "\(newSession.rawValue)",
+                "toNotesChars": "\(incomingDraft.count)",
+                "toNotesDirty": incomingDraft == incomingSaved ? "clean" : "dirty",
+                "sample": String(incomingDraft.prefix(80).replacingOccurrences(of: "\n", with: "⏎"))
+            ])
             
             // Load new session's static fields
             let staticData = sessionStaticFields[newSession] ?? ("", "", "", "")
@@ -5124,7 +5252,9 @@ struct ContentView: View {
 
             // Restore notes, alternates, images
             sessions.sessionNotes[sessions.current] = loaded.notes
-            sessionNotesDrafts[sessions.current] = loaded.notes
+            setSessionNotesDraft(loaded.notes,
+                                 for: sessions.current,
+                                 source: "loadTicketSession")
             sessions.sessionAlternateFields[sessions.current] =
                 loaded.alternateFields.map { AlternateField(name: $0.key, value: $0.value) }
             sessions.sessionImages[sessions.current] = loaded.sessionImages
@@ -5333,7 +5463,9 @@ struct ContentView: View {
             companyLabel = ""
             draftDynamicValues[sessions.current] = [:]
             sessionStaticFields[sessions.current] = ("", "", "", "")
-            sessionNotesDrafts[sessions.current] = ""
+            setSessionNotesDraft("",
+                                 for: sessions.current,
+                                 source: "clearSession")
             UsedTemplatesStore.shared.clearSession(sessions.current)
             sessionSavedSnapshots.removeValue(forKey: sessions.current)
             setPaneLockState(true, source: "clearSession")
@@ -5393,7 +5525,9 @@ struct ContentView: View {
                 return true
             } else {
                 sessions.sessionNotes[session] = previousSaved
-                sessionNotesDrafts[session] = draft
+                setSessionNotesDraft(draft,
+                                     for: session,
+                                     source: "handleSessionSaveOnly.rollback")
                 return false
             }
         }
@@ -7680,6 +7814,7 @@ struct ContentView: View {
         let onSessionLinkRequested: (_ selectedText: String, _ source: MarkdownEditor.LinkRequestSource, _ completion: @escaping (MarkdownEditor.LinkInsertion?) -> Void) -> Void
         let onSessionImageAttachment: (MarkdownEditor.ImageDropInfo) -> MarkdownEditor.ImageInsertion?
         let onSessionLinkOpen: (URL, NSEvent.ModifierFlags) -> Void
+        let onSessionDraftChanged: (TicketSession, String) -> Void
         let onHide: () -> Void
         let onTogglePreview: () -> Void
 
@@ -7717,7 +7852,13 @@ struct ContentView: View {
                     SessionNotesInline(
                         fontSize: fontSize,
                         session: session,
-                        draft: $sessionDraft,
+                        draft: Binding(
+                            get: { sessionDraft },
+                            set: { newValue in
+                                sessionDraft = newValue
+                                onSessionDraftChanged(session, newValue)
+                            }
+                        ),
                         savedValue: sessionSavedValue,
                         controller: sessionController,
                         isPreview: $isPreview,

@@ -15,6 +15,12 @@ final class MarkdownEditorController: ObservableObject {
     func inlineCode() { coordinator?.wrapSelection(prefix: "`", suffix: "`") }
     func codeBlock() { coordinator?.wrapSelection(prefix: "\n```\n", suffix: "\n```\n") }
     func link() { coordinator?.requestLinkInsertion(source: .toolbar) }
+
+    /// Returns the editor's current plain-text contents if the view is active.
+    /// Falls back to the last bound value when the editor is not mounted (e.g. preview mode).
+    func currentText() -> String? {
+        coordinator?.currentText()
+    }
 }
 
 struct MarkdownEditor: NSViewRepresentable {
@@ -148,6 +154,11 @@ struct MarkdownEditor: NSViewRepresentable {
 
         func focusTextView() {
             textView?.window?.makeFirstResponder(textView)
+        }
+
+        func currentText() -> String {
+            guard let textView else { return parent.text }
+            return sanitizeMarkdown(textView.string)
         }
 
         func applyExternalTextChange(_ newValue: String) {
