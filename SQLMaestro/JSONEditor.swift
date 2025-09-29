@@ -2,10 +2,35 @@ import SwiftUI
 import AppKit
 import Foundation
 
+final class JSONEditorController: ObservableObject {
+    fileprivate weak var coordinator: JSONEditor.Coordinator?
+
+    func focus() {
+        coordinator?.focus()
+    }
+
+    func focusAndSelectAll() {
+        coordinator?.focus()
+        coordinator?.selectAll()
+    }
+
+    @discardableResult
+    func find(_ query: String, direction: JSONEditor.SearchDirection, wrap: Bool = true) -> Bool {
+        coordinator?.find(query, direction: direction, wrap: wrap) ?? false
+    }
+}
+
 struct JSONEditor: NSViewRepresentable {
+    enum SearchDirection {
+        case forward
+        case backward
+    }
+
     @Binding var text: String
     var fontSize: CGFloat
     var onFocusChanged: ((Bool) -> Void)?
+    var controller: JSONEditorController? = nil
+    var onFindCommand: (() -> Void)? = nil
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -32,6 +57,9 @@ struct JSONEditor: NSViewRepresentable {
         textView.onFocusChanged = { focused in
             context.coordinator.parent.onFocusChanged?(focused)
         }
+        textView.onFindCommand = {
+            context.coordinator.handleFindCommand()
+        }
 
         let scrollView = NSScrollView()
         scrollView.drawsBackground = false
@@ -40,6 +68,7 @@ struct JSONEditor: NSViewRepresentable {
         scrollView.documentView = textView
 
         context.coordinator.textView = textView
+        context.coordinator.attach(controller: controller)
         textView.string = text
         context.coordinator.applyHighlight()
 
@@ -48,6 +77,7 @@ struct JSONEditor: NSViewRepresentable {
 
     func updateNSView(_ nsView: NSScrollView, context: Context) {
         guard let textView = context.coordinator.textView else { return }
+        context.coordinator.attach(controller: controller)
         if textView.string != text {
             context.coordinator.suppressTextDidChange = true
             textView.string = text
@@ -62,6 +92,9 @@ struct JSONEditor: NSViewRepresentable {
         textView.onFocusChanged = { focused in
             context.coordinator.parent.onFocusChanged?(focused)
         }
+        textView.onFindCommand = {
+            context.coordinator.handleFindCommand()
+        }
     }
 
     final class Coordinator: NSObject, NSTextViewDelegate {
@@ -69,9 +102,15 @@ struct JSONEditor: NSViewRepresentable {
         fileprivate weak var textView: JSONTextView?
         var suppressTextDidChange = false
         private let highlighter = JSONSyntaxHighlighter()
+        private weak var controller: JSONEditorController?
 
         init(parent: JSONEditor) {
             self.parent = parent
+        }
+
+        func attach(controller: JSONEditorController?) {
+            self.controller = controller
+            controller?.coordinator = self
         }
 
         func textDidChange(_ notification: Notification) {
@@ -92,11 +131,89 @@ struct JSONEditor: NSViewRepresentable {
             guard let textView else { return }
             highlighter.highlight(textView: textView)
         }
+
+        func focus() {
+            guard let textView else { return }
+            textView.window?.makeFirstResponder(textView)
+        }
+
+        func selectAll() {
+            guard let textView else { return }
+            textView.selectAll(nil)
+        }
+
+        func handleFindCommand() {
+            if let onFind = parent.onFindCommand {
+                onFind()
+            } else {
+                textView?.performFindPanelAction(nil)
+            }
+        }
+
+        @discardableResult
+        func find(_ query: String, direction: JSONEditor.SearchDirection, wrap: Bool) -> Bool {
+            guard let textView, !query.isEmpty else { return false }
+            let nsText = textView.string as NSString
+            guard nsText.length > 0 else { return false }
+
+            let selectedRange = textView.selectedRange()
+            let selectionEnd = selectedRange.location + selectedRange.length
+            var options: NSString.CompareOptions = [.caseInsensitive]
+            if direction == .backward {
+                options.insert(.backwards)
+            }
+
+            func apply(range: NSRange) -> Bool {
+                guard range.location != NSNotFound else { return false }
+                textView.setSelectedRange(range)
+                textView.scrollRangeToVisible(range)
+                if textView.responds(to: #selector(NSTextView.showFindIndicator(for:))) {
+                    textView.showFindIndicator(for: range)
+                }
+                return true
+            }
+
+            let length = nsText.length
+            switch direction {
+            case .forward:
+                let start = selectionEnd
+                if start < length {
+                    let range = nsText.range(of: query,
+                                             options: options,
+                                             range: NSRange(location: start, length: length - start))
+                    if apply(range: range) { return true }
+                }
+                if wrap, start > 0 {
+                    let range = nsText.range(of: query,
+                                             options: options,
+                                             range: NSRange(location: 0, length: start))
+                    if apply(range: range) { return true }
+                }
+            case .backward:
+                let end = selectedRange.location
+                if end > 0 {
+                    let range = nsText.range(of: query,
+                                             options: options,
+                                             range: NSRange(location: 0, length: end))
+                    if apply(range: range) { return true }
+                }
+                if wrap, selectionEnd < length {
+                    let range = nsText.range(of: query,
+                                             options: options,
+                                             range: NSRange(location: selectionEnd,
+                                                            length: length - selectionEnd))
+                    if apply(range: range) { return true }
+                }
+            }
+            NSSound.beep()
+            return false
+        }
     }
 }
 
 private final class JSONTextView: NSTextView {
     var onFocusChanged: ((Bool) -> Void)?
+    var onFindCommand: (() -> Void)?
 
     override func becomeFirstResponder() -> Bool {
         let result = super.becomeFirstResponder()
@@ -114,7 +231,7 @@ private final class JSONTextView: NSTextView {
         if event.type == .keyDown,
            event.modifierFlags.contains(.command),
            event.charactersIgnoringModifiers?.lowercased() == "f" {
-            self.performFindPanelAction(self)
+            onFindCommand?()
             return true
         }
         return super.performKeyEquivalent(with: event)

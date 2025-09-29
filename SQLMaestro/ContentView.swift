@@ -110,6 +110,12 @@ enum SessionNotesPaneMode: Hashable {
     case savedFiles
 }
 
+enum BottomPaneContent: Hashable {
+    case guideNotes
+    case sessionNotes
+    case savedFiles
+}
+
 enum JSONValidationState: Equatable {
     case valid
     case invalid(String)
@@ -1039,12 +1045,15 @@ struct ContentView: View {
     @State private var hoverRecentKey: String? = nil
     @State private var previewingSessionImage: SessionImage? = nil
     @State private var previewingGuideImage: TemplateGuideImage? = nil
-    @State private var showTroubleshootingGuide: Bool = false
+    @State private var activeBottomPane: BottomPaneContent = .sessionNotes
     @State private var showGuideNotesPopout: Bool = false
     @State private var guideNotesDraft: String = ""
     @State private var hoveredTemplateLinkID: UUID? = nil
     @State private var tagEditorTemplate: TemplateItem?
     @State private var tagExplorerContext: TagExplorerContext?
+    @State private var showSavedFilesPopout: Bool = false
+    @State private var savedFilesPopoutSession: TicketSession = .one
+    @State private var isSidebarVisible: Bool = false
     struct TagExplorerContext: Identifiable {
         let tag: String
         var id: String { tag }
@@ -1236,11 +1245,47 @@ struct ContentView: View {
                 .hidden()
                 .registerShortcut(name: "Search Queries", keyLabel: "F", modifiers: [.command], scope: "Global")
                 .disabled(isSavedFileEditorFocused)
+
+                Button(action: {
+                    setActivePane(.guideNotes)
+                }) {
+                    EmptyView()
+                }
+                .keyboardShortcut("1", modifiers: [.command])
+                .hidden()
+                .disabled(selectedTemplate == nil)
+
+                Button(action: {
+                    setActivePane(.sessionNotes)
+                }) {
+                    EmptyView()
+                }
+                .keyboardShortcut("2", modifiers: [.command])
+                .hidden()
+
+                Button(action: {
+                    setActivePane(.savedFiles)
+                }) {
+                    EmptyView()
+                }
+                .keyboardShortcut("3", modifiers: [.command])
+                .hidden()
+
+                Button(action: {
+                    toggleSidebar()
+                }) {
+                    EmptyView()
+                }
+                .keyboardShortcut("t", modifiers: [.command])
+                .hidden()
             }
             .padding()
             .background(Theme.grayBG)
         }
         .frame(minWidth: 980, minHeight: 640)
+        .overlay(alignment: .trailing) {
+            commandSidebar
+        }
         .overlay(alignment: .top) {
             VStack(spacing: 8) {
                 if toastCopied {
@@ -1403,6 +1448,7 @@ struct ContentView: View {
                     isSavedFileEditorFocused = focused
                 },
                 onSavedFileOpenTree: { presentTreeView(for: $0, session: activeSession) },
+                onSavedFilesModeExit: { commitSavedFileDrafts(for: activeSession) },
                 onSessionSave: { saveSessionNotes() },
                 onSessionRevert: revertSessionNotes,
                 onSessionLinkRequested: handleSessionNotesLink(selectedText:source:completion:),
@@ -1428,6 +1474,74 @@ struct ContentView: View {
             )
             .id(activeSession)
             .frame(minWidth: 1100, minHeight: 720)
+        }
+        .sheet(isPresented: $showSavedFilesPopout) {
+            let session = savedFilesPopoutSession
+            SavedFilesPopoutSheet(
+                fontSize: fontSize,
+                session: session,
+                sessionDraft: Binding(
+                    get: { sessionNotesDrafts[session] ?? "" },
+                    set: { newValue in
+                        setSessionNotesDraft(newValue,
+                                             for: session,
+                                             source: "savedFile-popout",
+                                             logChange: false)
+                    }
+                ),
+                sessionSavedValue: sessions.sessionNotes[session] ?? "",
+                sessionController: sessionNotesEditor,
+                sessionNotesMode: Binding(
+                    get: { sessionNotesMode[session] ?? .savedFiles },
+                    set: { sessionNotesMode[session] = $0 }
+                ),
+                isPreview: Binding(
+                    get: { isPreviewMode },
+                    set: { setPreviewMode($0) }
+                ),
+                savedFiles: savedFiles(for: session),
+                selectedSavedFileID: currentSavedFileSelection(for: session),
+                savedFileDraftProvider: { savedFileDraft(for: session, fileId: $0) },
+                savedFileValidationProvider: { validationState(for: session, fileId: $0) },
+                onSavedFileSelect: { setSavedFileSelection($0, for: session) },
+                onSavedFileAdd: { addSavedFile(for: session) },
+                onSavedFileDelete: { removeSavedFile($0, in: session) },
+                onSavedFileRename: { renameSavedFile($0, in: session) },
+                onSavedFileContentChange: { fileId, newValue in
+                    setSavedFileDraft(newValue,
+                                      for: fileId,
+                                      session: session,
+                                      source: "savedFile.popout")
+                },
+                onSavedFileFocusChange: { focused in
+                    isSavedFileEditorFocused = focused
+                },
+                onSavedFileOpenTree: { presentTreeView(for: $0, session: session) },
+                onSavedFileModeExit: { commitSavedFileDrafts(for: session) },
+                onSessionSave: { saveSessionNotes() },
+                onSessionRevert: revertSessionNotes,
+                onSessionLinkRequested: handleSessionNotesLink(selectedText:source:completion:),
+                onSessionImageAttachment: { info in
+                    handleSessionEditorImageAttachment(info)
+                },
+                onSessionLinkOpen: { url, modifiers in
+                    openLink(url, modifiers: modifiers)
+                },
+                onSessionDraftChanged: { _, newValue in
+                    setSessionNotesDraft(newValue,
+                                         for: session,
+                                         source: "savedFile-popout",
+                                         logChange: false)
+                },
+                onTogglePreview: {
+                    togglePreviewShortcut()
+                },
+                onClose: {
+                    commitSavedFileDrafts(for: session)
+                    showSavedFilesPopout = false
+                }
+            )
+            .id(session)
         }
         .sheet(item: $tagEditorTemplate) { template in
             TemplateTagEditorSheet(
@@ -1572,7 +1686,8 @@ struct ContentView: View {
                 LOG("Scroll monitor removed")
             }
         }
-        .onChange(of: sessions.current) { _, newSession in
+        .onChange(of: sessions.current) { oldSession, newSession in
+            commitSavedFileDrafts(for: oldSession)
             let saved = sessions.sessionNotes[newSession] ?? ""
             if !isSessionNotesDirty(session: newSession) {
                 setSessionNotesDraft(saved, for: newSession, source: "onChange.current")
@@ -1583,7 +1698,7 @@ struct ContentView: View {
                     "session": "\(newSession.rawValue)",
                     "draftChars": "\(draftChars)",
                     "savedChars": "\(saved.count)",
-                    "sample": String(draftValue.prefix(80).replacingOccurrences(of: "\n", with: "⏎")),
+                    "sample": String(draftValue.prefix(80)).replacingOccurrences(of: "\n", with: "⏎"),
                     "source": "onChange.current"
                 ])
             }
@@ -1600,7 +1715,7 @@ struct ContentView: View {
                         "session": "\(session.rawValue)",
                         "draftChars": "\(draftValue.count)",
                         "savedChars": "\((newValue[session] ?? "").count)",
-                        "sample": String(draftValue.prefix(80).replacingOccurrences(of: "\n", with: "⏎")),
+                        "sample": String(draftValue.prefix(80)).replacingOccurrences(of: "\n", with: "⏎"),
                         "source": "onReceive.sessionNotes"
                     ])
                 }
@@ -2324,7 +2439,7 @@ struct ContentView: View {
                 "notesChars": "\(initialDraft.count)",
                 "savedChars": "\(savedValue.count)",
                 "notesDirty": initialDraft == savedValue ? "clean" : "dirty",
-                "sample": String(initialDraft.prefix(80).replacingOccurrences(of: "\n", with: "⏎"))
+                "sample": String(initialDraft.prefix(80)).replacingOccurrences(of: "\n", with: "⏎")
             ])
             let bucket = draftDynamicValues[cur] ?? [:]
             for (ph, val) in bucket {
@@ -2358,7 +2473,7 @@ struct ContentView: View {
                 "notesChars": "\(finalDraft.count)",
                 "savedChars": "\(savedValue.count)",
                 "notesDirty": finalDraft == savedValue ? "clean" : "dirty",
-                "sample": String(finalDraft.prefix(80).replacingOccurrences(of: "\n", with: "⏎"))
+                "sample": String(finalDraft.prefix(80)).replacingOccurrences(of: "\n", with: "⏎")
             ])
 
             saveSessionNotes(for: cur, reason: "commitDrafts")
@@ -2379,7 +2494,7 @@ struct ContentView: View {
             guard logChange else { return }
 
             let saved = sessions.sessionNotes[session] ?? ""
-            let sample = value.prefix(80).replacingOccurrences(of: "\n", with: "⏎")
+            let sample = String(value.prefix(80)).replacingOccurrences(of: "\n", with: "⏎")
             LOG("Session notes draft updated", ctx: [
                 "session": "\(session.rawValue)",
                 "chars": "\(value.count)",
@@ -2470,6 +2585,11 @@ struct ContentView: View {
         }
 
         private func setSavedFileSelection(_ id: UUID?, for session: TicketSession) {
+            let previous = currentSavedFileSelection(for: session)
+            if let previous, previous != id {
+                savedFileAutosave.flush(session: session, fileId: previous)
+                saveSavedFile(for: session, fileId: previous, reason: "selection-change")
+            }
             selectedSavedFile[session] = id
         }
 
@@ -4410,233 +4530,603 @@ struct ContentView: View {
         }
         
         // MARK: — Output area
+        private var isGuidePaneActive: Bool { activeBottomPane == .guideNotes }
+        private var isSessionNotesPaneActive: Bool { activeBottomPane == .sessionNotes }
+        private var isSavedFilesPaneActive: Bool { activeBottomPane == .savedFiles }
+
+        private func setActivePane(_ pane: BottomPaneContent) {
+            guard activeBottomPane != pane else { return }
+            if activeBottomPane == .savedFiles && pane != .savedFiles {
+                commitSavedFileDrafts(for: sessions.current)
+            }
+            switch pane {
+            case .guideNotes:
+                guard let template = selectedTemplate else { return }
+                templateGuideStore.prepare(for: template)
+                guideNotesDraft = templateGuideStore.currentNotes(for: template)
+                setPreviewMode(true)
+                sessionNotesMode[sessions.current] = .notes
+            case .sessionNotes:
+                setPreviewMode(true)
+                sessionNotesMode[sessions.current] = .notes
+            case .savedFiles:
+                sessionNotesMode[sessions.current] = .savedFiles
+                break
+            }
+            activeBottomPane = pane
+        }
+
+
         private var outputView: some View {
             let guideDirty = templateGuideStore.isNotesDirty(for: selectedTemplate)
-            return VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .center, spacing: 12) {
-                    if showTroubleshootingGuide {
-                        MarkdownToolbar(iconSize: fontSize + 2, isEnabled: !isPreviewMode, controller: guideNotesEditor)
-                        PreviewModeToggle(isPreview: Binding(
-                            get: { isPreviewMode },
-                            set: { setPreviewMode($0) }
-                        ))
-                    } else {
-                        Text("Output SQL")
-                            .font(.system(size: fontSize + 4, weight: .semibold))
-                            .foregroundStyle(Theme.aqua)
-                    }
+            let activeSession = sessions.current
 
-                    Button(showGuideNotesPopout ? "Hide Popout" : "Pop Out Editors") {
-                        if showGuideNotesPopout {
-                            showGuideNotesPopout = false
-                        } else {
-                            if let template = selectedTemplate {
-                                templateGuideStore.prepare(for: template)
-                                guideNotesDraft = templateGuideStore.currentNotes(for: template)
-                            }
-                            showGuideNotesPopout = true
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(Theme.accent)
-                    .font(.system(size: fontSize - 1))
-                    .help("Open the troubleshooting guide and session notes in a larger window")
+            return VSplitView {
+                outputSQLSection
+                bottomPaneContainer(guideDirty: guideDirty, activeSession: activeSession)
+            }
+            .frame(minHeight: 360)
+        }
 
-                    if showTroubleshootingGuide, guideDirty {
-                        HStack(spacing: 8) {
-                            Button("Save Guide") {
-                                guard let template = selectedTemplate else { return }
-                                if templateGuideStore.saveNotes(for: template) {
-                                    guideNotesDraft = templateGuideStore.currentNotes(for: template)
-                                    touchTemplateActivity(for: template)
-                                }
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(Theme.purple)
-                            .font(.system(size: fontSize - 1))
-
-                            Button("Revert") {
-                                guard let template = selectedTemplate else { return }
-                                guideNotesDraft = templateGuideStore.revertNotes(for: template)
-                            }
-                            .buttonStyle(.bordered)
-                            .tint(Theme.pink)
-                            .font(.system(size: fontSize - 1))
-                        }
-                    }
-
-                    Spacer(minLength: 12)
-
+        private var outputSQLSection: some View {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 12) {
+                    Text("Output SQL")
+                        .font(.system(size: fontSize + 4, weight: .semibold))
+                        .foregroundStyle(Theme.aqua)
+                    Spacer(minLength: 16)
                     Button {
-                        withAnimation { showNotesSidebar.toggle() }
+                        copyBlockValuesToClipboard()
                     } label: {
-                        Label(showNotesSidebar ? "Hide Notes" : "Show Notes", systemImage: "note.text")
+                        Label("Copy Block Values", systemImage: "doc.on.clipboard")
                     }
                     .buttonStyle(.bordered)
-                    .tint(Theme.purple)
+                    .tint(Theme.aqua)
                     .font(.system(size: fontSize - 1))
-                    .help("Toggle Session Notes sidebar")
+                    Button {
+                        copyIndividualValuesToClipboard()
+                    } label: {
+                        Label("Copy All Individual", systemImage: "list.clipboard")
+                    }
+                    .buttonStyle(.bordered)
+                    .tint(Theme.aqua)
+                    .font(.system(size: fontSize - 1))
                 }
 
-                let leftPane = Group {
-                    if showTroubleshootingGuide {
-                        if let template = selectedTemplate {
-                            VStack(spacing: 10) {
-                                Group {
-                                    if isPreviewMode {
-                                        MarkdownPreviewView(
-                                            text: guideNotesDraft,
-                                            fontSize: fontSize * 1.5,
-                                            onLinkOpen: { url, modifiers in
-                                                openLink(url, modifiers: modifiers)
-                                            }
-                                        )
-                                    } else {
-                                        MarkdownEditor(
-                                            text: $guideNotesDraft,
-                                            fontSize: fontSize * 1.5,
-                                            controller: guideNotesEditor,
-                                            onLinkRequested: handleTroubleshootingLink(selectedText:source:completion:),
-                                            onImageAttachment: { info in
-                                                handleGuideEditorImageAttachment(info)
-                                            }
-                                        )
-                                    }
-                                }
-                                .frame(minHeight: 200)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .fill(Theme.grayBG.opacity(0.25))
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 8)
-                                                .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
-                                        )
-                                )
-                                .onChange(of: guideNotesDraft) { _, newVal in
-                                    syncGuideImageNames(with: newVal, for: template)
-                                    if templateGuideStore.setNotes(newVal, for: template) {
-                                        touchTemplateActivity(for: template)
-                                    }
-                                }
+                TextEditor(text: $populatedSQL)
+                    .font(.system(size: fontSize, weight: .regular, design: .monospaced))
+                    .frame(minHeight: 180)
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.aqua.opacity(0.3)))
+                    .disableAutocorrection(true)
+                    .autocorrectionDisabled(true)
+                    .onReceive(NotificationCenter.default.publisher(for: NSText.didBeginEditingNotification)) { _ in
+                        if let textView = NSApp.keyWindow?.firstResponder as? NSTextView {
+                            textView.isAutomaticQuoteSubstitutionEnabled = false
+                            textView.isAutomaticDashSubstitutionEnabled = false
+                            textView.isAutomaticTextReplacementEnabled = false
+                        }
+                    }
+            }
+            .padding(16)
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Theme.grayBG.opacity(0.22))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(Theme.purple.opacity(0.18), lineWidth: 1)
+                    )
+            )
+            .padding(.bottom, 4)
+        }
 
-                                EditorSectionBadge(title: "Troubleshooting Guide")
-                                    .padding(.top, 4)
-                            }
-                        } else {
-                            VStack(spacing: 10) {
-                                VStack {
-                                    Text("Select a template to view its troubleshooting guide")
-                                        .font(.system(size: fontSize - 1))
-                                        .foregroundStyle(.secondary)
-                                    Spacer()
-                                }
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .fill(Theme.grayBG.opacity(0.25))
-                                        .overlay(
-                                            RoundedRectangle(cornerRadius: 8)
-                                                .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
-                                        )
-                                )
-                                .frame(minHeight: 160)
+        private func bottomPaneContainer(guideDirty: Bool, activeSession: TicketSession) -> some View {
+            VStack(spacing: 0) {
+                bottomPaneHeader(guideDirty: guideDirty, activeSession: activeSession)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 12)
+                    .background(
+                        RoundedRectangle(cornerRadius: 14)
+                            .fill(Theme.grayBG.opacity(0.3))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 14)
+                                    .stroke(Theme.purple.opacity(0.18), lineWidth: 1)
+                            )
+                    )
+                    .padding(.bottom, 2)
 
-                                EditorSectionBadge(title: "Troubleshooting Guide")
-                                    .padding(.top, 4)
+                bottomPaneContent(activeSession: activeSession)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 16)
+            }
+        }
+
+        private func bottomPaneHeader(guideDirty: Bool, activeSession: TicketSession) -> some View {
+            HStack(alignment: .center, spacing: 12) {
+                paneSwitcher
+                Spacer(minLength: 12)
+                switch activeBottomPane {
+                case .guideNotes:
+                    MarkdownToolbar(iconSize: fontSize + 2, isEnabled: !isPreviewMode, controller: guideNotesEditor)
+                    PreviewModeToggle(isPreview: Binding(
+                        get: { isPreviewMode },
+                        set: { setPreviewMode($0) }
+                    ))
+                    if guideDirty {
+                        Button("Save Guide") {
+                            guard let template = selectedTemplate else { return }
+                            if templateGuideStore.saveNotes(for: template) {
+                                guideNotesDraft = templateGuideStore.currentNotes(for: template)
+                                touchTemplateActivity(for: template)
                             }
                         }
-                    } else {
-                        TextEditor(text: $populatedSQL)
-                            .font(.system(size: fontSize, weight: .regular, design: .monospaced))
-                            .frame(minHeight: 160)
-                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.aqua.opacity(0.3)))
-                            .disableAutocorrection(true)
-                            .autocorrectionDisabled(true)
-                            .onReceive(NotificationCenter.default.publisher(for: NSText.didBeginEditingNotification)) { _ in
-                                if let textView = NSApp.keyWindow?.firstResponder as? NSTextView {
-                                    textView.isAutomaticQuoteSubstitutionEnabled = false
-                                    textView.isAutomaticDashSubstitutionEnabled = false
-                                    textView.isAutomaticTextReplacementEnabled = false
-                                }
-                            }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Theme.purple)
+                        .font(.system(size: fontSize - 1))
+
+                        Button("Revert") {
+                            guard let template = selectedTemplate else { return }
+                            guideNotesDraft = templateGuideStore.revertNotes(for: template)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(Theme.pink)
+                        .font(.system(size: fontSize - 1))
+                    }
+                case .sessionNotes:
+                    MarkdownToolbar(iconSize: fontSize + 2, isEnabled: !isPreviewMode, controller: sessionNotesEditor)
+                    PreviewModeToggle(isPreview: Binding(
+                        get: { isPreviewMode },
+                        set: { setPreviewMode($0) }
+                    ))
+                    if (sessionNotesDrafts[activeSession] ?? "") != (sessions.sessionNotes[activeSession] ?? "") {
+                        Button("Save Notes") {
+                            saveSessionNotes()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Theme.purple)
+                        .font(.system(size: fontSize - 1))
+
+                        Button("Revert") {
+                            revertSessionNotes()
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(Theme.pink)
+                        .font(.system(size: fontSize - 1))
+                    }
+                case .savedFiles:
+                    SessionNotesInline.SavedFilesWorkspace.Toolbar(
+                        fontSize: fontSize,
+                        files: savedFiles(for: activeSession),
+                        selectedID: currentSavedFileSelection(for: activeSession),
+                        onAdd: { addSavedFile(for: activeSession) },
+                        onSelect: { setSavedFileSelection($0, for: activeSession) },
+                        onOpenTree: { presentTreeView(for: $0, session: activeSession) },
+                        onRename: { renameSavedFile($0, in: activeSession) },
+                        onDelete: { removeSavedFile($0, in: activeSession) },
+                        onPopOut: { triggerPopOut(for: activeSession) }
+                    )
+                }
+
+                Spacer(minLength: 8)
+
+                Button("Pop Out") {
+                    triggerPopOut(for: activeSession)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.accent)
+                .font(.system(size: fontSize - 1))
+                .disabled(activeBottomPane == .guideNotes && selectedTemplate == nil)
+            }
+        }
+
+        private var paneSwitcher: some View {
+            HStack(spacing: 8) {
+                paneSwitchButton(title: "Guide Notes", systemImage: "text.book.closed", pane: .guideNotes, isEnabled: selectedTemplate != nil)
+                paneSwitchButton(title: "Session Notes", systemImage: "pencil.and.list.clipboard", pane: .sessionNotes)
+                paneSwitchButton(title: "Saved Files", systemImage: "doc.richtext", pane: .savedFiles)
+            }
+            .background(
+                Group {
+                    Color.clear
+                        .registerShortcut(name: "Show Guide Notes", keyLabel: "1", modifiers: [.command], scope: "Panes")
+                    Color.clear
+                        .registerShortcut(name: "Show Session Notes", keyLabel: "2", modifiers: [.command], scope: "Panes")
+                    Color.clear
+                        .registerShortcut(name: "Show Saved Files", keyLabel: "3", modifiers: [.command], scope: "Panes")
+                }
+            )
+        }
+
+        private func paneSwitchButton(title: String, systemImage: String, pane: BottomPaneContent, isEnabled: Bool = true) -> some View {
+            let isActive = activeBottomPane == pane
+            return Button {
+                setActivePane(pane)
+            } label: {
+                Label(title, systemImage: systemImage)
+                    .labelStyle(.titleAndIcon)
+                    .font(.system(size: fontSize - 1, weight: isActive ? .semibold : .regular))
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(isActive ? Theme.purple : Theme.grayBG.opacity(0.3))
+                    .foregroundStyle(isActive ? Color.white : Theme.purple)
+                    .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+            .disabled(!isEnabled)
+            .opacity(isEnabled ? 1 : 0.45)
+        }
+
+        private var commandSidebar: some View {
+            ZStack(alignment: .trailing) {
+                if isSidebarVisible {
+                    Color.black.opacity(0.001)
+                        .ignoresSafeArea()
+                        .onTapGesture { toggleSidebar(false) }
+                        .transition(.opacity)
+                }
+
+                commandSidebarContent
+                    .offset(x: isSidebarVisible ? 0 : 280)
+                    .shadow(color: Color.black.opacity(0.18), radius: 18, x: -6, y: 0)
+            }
+            .animation(.easeInOut(duration: 0.26), value: isSidebarVisible)
+            .allowsHitTesting(isSidebarVisible)
+        }
+
+        private var commandSidebarContent: some View {
+            VStack(alignment: .leading, spacing: 18) {
+                HStack(alignment: .center) {
+                    Label("Quick Controls", systemImage: "slider.horizontal.3")
+                        .labelStyle(.titleAndIcon)
+                        .font(.system(size: fontSize + 2, weight: .semibold))
+                        .foregroundStyle(Theme.aqua)
+                    Spacer()
+                    Button(action: { toggleSidebar(false) }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: fontSize + 2, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Sessions")
+                        .font(.system(size: fontSize - 2, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    ForEach(TicketSession.allCases, id: \.self) { session in
+                        sidebarSessionButton(session)
                     }
                 }
 
-                let activeSession = sessions.current
-                if showNotesSidebar {
-                    HSplitView {
-                        leftPane
-                            .frame(minWidth: 900, idealWidth: 1100)
+                Divider()
 
-                        SessionNotesInline(
-                            fontSize: fontSize,
-                            session: activeSession,
-                            draft: Binding(
-                                get: { sessionNotesDrafts[activeSession] ?? "" },
-                                set: { newValue in
-                                    let session = activeSession
-                                    if sessionNotesDrafts[session] == newValue { return }
-                                    LOG("Session notes binding set", ctx: [
-                                        "session": "\(session.rawValue)",
-                                        "chars": "\(newValue.count)",
-                                        "sample": String(newValue.prefix(80).replacingOccurrences(of: "\n", with: "⏎")),
-                                        "source": "editor-inline"
-                                    ])
-                                    setSessionNotesDraft(newValue,
-                                                        for: session,
-                                                        source: "editor-inline")
-                                }
-                            ),
-                            savedValue: sessions.sessionNotes[activeSession] ?? "",
-                            controller: sessionNotesEditor,
-                            isPreview: Binding(
-                                get: { isPreviewMode },
-                                set: { setPreviewMode($0) }
-                            ),
-                            mode: Binding(
-                                get: { sessionNotesMode[activeSession] ?? .notes },
-                                set: { sessionNotesMode[activeSession] = $0 }
-                            ),
-                            savedFiles: savedFiles(for: activeSession),
-                            selectedSavedFileID: currentSavedFileSelection(for: activeSession),
-                            savedFileDraft: { savedFileDraft(for: activeSession, fileId: $0) },
-                            savedFileValidation: { validationState(for: activeSession, fileId: $0) },
-                            onSavedFileSelect: { setSavedFileSelection($0, for: activeSession) },
-                            onSavedFileAdd: { addSavedFile(for: activeSession) },
-                            onSavedFileDelete: { removeSavedFile($0, in: activeSession) },
-                            onSavedFileRename: { renameSavedFile($0, in: activeSession) },
-                            onSavedFileContentChange: { fileId, newValue in
-                                setSavedFileDraft(newValue,
-                                                 for: fileId,
-                                                 session: activeSession,
-                                                 source: "savedFile.inline")
-                            },
-                            onSavedFileFocusChanged: { focused in
-                                isSavedFileEditorFocused = focused
-                            },
-                            onSavedFileOpenTree: { presentTreeView(for: $0, session: activeSession) },
-                            onSave: { saveSessionNotes() },
-                            onRevert: revertSessionNotes,
-                            onLinkRequested: handleSessionNotesLink(selectedText:source:completion:),
-                            onLinkOpen: { url, modifiers in
-                                openLink(url, modifiers: modifiers)
-                            },
-                            onImageAttachment: { info in
-                                handleSessionEditorImageAttachment(info)
-                            }
-                        )
-                        .id(activeSession)
-                        .frame(minWidth: 300, idealWidth: 360)
-                        .layoutPriority(1)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Panes")
+                        .font(.system(size: fontSize - 2, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    ForEach([BottomPaneContent.guideNotes, .sessionNotes, .savedFiles], id: \.self) { pane in
+                        sidebarPaneButton(pane)
                     }
-                    .frame(minHeight: 160)
+                }
+
+                Divider()
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Clipboard")
+                        .font(.system(size: fontSize - 2, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Button(action: copyBlockValuesToClipboard) {
+                        Label("Copy Block Values", systemImage: "doc.on.clipboard")
+                            .labelStyle(.titleAndIcon)
+                            .font(.system(size: fontSize - 1, weight: .medium))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 10)
+                    .background(Theme.grayBG.opacity(0.25), in: RoundedRectangle(cornerRadius: 10))
+
+                    Button(action: copyIndividualValuesToClipboard) {
+                        Label("Copy All Individual", systemImage: "list.clipboard")
+                            .labelStyle(.titleAndIcon)
+                            .font(.system(size: fontSize - 1, weight: .medium))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 10)
+                    .background(Theme.grayBG.opacity(0.25), in: RoundedRectangle(cornerRadius: 10))
+                }
+
+                Spacer(minLength: 12)
+            }
+            .padding(.vertical, 24)
+            .padding(.horizontal, 18)
+            .frame(width: 260)
+            .background(
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(.ultraThinMaterial)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 20)
+                            .stroke(Theme.purple.opacity(0.15), lineWidth: 1)
+                    )
+            )
+            .padding(.trailing, 12)
+            .padding(.top, 48)
+            .background(
+                Color.clear
+                    .registerShortcut(name: "Toggle Sidebar", keyLabel: "T", modifiers: [.command], scope: "Layout")
+            )
+        }
+
+        private func toggleSidebar(_ desiredState: Bool? = nil) {
+            withAnimation(.easeInOut(duration: 0.26)) {
+                if let desiredState {
+                    isSidebarVisible = desiredState
                 } else {
-                    leftPane
+                    isSidebarVisible.toggle()
                 }
             }
-
         }
-        
+
+        private func sidebarSessionButton(_ session: TicketSession) -> some View {
+            let isActive = sessions.current == session
+            return Button(action: { switchToSession(session) }) {
+                HStack {
+                    Text(sessions.sessionNames[session] ?? "Session #\(session.rawValue)")
+                        .font(.system(size: fontSize - 1, weight: isActive ? .semibold : .regular))
+                    Spacer()
+                    Text("⌃\(session.rawValue)")
+                        .font(.system(size: fontSize - 4, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 6)
+                .padding(.horizontal, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(isActive ? Theme.purple.opacity(0.18) : Theme.grayBG.opacity(0.18))
+                )
+            }
+            .buttonStyle(.plain)
+        }
+
+        private func sidebarPaneButton(_ pane: BottomPaneContent) -> some View {
+            let info = paneInfo(for: pane)
+            let isActive = activeBottomPane == pane
+            let isEnabled = pane != .guideNotes || selectedTemplate != nil
+            return Button(action: { setActivePane(pane) }) {
+                HStack {
+                    Label(info.title, systemImage: info.systemImage)
+                        .labelStyle(.titleAndIcon)
+                        .font(.system(size: fontSize - 1, weight: isActive ? .semibold : .regular))
+                    Spacer()
+                    Text("⌘\(info.shortcut)")
+                        .font(.system(size: fontSize - 4, weight: .medium, design: .monospaced))
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.vertical, 6)
+                .padding(.horizontal, 12)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(isActive ? Theme.purple.opacity(0.18) : Theme.grayBG.opacity(0.18))
+                )
+            }
+            .buttonStyle(.plain)
+            .disabled(!isEnabled)
+            .opacity(isEnabled ? 1 : 0.45)
+        }
+
+        private func paneInfo(for pane: BottomPaneContent) -> (title: String, systemImage: String, shortcut: String) {
+            switch pane {
+            case .guideNotes:
+                return ("Guide Notes", "text.book.closed", "1")
+            case .sessionNotes:
+                return ("Session Notes", "pencil.and.list.clipboard", "2")
+            case .savedFiles:
+                return ("Saved Files", "doc.richtext", "3")
+            }
+        }
+
+        private func bottomPaneContent(activeSession: TicketSession) -> some View {
+            Group {
+                switch activeBottomPane {
+                case .guideNotes:
+                    guideNotesPane
+                case .sessionNotes:
+                    sessionNotesPane(for: activeSession)
+                case .savedFiles:
+                    savedFilesPane(for: activeSession)
+                }
+            }
+            .frame(minHeight: 220)
+        }
+
+        @ViewBuilder
+        private var guideNotesPane: some View {
+            if selectedTemplate != nil {
+                Group {
+                    if isPreviewMode {
+                        MarkdownPreviewView(
+                            text: guideNotesDraft,
+                            fontSize: fontSize * 1.5,
+                            onLinkOpen: { url, modifiers in
+                                openLink(url, modifiers: modifiers)
+                            }
+                        )
+                    } else {
+                        MarkdownEditor(
+                            text: $guideNotesDraft,
+                            fontSize: fontSize * 1.5,
+                            controller: guideNotesEditor,
+                            onLinkRequested: handleTroubleshootingLink(selectedText:source:completion:),
+                            onImageAttachment: { info in
+                                handleGuideEditorImageAttachment(info)
+                            }
+                        )
+                    }
+                }
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Theme.grayBG.opacity(0.22))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Theme.purple.opacity(0.18), lineWidth: 1)
+                        )
+                )
+            } else {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Select a template to view its troubleshooting guide")
+                        .font(.system(size: fontSize - 1))
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, minHeight: 220)
+                .background(
+                    RoundedRectangle(cornerRadius: 12)
+                        .fill(Theme.grayBG.opacity(0.18))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Theme.purple.opacity(0.15), lineWidth: 1)
+                        )
+                )
+            }
+        }
+
+        private func sessionNotesPane(for activeSession: TicketSession) -> some View {
+            SessionNotesInline(
+                fontSize: fontSize,
+                session: activeSession,
+                draft: Binding(
+                    get: { sessionNotesDrafts[activeSession] ?? "" },
+                    set: { newValue in
+                        let session = activeSession
+                        if sessionNotesDrafts[session] == newValue { return }
+                        LOG("Session notes binding set", ctx: [
+                            "session": "\(session.rawValue)",
+                            "chars": "\(newValue.count)",
+                            "sample": String(newValue.prefix(80)).replacingOccurrences(of: "\n", with: "⏎"),
+                            "source": "editor-inline"
+                        ])
+                        setSessionNotesDraft(newValue,
+                                            for: session,
+                                            source: "editor-inline")
+                    }
+                ),
+                savedValue: sessions.sessionNotes[activeSession] ?? "",
+                controller: sessionNotesEditor,
+                isPreview: Binding(
+                    get: { isPreviewMode },
+                    set: { setPreviewMode($0) }
+                ),
+                mode: Binding(
+                    get: { sessionNotesMode[activeSession] ?? .notes },
+                    set: { sessionNotesMode[activeSession] = $0 }
+                ),
+                savedFiles: savedFiles(for: activeSession),
+                selectedSavedFileID: currentSavedFileSelection(for: activeSession),
+                savedFileDraft: { savedFileDraft(for: activeSession, fileId: $0) },
+                savedFileValidation: { validationState(for: activeSession, fileId: $0) },
+                onSavedFileSelect: { setSavedFileSelection($0, for: activeSession) },
+                onSavedFileAdd: { addSavedFile(for: activeSession) },
+                onSavedFileDelete: { removeSavedFile($0, in: activeSession) },
+                onSavedFileRename: { renameSavedFile($0, in: activeSession) },
+                onSavedFileContentChange: { fileId, newValue in
+                    setSavedFileDraft(newValue,
+                                     for: fileId,
+                                     session: activeSession,
+                                     source: "savedFile.inline")
+                },
+                onSavedFileFocusChanged: { focused in
+                    isSavedFileEditorFocused = focused
+                },
+                onSavedFileOpenTree: { presentTreeView(for: $0, session: activeSession) },
+                onSavedFilesModeExit: { commitSavedFileDrafts(for: activeSession) },
+                onSavedFilesPopout: nil,
+                onSave: { saveSessionNotes() },
+                onRevert: revertSessionNotes,
+                onLinkRequested: handleSessionNotesLink(selectedText:source:completion:),
+                onLinkOpen: { url, modifiers in
+                    openLink(url, modifiers: modifiers)
+                },
+                onImageAttachment: { info in
+                    handleSessionEditorImageAttachment(info)
+                },
+                showsModePicker: false
+            )
+        }
+
+        private func savedFilesPane(for activeSession: TicketSession) -> some View {
+            SessionNotesInline(
+                fontSize: fontSize,
+                session: activeSession,
+                draft: Binding(
+                    get: { sessionNotesDrafts[activeSession] ?? "" },
+                    set: { newValue in
+                        setSessionNotesDraft(newValue,
+                                            for: activeSession,
+                                            source: "editor-inline")
+                    }
+                ),
+                savedValue: sessions.sessionNotes[activeSession] ?? "",
+                controller: sessionNotesEditor,
+                isPreview: Binding(
+                    get: { isPreviewMode },
+                    set: { setPreviewMode($0) }
+                ),
+                mode: Binding(
+                    get: { sessionNotesMode[activeSession] ?? .savedFiles },
+                    set: { sessionNotesMode[activeSession] = $0 }
+                ),
+                savedFiles: savedFiles(for: activeSession),
+                selectedSavedFileID: currentSavedFileSelection(for: activeSession),
+                savedFileDraft: { savedFileDraft(for: activeSession, fileId: $0) },
+                savedFileValidation: { validationState(for: activeSession, fileId: $0) },
+                onSavedFileSelect: { setSavedFileSelection($0, for: activeSession) },
+                onSavedFileAdd: { addSavedFile(for: activeSession) },
+                onSavedFileDelete: { removeSavedFile($0, in: activeSession) },
+                onSavedFileRename: { renameSavedFile($0, in: activeSession) },
+                onSavedFileContentChange: { fileId, newValue in
+                    setSavedFileDraft(newValue,
+                                     for: fileId,
+                                     session: activeSession,
+                                     source: "savedFile.inline")
+                },
+                onSavedFileFocusChanged: { focused in
+                    isSavedFileEditorFocused = focused
+                },
+                onSavedFileOpenTree: { presentTreeView(for: $0, session: activeSession) },
+                onSavedFilesModeExit: { commitSavedFileDrafts(for: activeSession) },
+                onSavedFilesPopout: nil,
+                onSave: { saveSessionNotes() },
+                onRevert: revertSessionNotes,
+                onLinkRequested: handleSessionNotesLink(selectedText:source:completion:),
+                onLinkOpen: { url, modifiers in
+                    openLink(url, modifiers: modifiers)
+                },
+                onImageAttachment: { info in
+                    handleSessionEditorImageAttachment(info)
+                },
+                showsModePicker: false
+            )
+        }
+
+        private func triggerPopOut(for activeSession: TicketSession) {
+            switch activeBottomPane {
+            case .guideNotes, .sessionNotes:
+                if activeBottomPane == .guideNotes, selectedTemplate == nil {
+                    return
+                }
+                if let template = selectedTemplate {
+                    templateGuideStore.prepare(for: template)
+                    guideNotesDraft = templateGuideStore.currentNotes(for: template)
+                }
+                showGuideNotesPopout = true
+            case .savedFiles:
+                savedFilesPopoutSession = activeSession
+                sessionNotesMode[activeSession] = .savedFiles
+                showSavedFilesPopout = true
+            }
+        }
+
         @ViewBuilder
         private var sessionToolbar: some View {
             Group {
@@ -4673,20 +5163,17 @@ struct ContentView: View {
                     .font(.system(size: fontSize))
                     .registerShortcut(name: "Populate Query", key: .return, modifiers: [.command], scope: "Global")
 
-                Button(showTroubleshootingGuide ? "Hide Guide" : "Troubleshooting Guide") {
-                    if let template = selectedTemplate {
-                        templateGuideStore.prepare(for: template)
-                        guideNotesDraft = templateGuideStore.currentNotes(for: template)
-                        if !showTroubleshootingGuide {
-                            setPreviewMode(true)
-                        }
-                        withAnimation { showTroubleshootingGuide.toggle() }
+                Button(isGuidePaneActive ? "Hide Guide" : "Troubleshooting Guide") {
+                    if isGuidePaneActive {
+                        setActivePane(.sessionNotes)
+                    } else {
+                        setActivePane(.guideNotes)
                     }
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.accent)
                 .font(.system(size: fontSize))
-                .disabled(selectedTemplate == nil)
+                .disabled(selectedTemplate == nil && !isGuidePaneActive)
 
                 Button("Clear Session #\(sessions.current.rawValue)") {
                     attemptClearCurrentSession()
@@ -4733,8 +5220,8 @@ struct ContentView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(sessions.current == s ? Theme.purple : Theme.purple.opacity(0.3))
-                    .keyboardShortcut(KeyEquivalent(Character("\(s.rawValue)")), modifiers: [.command])
-                    .registerShortcut(name: "Switch to Session #\(s.rawValue)", keyLabel: "\(s.rawValue)", modifiers: [.command], scope: "Sessions")
+                    .keyboardShortcut(KeyEquivalent(Character("\(s.rawValue)")), modifiers: [.control])
+                    .registerShortcut(name: "Switch to Session #\(s.rawValue)", keyLabel: "\(s.rawValue)", modifiers: [.control], scope: "Sessions")
                     .contextMenu {
                         Button("Rename…") { promptRename(for: s) }
                         Button("Link to Ticket…") { promptLink(for: s) }
@@ -4753,25 +5240,6 @@ struct ContentView: View {
                         }
                     }
                 }
-                // New: Copy Block Values and Copy All Individual buttons
-                Button {
-                    copyBlockValuesToClipboard()
-                } label: {
-                    Label("Copy Block Values", systemImage: "doc.on.clipboard")
-                }
-                .buttonStyle(.bordered)
-                .tint(Theme.aqua)
-                .font(.system(size: fontSize - 1))
-                .help("Copy Org-ID, Acct-ID, mysqlDb, and all template values as a single block to clipboard")
-                Button {
-                    copyIndividualValuesToClipboard()
-                } label: {
-                    Label("Copy All Individual", systemImage: "list.clipboard")
-                }
-                .buttonStyle(.bordered)
-                .tint(Theme.aqua)
-                .font(.system(size: fontSize - 1))
-                .help("Copy Org-ID, Acct-ID, mysqlDb, and all template values as individual clipboard items")
                 // Invisible bridge view to receive menu notifications and register KB shortcuts for Help sheet
                 Color.clear.frame(width: 0, height: 0)
                     .background(TicketSessionNotificationBridge(
@@ -5201,7 +5669,9 @@ struct ContentView: View {
                 templateGuideStore.prepare(for: t)
                 guideNotesDraft = templateGuideStore.currentNotes(for: t)
             } else {
-                showTroubleshootingGuide = false
+                if activeBottomPane == .guideNotes {
+                    activeBottomPane = .sessionNotes
+                }
                 guideNotesDraft = ""
             }
         }
@@ -5218,7 +5688,7 @@ struct ContentView: View {
                 "to": "\(newSession.rawValue)",
                 "fromNotesChars": "\(previousDraft.count)",
                 "fromNotesDirty": previousDraft == previousSaved ? "clean" : "dirty",
-                "sample": String(previousDraft.prefix(80).replacingOccurrences(of: "\n", with: "⏎"))
+                "sample": String(previousDraft.prefix(80)).replacingOccurrences(of: "\n", with: "⏎")
             ])
             commitDraftsForCurrentSession()
 
@@ -5234,7 +5704,7 @@ struct ContentView: View {
                 "to": "\(newSession.rawValue)",
                 "toNotesChars": "\(incomingDraft.count)",
                 "toNotesDirty": incomingDraft == incomingSaved ? "clean" : "dirty",
-                "sample": String(incomingDraft.prefix(80).replacingOccurrences(of: "\n", with: "⏎"))
+                "sample": String(incomingDraft.prefix(80)).replacingOccurrences(of: "\n", with: "⏎")
             ])
             ensureSavedFileState(for: newSession)
 
@@ -5258,12 +5728,20 @@ struct ContentView: View {
                 guideNotesDraft = templateGuideStore.currentNotes(for: found)
             } else {
                 selectedTemplate = nil
-                showTroubleshootingGuide = false
+                if activeBottomPane == .guideNotes {
+                    activeBottomPane = .sessionNotes
+                }
                 guideNotesDraft = ""
             }
             
             setPaneLockState(true, source: "sessionSwitch")
             LOG("Session switched", ctx: ["from": "\(previousSession.rawValue)", "to": "\(newSession.rawValue)"])
+
+            if activeBottomPane == .savedFiles {
+                sessionNotesMode[newSession] = .savedFiles
+            } else {
+                sessionNotesMode[newSession] = .notes
+            }
         }
 
         private func togglePreviewShortcut() {
@@ -5369,7 +5847,7 @@ struct ContentView: View {
 
         private func setPreviewMode(_ preview: Bool) {
             isPreviewMode = preview
-            if !preview, showTroubleshootingGuide {
+            if !preview, activeBottomPane == .guideNotes {
                 DispatchQueue.main.async { guideNotesEditor.focus() }
             }
         }
@@ -5442,7 +5920,9 @@ struct ContentView: View {
         private func populateQuery() {
             commitDraftsForCurrentSession()
             guard let t = selectedTemplate else { return }
-            showTroubleshootingGuide = false
+            if activeBottomPane == .guideNotes {
+                activeBottomPane = .sessionNotes
+            }
             var sql = t.rawSQL
             
             // Static placeholders that should always use static field values
@@ -5492,7 +5972,6 @@ struct ContentView: View {
         }
         
         @State private var isNotesSheetOpen: Bool = false
-        @State private var showNotesSidebar: Bool = true
         
         
     private func promptRename(for s: TicketSession) {
@@ -8225,107 +8704,249 @@ struct ContentView: View {
         var onSavedFileContentChange: (UUID, String) -> Void
         var onSavedFileFocusChanged: (Bool) -> Void
         var onSavedFileOpenTree: (UUID) -> Void
+        var onSavedFilesModeExit: () -> Void
+        var onSavedFilesPopout: (() -> Void)? = nil
         var onSave: () -> Void
         var onRevert: () -> Void
         var onLinkRequested: (_ selectedText: String, _ source: MarkdownEditor.LinkRequestSource, _ completion: @escaping (MarkdownEditor.LinkInsertion?) -> Void) -> Void
         var onLinkOpen: (URL, NSEvent.ModifierFlags) -> Void
         var onImageAttachment: (MarkdownEditor.ImageDropInfo) -> MarkdownEditor.ImageInsertion?
+        var showsModePicker: Bool = true
 
         private var isDirty: Bool { draft != savedValue }
 
         var body: some View {
-            VStack(alignment: .leading, spacing: 12) {
-                Picker("Notes Mode", selection: $mode) {
-                    Text("Session Notes").tag(SessionNotesPaneMode.notes)
-                    Text("Saved Files").tag(SessionNotesPaneMode.savedFiles)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-
-                if mode == .notes {
-                    notesPane
-                } else {
-                    SavedFilesEditor(
-                        fontSize: fontSize,
-                        files: savedFiles,
-                        selectedID: selectedSavedFileID,
-                        draftProvider: savedFileDraft,
-                        validationProvider: savedFileValidation,
-                        onAdd: onSavedFileAdd,
-                        onSelect: onSavedFileSelect,
-                        onDelete: onSavedFileDelete,
-                        onRename: onSavedFileRename,
-                        onContentChange: onSavedFileContentChange,
-                        onFocusChange: onSavedFileFocusChanged,
-                        onOpenTree: onSavedFileOpenTree
-                    )
+            VStack(alignment: .leading, spacing: 16) {
+                if showsModePicker {
+                    Picker("Notes Mode", selection: $mode) {
+                        Text("Session Notes").tag(SessionNotesPaneMode.notes)
+                        Text("Saved Files").tag(SessionNotesPaneMode.savedFiles)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
                 }
 
-                EditorSectionBadge(title: mode == .notes ? "Session Notes" : "Saved Files")
-                    .padding(.top, 4)
+                modeToolbar
+
+                Group {
+                    if mode == .notes {
+                        notesPane
+                    } else {
+                        SavedFilesWorkspace(
+                            fontSize: fontSize,
+                            files: savedFiles,
+                            selectedID: selectedSavedFileID,
+                            draftProvider: savedFileDraft,
+                            validationProvider: savedFileValidation,
+                            onAdd: onSavedFileAdd,
+                            onSelect: onSavedFileSelect,
+                            onDelete: onSavedFileDelete,
+                            onRename: onSavedFileRename,
+                            onContentChange: onSavedFileContentChange,
+                            onFocusChange: onSavedFileFocusChanged,
+                            onOpenTree: onSavedFileOpenTree
+                        )
+                    }
+                }
             }
-            .padding(6)
+            .padding(18)
             .frame(maxWidth: .infinity)
-            .onChange(of: mode) { _, newValue in
+            .background(
+                RoundedRectangle(cornerRadius: 14)
+                    .fill(Theme.grayBG.opacity(0.22))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .stroke(Theme.purple.opacity(0.2), lineWidth: 1)
+                    )
+            )
+            .onChange(of: mode) { previous, newValue in
                 if newValue != .savedFiles {
                     onSavedFileFocusChanged(false)
+                    onSavedFilesModeExit()
                 }
             }
+        }
+
+        private var modeToolbar: some View {
+            ZStack(alignment: .topLeading) {
+                notesToolbar
+                    .opacity(mode == .notes ? 1 : 0)
+                    .allowsHitTesting(mode == .notes)
+                savedFilesToolbar
+                    .opacity(mode == .savedFiles ? 1 : 0)
+                    .allowsHitTesting(mode == .savedFiles)
+            }
+            .frame(minHeight: 60, alignment: .topLeading)
+            .animation(.easeInOut(duration: 0.18), value: mode)
+        }
+
+        private var notesToolbar: some View {
+            HStack(spacing: 12) {
+                MarkdownToolbar(iconSize: fontSize + 2, isEnabled: !isPreview, controller: controller)
+                PreviewModeToggle(isPreview: $isPreview)
+                Spacer()
+                if isDirty {
+                    Button("Save Notes") { onSave() }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Theme.purple)
+                        .font(.system(size: fontSize - 2))
+                    Button("Revert") { onRevert() }
+                        .buttonStyle(.bordered)
+                        .tint(Theme.pink)
+                        .font(.system(size: fontSize - 2))
+                }
+            }
+        }
+
+        private var savedFilesToolbar: some View {
+            SavedFilesWorkspace.Toolbar(
+                fontSize: fontSize,
+                files: savedFiles,
+                selectedID: selectedSavedFileID,
+                onAdd: onSavedFileAdd,
+                onSelect: onSavedFileSelect,
+                onOpenTree: onSavedFileOpenTree,
+                onRename: onSavedFileRename,
+                onDelete: onSavedFileDelete,
+                onPopOut: onSavedFilesPopout
+            )
         }
 
         private var notesPane: some View {
-            VStack(alignment: .leading, spacing: 10) {
-                HStack(alignment: .center, spacing: 12) {
-                    MarkdownToolbar(iconSize: fontSize + 2, isEnabled: !isPreview, controller: controller)
-                    PreviewModeToggle(isPreview: $isPreview)
-
-                    Spacer()
-
-                    if isDirty {
-                        Button("Save Notes") { onSave() }
-                            .buttonStyle(.borderedProminent)
-                            .tint(Theme.purple)
-                            .font(.system(size: fontSize - 2))
-
-                        Button("Revert") { onRevert() }
-                            .buttonStyle(.bordered)
-                            .tint(Theme.pink)
-                            .font(.system(size: fontSize - 2))
-                    }
+            Group {
+                if isPreview {
+                    MarkdownPreviewView(
+                        text: draft,
+                        fontSize: fontSize * 1.5,
+                        onLinkOpen: onLinkOpen
+                    )
+                } else {
+                    MarkdownEditor(
+                        text: $draft,
+                        fontSize: fontSize * 1.5,
+                        controller: controller,
+                        onLinkRequested: onLinkRequested,
+                        onImageAttachment: { info in
+                            onImageAttachment(info)
+                        }
+                    )
                 }
-
-                Group {
-                    if isPreview {
-                        MarkdownPreviewView(
-                            text: draft,
-                            fontSize: fontSize * 1.5,
-                            onLinkOpen: onLinkOpen
-                        )
-                    } else {
-                        MarkdownEditor(
-                            text: $draft,
-                            fontSize: fontSize * 1.5,
-                            controller: controller,
-                            onLinkRequested: onLinkRequested,
-                            onImageAttachment: { info in
-                                onImageAttachment(info)
-                            }
-                        )
-                    }
-                }
-                .frame(maxWidth: .infinity, minHeight: 180)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Theme.grayBG.opacity(0.25))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
-                        )
-                )
             }
+            .frame(maxWidth: .infinity, minHeight: 220)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(Theme.grayBG.opacity(0.25))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
+                    )
+            )
         }
 
-        private struct SavedFilesEditor: View {
+        struct SavedFilesWorkspace: View {
+            enum SearchStatus {
+                case idle
+                case noMatch
+
+                var message: String? {
+                    switch self {
+                    case .idle: return nil
+                    case .noMatch: return "No matches"
+                    }
+                }
+
+                var color: Color {
+                    switch self {
+                    case .idle: return .secondary
+                    case .noMatch: return Color.red
+                    }
+                }
+            }
+
+            struct Toolbar: View {
+                var fontSize: CGFloat
+                var files: [SessionSavedFile]
+                var selectedID: UUID?
+                var onAdd: () -> Void
+                var onSelect: (UUID?) -> Void
+                var onOpenTree: (UUID) -> Void
+                var onRename: (UUID) -> Void
+                var onDelete: (UUID) -> Void
+                var onPopOut: (() -> Void)?
+
+                var body: some View {
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack(alignment: .center, spacing: 8) {
+                            ScrollViewReader { proxy in
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: 8) {
+                                        ForEach(files) { file in
+                                            let isSelected = file.id == selectedID
+                                            Button {
+                                                onSelect(file.id)
+                                            } label: {
+                                                Text(file.displayName)
+                                                    .font(.system(size: fontSize - 1, weight: isSelected ? .semibold : .regular))
+                                                    .padding(.horizontal, 12)
+                                                    .padding(.vertical, 6)
+                                            }
+                                            .buttonStyle(.borderedProminent)
+                                            .tint(isSelected ? Theme.purple : Theme.purple.opacity(0.3))
+                                            .contextMenu {
+                                                Button("Structure View") { onOpenTree(file.id) }
+                                                Button("Rename…") { onRename(file.id) }
+                                                Divider()
+                                                Button("Delete", role: .destructive) { onDelete(file.id) }
+                                            }
+                                            .id(file.id)
+                                        }
+                                    }
+                                    .padding(.vertical, 4)
+                                }
+                                .onChange(of: selectedID) { _, newValue in
+                                    guard let newValue else { return }
+                                    withAnimation {
+                                        proxy.scrollTo(newValue, anchor: .center)
+                                    }
+                                }
+                            }
+                            Spacer(minLength: 8)
+                            Button {
+                                onAdd()
+                            } label: {
+                                Label("Add", systemImage: "plus")
+                                    .font(.system(size: fontSize - 1, weight: .semibold))
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(Theme.aqua)
+
+                            Button {
+                                if let id = selectedID {
+                                    onOpenTree(id)
+                                }
+                            } label: {
+                                Label("Structure", systemImage: "point.3.connected.trianglepath.dotted")
+                                    .font(.system(size: fontSize - 1, weight: .semibold))
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(Theme.gold)
+                            .disabled(selectedID == nil)
+
+                            if let onPopOut {
+                                Button {
+                                    onPopOut()
+                                } label: {
+                                    Label("Pop Out", systemImage: "rectangle.expand.vertical")
+                                        .font(.system(size: fontSize - 1, weight: .semibold))
+                                }
+                                .buttonStyle(.bordered)
+                                .tint(Theme.accent)
+                            }
+                        }
+                    }
+                }
+            }
+
             var fontSize: CGFloat
             var files: [SessionSavedFile]
             var selectedID: UUID?
@@ -8339,56 +8960,14 @@ struct ContentView: View {
             var onFocusChange: (Bool) -> Void
             var onOpenTree: (UUID) -> Void
 
+            @StateObject private var editorController = JSONEditorController()
+            @State private var searchQuery: String = ""
+            @State private var searchStatus: SearchStatus = .idle
+            @FocusState private var isSearchFieldFocused: Bool
+
             var body: some View {
                 VStack(alignment: .leading, spacing: 12) {
-                    HStack(alignment: .center, spacing: 10) {
-                        ScrollView(.horizontal, showsIndicators: false) {
-                            HStack(spacing: 8) {
-                                ForEach(files) { file in
-                                    let isSelected = file.id == selectedID
-                                    Button {
-                                        onSelect(file.id)
-                                    } label: {
-                                        Text(file.displayName)
-                                            .font(.system(size: fontSize - 1, weight: isSelected ? .semibold : .regular))
-                                            .padding(.horizontal, 12)
-                                            .padding(.vertical, 6)
-                                    }
-                                    .buttonStyle(.borderedProminent)
-                                    .tint(isSelected ? Theme.purple : Theme.purple.opacity(0.3))
-                                    .contextMenu {
-                                        Button("Structure View") { onOpenTree(file.id) }
-                                        Button("Rename…") { onRename(file.id) }
-                                        Divider()
-                                        Button("Delete", role: .destructive) { onDelete(file.id) }
-                                    }
-                                }
-                            }
-                            .padding(.vertical, 4)
-                        }
-
-                        Button {
-                            onAdd()
-                        } label: {
-                            Label("Add", systemImage: "plus")
-                                .font(.system(size: fontSize - 1, weight: .semibold))
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(Theme.aqua)
-
-                        Button {
-                            if let id = selectedID {
-                                onOpenTree(id)
-                            }
-                        } label: {
-                            Label("Structure", systemImage: "point.3.connected.trianglepath.dotted")
-                                .font(.system(size: fontSize - 1, weight: .semibold))
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(Theme.gold)
-                        .disabled(selectedID == nil)
-                        .help("Open a tree visualization for the selected JSON file")
-                    }
+                    searchControls
 
                     if let selectedID, files.contains(where: { $0.id == selectedID }) {
                         let binding = Binding<String>(
@@ -8399,14 +8978,21 @@ struct ContentView: View {
                         JSONEditor(
                             text: binding,
                             fontSize: fontSize * 1.35,
-                            onFocusChanged: onFocusChange
+                            onFocusChanged: onFocusChange,
+                            controller: editorController,
+                            onFindCommand: {
+                                guard selectedID != nil else { return }
+                                DispatchQueue.main.async {
+                                    isSearchFieldFocused = true
+                                }
+                            }
                         )
-                        .frame(maxWidth: .infinity, minHeight: 220)
+                        .frame(maxWidth: .infinity, minHeight: 240)
                         .background(
-                            RoundedRectangle(cornerRadius: 8)
+                            RoundedRectangle(cornerRadius: 10)
                                 .fill(Theme.grayBG.opacity(0.25))
                                 .overlay(
-                                    RoundedRectangle(cornerRadius: 8)
+                                    RoundedRectangle(cornerRadius: 10)
                                         .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
                                 )
                         )
@@ -8418,9 +9004,93 @@ struct ContentView: View {
                     }
                 }
                 .onChange(of: selectedID) { _, newValue in
-                    if newValue == nil {
-                        onFocusChange(false)
+                    searchStatus = .idle
+                    searchQuery = ""
+                    if newValue != nil {
+                        DispatchQueue.main.async {
+                            editorController.focusAndSelectAll()
+                        }
                     }
+                    isSearchFieldFocused = false
+                }
+            }
+
+            private var searchControls: some View {
+                HStack(spacing: 8) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "magnifyingglass")
+                        TextField("Search within file", text: $searchQuery, onCommit: {
+                            performSearch(.forward)
+                        })
+                        .textFieldStyle(.plain)
+                        .font(.system(size: fontSize - 2, weight: .regular, design: .monospaced))
+                        .disabled(selectedID == nil)
+                        .focused($isSearchFieldFocused)
+                        if !searchQuery.isEmpty {
+                            Button {
+                                searchQuery = ""
+                                searchStatus = .idle
+                                editorController.focus()
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: fontSize - 2))
+                                    .foregroundStyle(.secondary)
+                            }
+                            .buttonStyle(.plain)
+                            .disabled(selectedID == nil)
+                        }
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule()
+                            .fill(Theme.grayBG.opacity(0.35))
+                    )
+                    .overlay(
+                        Capsule()
+                            .stroke(Theme.purple.opacity(0.3), lineWidth: 1)
+                    )
+                    .frame(maxWidth: 260)
+
+                    Button {
+                        performSearch(.backward)
+                    } label: {
+                        Image(systemName: "chevron.up")
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .disabled(selectedID == nil || searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                    Button {
+                        performSearch(.forward)
+                    } label: {
+                        Image(systemName: "chevron.down")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .tint(Theme.purple)
+                    .disabled(selectedID == nil || searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
+                    if let message = searchStatus.message {
+                        Text(message)
+                            .font(.system(size: fontSize - 4, weight: .medium))
+                            .foregroundStyle(searchStatus.color)
+                            .transition(.opacity)
+                    }
+
+                    Spacer()
+                }
+            }
+
+            private func performSearch(_ direction: JSONEditor.SearchDirection) {
+                let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else {
+                    NSSound.beep()
+                    return
+                }
+                let found = editorController.find(trimmed, direction: direction, wrap: true)
+                withAnimation(.easeInOut(duration: 0.15)) {
+                    searchStatus = found ? .idle : .noMatch
                 }
             }
 
@@ -8458,12 +9128,12 @@ struct ContentView: View {
                     .buttonStyle(.borderedProminent)
                     .tint(Theme.purple)
                 }
-                .frame(maxWidth: .infinity, minHeight: 220)
+                .frame(maxWidth: .infinity, minHeight: 240)
                 .background(
-                    RoundedRectangle(cornerRadius: 8)
+                    RoundedRectangle(cornerRadius: 10)
                         .fill(Theme.grayBG.opacity(0.2))
                         .overlay(
-                            RoundedRectangle(cornerRadius: 8)
+                            RoundedRectangle(cornerRadius: 10)
                                 .stroke(Theme.purple.opacity(0.15), lineWidth: 1)
                         )
                 )
@@ -8653,6 +9323,7 @@ struct ContentView: View {
         let onSavedFileContentChange: (UUID, String) -> Void
         let onSavedFileFocusChange: (Bool) -> Void
         let onSavedFileOpenTree: (UUID) -> Void
+        let onSavedFilesModeExit: () -> Void
         let onSessionSave: () -> Void
         let onSessionRevert: () -> Void
         let onSessionLinkRequested: (_ selectedText: String, _ source: MarkdownEditor.LinkRequestSource, _ completion: @escaping (MarkdownEditor.LinkInsertion?) -> Void) -> Void
@@ -8680,12 +9351,6 @@ struct ContentView: View {
                         }
                     }
                     Spacer()
-                    Button("Hide") {
-                        onHide()
-                    }
-                    .buttonStyle(.bordered)
-                    .keyboardShortcut(.cancelAction)
-                    .font(.system(size: fontSize - 1))
                 }
 
                 HSplitView {
@@ -8718,6 +9383,7 @@ struct ContentView: View {
                         onSavedFileContentChange: onSavedFileContentChange,
                         onSavedFileFocusChanged: onSavedFileFocusChange,
                         onSavedFileOpenTree: onSavedFileOpenTree,
+                        onSavedFilesModeExit: onSavedFilesModeExit,
                         onSave: onSessionSave,
                         onRevert: onSessionRevert,
                         onLinkRequested: onSessionLinkRequested,
@@ -8826,6 +9492,98 @@ struct ContentView: View {
                 EditorSectionBadge(title: "Troubleshooting Guide")
                     .padding(.top, 4)
             }
+        }
+    }
+
+    struct SavedFilesPopoutSheet: View {
+        var fontSize: CGFloat
+        var session: TicketSession
+        @Binding var sessionDraft: String
+        var sessionSavedValue: String
+        @ObservedObject var sessionController: MarkdownEditorController
+        @Binding var sessionNotesMode: SessionNotesPaneMode
+        @Binding var isPreview: Bool
+        var savedFiles: [SessionSavedFile]
+        var selectedSavedFileID: UUID?
+        var savedFileDraftProvider: (UUID) -> String
+        var savedFileValidationProvider: (UUID) -> JSONValidationState
+        let onSavedFileSelect: (UUID?) -> Void
+        let onSavedFileAdd: () -> Void
+        let onSavedFileDelete: (UUID) -> Void
+        let onSavedFileRename: (UUID) -> Void
+        let onSavedFileContentChange: (UUID, String) -> Void
+        let onSavedFileFocusChange: (Bool) -> Void
+        let onSavedFileOpenTree: (UUID) -> Void
+        let onSavedFileModeExit: () -> Void
+        let onSessionSave: () -> Void
+        let onSessionRevert: () -> Void
+        let onSessionLinkRequested: (_ selectedText: String, _ source: MarkdownEditor.LinkRequestSource, _ completion: @escaping (MarkdownEditor.LinkInsertion?) -> Void) -> Void
+        let onSessionImageAttachment: (MarkdownEditor.ImageDropInfo) -> MarkdownEditor.ImageInsertion?
+        let onSessionLinkOpen: (URL, NSEvent.ModifierFlags) -> Void
+        let onSessionDraftChanged: (TicketSession, String) -> Void
+        let onTogglePreview: () -> Void
+        let onClose: () -> Void
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(alignment: .center, spacing: 12) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Saved Files Workspace")
+                            .font(.system(size: fontSize + 4, weight: .semibold))
+                            .foregroundStyle(Theme.aqua)
+                        Text("Session #\(session.rawValue)")
+                            .font(.system(size: fontSize - 1, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                }
+
+                SessionNotesInline(
+                    fontSize: fontSize,
+                    session: session,
+                    draft: Binding(
+                        get: { sessionDraft },
+                        set: { newValue in
+                            sessionDraft = newValue
+                            onSessionDraftChanged(session, newValue)
+                        }
+                    ),
+                    savedValue: sessionSavedValue,
+                    controller: sessionController,
+                    isPreview: $isPreview,
+                    mode: $sessionNotesMode,
+                    savedFiles: savedFiles,
+                    selectedSavedFileID: selectedSavedFileID,
+                    savedFileDraft: savedFileDraftProvider,
+                    savedFileValidation: savedFileValidationProvider,
+                    onSavedFileSelect: onSavedFileSelect,
+                    onSavedFileAdd: onSavedFileAdd,
+                    onSavedFileDelete: onSavedFileDelete,
+                    onSavedFileRename: onSavedFileRename,
+                    onSavedFileContentChange: onSavedFileContentChange,
+                    onSavedFileFocusChanged: onSavedFileFocusChange,
+                    onSavedFileOpenTree: onSavedFileOpenTree,
+                    onSavedFilesModeExit: onSavedFileModeExit,
+                    onSave: onSessionSave,
+                    onRevert: onSessionRevert,
+                    onLinkRequested: onSessionLinkRequested,
+                    onLinkOpen: onSessionLinkOpen,
+                    onImageAttachment: onSessionImageAttachment
+                )
+                .frame(minHeight: 360)
+            }
+            .padding(20)
+            .frame(minWidth: 900, minHeight: 600)
+            .background(
+                SheetWindowConfigurator(
+                    minSize: CGSize(width: 900, height: 600),
+                    preferredSize: CGSize(width: 1040, height: 680),
+                    sizeStorageKey: "SavedFilesPopoutSize"
+                )
+            )
+            .overlay(
+                KeyboardShortcutOverlay(onTrigger: onTogglePreview)
+            )
         }
     }
 
