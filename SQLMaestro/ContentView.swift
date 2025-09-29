@@ -1045,7 +1045,8 @@ struct ContentView: View {
     @State private var hoverRecentKey: String? = nil
     @State private var previewingSessionImage: SessionImage? = nil
     @State private var previewingGuideImage: TemplateGuideImage? = nil
-    @State private var activeBottomPane: BottomPaneContent = .sessionNotes
+    @State private var activeBottomPane: BottomPaneContent? = nil
+    @State private var isOutputVisible: Bool = false
     @State private var showGuideNotesPopout: Bool = false
     @State private var guideNotesDraft: String = ""
     @State private var hoveredTemplateLinkID: UUID? = nil
@@ -1231,7 +1232,7 @@ struct ContentView: View {
                     Spacer()
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.bottom, 12)
+                .padding(.bottom, 42)
                 
                 sessionToolbar
                 
@@ -1254,6 +1255,7 @@ struct ContentView: View {
                 .keyboardShortcut("1", modifiers: [.command])
                 .hidden()
                 .disabled(selectedTemplate == nil)
+                .registerShortcut(name: "Show Guide Notes", keyLabel: "1", modifiers: [.command], scope: "Panes")
 
                 Button(action: {
                     setActivePane(.sessionNotes)
@@ -1262,6 +1264,7 @@ struct ContentView: View {
                 }
                 .keyboardShortcut("2", modifiers: [.command])
                 .hidden()
+                .registerShortcut(name: "Show Session Notes", keyLabel: "2", modifiers: [.command], scope: "Panes")
 
                 Button(action: {
                     setActivePane(.savedFiles)
@@ -1270,6 +1273,7 @@ struct ContentView: View {
                 }
                 .keyboardShortcut("3", modifiers: [.command])
                 .hidden()
+                .registerShortcut(name: "Show Saved Files", keyLabel: "3", modifiers: [.command], scope: "Panes")
 
                 Button(action: {
                     toggleSidebar()
@@ -1278,6 +1282,7 @@ struct ContentView: View {
                 }
                 .keyboardShortcut("t", modifiers: [.command])
                 .hidden()
+                .registerShortcut(name: "Toggle Sidebar", keyLabel: "T", modifiers: [.command], scope: "Layout")
             }
             .padding()
             .background(Theme.grayBG)
@@ -4531,29 +4536,36 @@ struct ContentView: View {
         
         // MARK: — Output area
         private var isGuidePaneActive: Bool { activeBottomPane == .guideNotes }
-        private var isSessionNotesPaneActive: Bool { activeBottomPane == .sessionNotes }
-        private var isSavedFilesPaneActive: Bool { activeBottomPane == .savedFiles }
 
-        private func setActivePane(_ pane: BottomPaneContent) {
-            guard activeBottomPane != pane else { return }
-            if activeBottomPane == .savedFiles && pane != .savedFiles {
+        private func setActivePane(_ pane: BottomPaneContent?) {
+            let normalized: BottomPaneContent?
+            if let pane, pane == activeBottomPane {
+                normalized = nil
+            } else {
+                normalized = pane
+            }
+
+            if activeBottomPane == .savedFiles && normalized != .savedFiles {
                 commitSavedFileDrafts(for: sessions.current)
             }
-            switch pane {
-            case .guideNotes:
-                guard let template = selectedTemplate else { return }
-                templateGuideStore.prepare(for: template)
-                guideNotesDraft = templateGuideStore.currentNotes(for: template)
-                setPreviewMode(true)
-                sessionNotesMode[sessions.current] = .notes
-            case .sessionNotes:
-                setPreviewMode(true)
-                sessionNotesMode[sessions.current] = .notes
-            case .savedFiles:
-                sessionNotesMode[sessions.current] = .savedFiles
-                break
+            if let pane = normalized {
+                switch pane {
+                case .guideNotes:
+                    guard let template = selectedTemplate else { return }
+                    templateGuideStore.prepare(for: template)
+                    guideNotesDraft = templateGuideStore.currentNotes(for: template)
+                    setPreviewMode(true)
+                    sessionNotesMode[sessions.current] = .notes
+                case .sessionNotes:
+                    setPreviewMode(true)
+                    sessionNotesMode[sessions.current] = .notes
+                case .savedFiles:
+                    sessionNotesMode[sessions.current] = .savedFiles
+                }
+                isOutputVisible = false
             }
-            activeBottomPane = pane
+
+            activeBottomPane = normalized
         }
 
 
@@ -4561,11 +4573,15 @@ struct ContentView: View {
             let guideDirty = templateGuideStore.isNotesDirty(for: selectedTemplate)
             let activeSession = sessions.current
 
-            return VSplitView {
-                outputSQLSection
-                bottomPaneContainer(guideDirty: guideDirty, activeSession: activeSession)
+            return VStack(spacing: 12) {
+                if isOutputVisible {
+                    outputSQLSection
+                }
+
+                if let pane = activeBottomPane {
+                    bottomPaneContainer(pane: pane, guideDirty: guideDirty, activeSession: activeSession)
+                }
             }
-            .frame(minHeight: 360)
         }
 
         private var outputSQLSection: some View {
@@ -4575,22 +4591,13 @@ struct ContentView: View {
                         .font(.system(size: fontSize + 4, weight: .semibold))
                         .foregroundStyle(Theme.aqua)
                     Spacer(minLength: 16)
-                    Button {
-                        copyBlockValuesToClipboard()
-                    } label: {
-                        Label("Copy Block Values", systemImage: "doc.on.clipboard")
+
+                    Button("Hide Output") {
+                        withAnimation { isOutputVisible = false }
                     }
-                    .buttonStyle(.bordered)
-                    .tint(Theme.aqua)
-                    .font(.system(size: fontSize - 1))
-                    Button {
-                        copyIndividualValuesToClipboard()
-                    } label: {
-                        Label("Copy All Individual", systemImage: "list.clipboard")
-                    }
-                    .buttonStyle(.bordered)
-                    .tint(Theme.aqua)
-                    .font(.system(size: fontSize - 1))
+                    .buttonStyle(.plain)
+                    .font(.system(size: fontSize - 2, weight: .semibold))
+                    .foregroundStyle(.secondary)
                 }
 
                 TextEditor(text: $populatedSQL)
@@ -4619,9 +4626,9 @@ struct ContentView: View {
             .padding(.bottom, 4)
         }
 
-        private func bottomPaneContainer(guideDirty: Bool, activeSession: TicketSession) -> some View {
+        private func bottomPaneContainer(pane: BottomPaneContent, guideDirty: Bool, activeSession: TicketSession) -> some View {
             VStack(spacing: 0) {
-                bottomPaneHeader(guideDirty: guideDirty, activeSession: activeSession)
+                bottomPaneHeader(for: pane, guideDirty: guideDirty, activeSession: activeSession)
                     .padding(.horizontal, 16)
                     .padding(.vertical, 12)
                     .background(
@@ -4634,17 +4641,17 @@ struct ContentView: View {
                     )
                     .padding(.bottom, 2)
 
-                bottomPaneContent(activeSession: activeSession)
+                bottomPaneContent(for: pane, activeSession: activeSession)
                     .padding(.horizontal, 16)
                     .padding(.bottom, 16)
             }
         }
 
-        private func bottomPaneHeader(guideDirty: Bool, activeSession: TicketSession) -> some View {
+        private func bottomPaneHeader(for pane: BottomPaneContent, guideDirty: Bool, activeSession: TicketSession) -> some View {
             HStack(alignment: .center, spacing: 12) {
-                paneSwitcher
+                paneTitle(for: pane)
                 Spacer(minLength: 12)
-                switch activeBottomPane {
+                switch pane {
                 case .guideNotes:
                     MarkdownToolbar(iconSize: fontSize + 2, isEnabled: !isPreviewMode, controller: guideNotesEditor)
                     PreviewModeToggle(isPreview: Binding(
@@ -4714,45 +4721,16 @@ struct ContentView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.accent)
                 .font(.system(size: fontSize - 1))
-                .disabled(activeBottomPane == .guideNotes && selectedTemplate == nil)
+                .disabled(pane == .guideNotes && selectedTemplate == nil)
             }
         }
 
-        private var paneSwitcher: some View {
-            HStack(spacing: 8) {
-                paneSwitchButton(title: "Guide Notes", systemImage: "text.book.closed", pane: .guideNotes, isEnabled: selectedTemplate != nil)
-                paneSwitchButton(title: "Session Notes", systemImage: "pencil.and.list.clipboard", pane: .sessionNotes)
-                paneSwitchButton(title: "Saved Files", systemImage: "doc.richtext", pane: .savedFiles)
-            }
-            .background(
-                Group {
-                    Color.clear
-                        .registerShortcut(name: "Show Guide Notes", keyLabel: "1", modifiers: [.command], scope: "Panes")
-                    Color.clear
-                        .registerShortcut(name: "Show Session Notes", keyLabel: "2", modifiers: [.command], scope: "Panes")
-                    Color.clear
-                        .registerShortcut(name: "Show Saved Files", keyLabel: "3", modifiers: [.command], scope: "Panes")
-                }
-            )
-        }
-
-        private func paneSwitchButton(title: String, systemImage: String, pane: BottomPaneContent, isEnabled: Bool = true) -> some View {
-            let isActive = activeBottomPane == pane
-            return Button {
-                setActivePane(pane)
-            } label: {
-                Label(title, systemImage: systemImage)
-                    .labelStyle(.titleAndIcon)
-                    .font(.system(size: fontSize - 1, weight: isActive ? .semibold : .regular))
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(isActive ? Theme.purple : Theme.grayBG.opacity(0.3))
-                    .foregroundStyle(isActive ? Color.white : Theme.purple)
-                    .clipShape(Capsule())
-            }
-            .buttonStyle(.plain)
-            .disabled(!isEnabled)
-            .opacity(isEnabled ? 1 : 0.45)
+        private func paneTitle(for pane: BottomPaneContent) -> some View {
+            let info = paneInfo(for: pane)
+            return Label(info.title, systemImage: info.systemImage)
+                .labelStyle(.titleAndIcon)
+                .font(.system(size: fontSize + 2, weight: .semibold))
+                .foregroundStyle(Theme.aqua)
         }
 
         private var commandSidebar: some View {
@@ -4926,9 +4904,9 @@ struct ContentView: View {
             }
         }
 
-        private func bottomPaneContent(activeSession: TicketSession) -> some View {
+        private func bottomPaneContent(for pane: BottomPaneContent, activeSession: TicketSession) -> some View {
             Group {
-                switch activeBottomPane {
+                switch pane {
                 case .guideNotes:
                     guideNotesPane
                 case .sessionNotes:
@@ -5017,10 +4995,7 @@ struct ContentView: View {
                     get: { isPreviewMode },
                     set: { setPreviewMode($0) }
                 ),
-                mode: Binding(
-                    get: { sessionNotesMode[activeSession] ?? .notes },
-                    set: { sessionNotesMode[activeSession] = $0 }
-                ),
+                mode: .constant(.notes),
                 savedFiles: savedFiles(for: activeSession),
                 selectedSavedFileID: currentSavedFileSelection(for: activeSession),
                 savedFileDraft: { savedFileDraft(for: activeSession, fileId: $0) },
@@ -5050,7 +5025,8 @@ struct ContentView: View {
                 onImageAttachment: { info in
                     handleSessionEditorImageAttachment(info)
                 },
-                showsModePicker: false
+                showsModePicker: false,
+                showsModeToolbar: true
             )
         }
 
@@ -5072,10 +5048,7 @@ struct ContentView: View {
                     get: { isPreviewMode },
                     set: { setPreviewMode($0) }
                 ),
-                mode: Binding(
-                    get: { sessionNotesMode[activeSession] ?? .savedFiles },
-                    set: { sessionNotesMode[activeSession] = $0 }
-                ),
+                mode: .constant(.savedFiles),
                 savedFiles: savedFiles(for: activeSession),
                 selectedSavedFileID: currentSavedFileSelection(for: activeSession),
                 savedFileDraft: { savedFileDraft(for: activeSession, fileId: $0) },
@@ -5105,7 +5078,8 @@ struct ContentView: View {
                 onImageAttachment: { info in
                     handleSessionEditorImageAttachment(info)
                 },
-                showsModePicker: false
+                showsModePicker: false,
+                showsModeToolbar: false
             )
         }
 
@@ -5124,6 +5098,8 @@ struct ContentView: View {
                 savedFilesPopoutSession = activeSession
                 sessionNotesMode[activeSession] = .savedFiles
                 showSavedFilesPopout = true
+            case nil:
+                break
             }
         }
 
@@ -5164,11 +5140,7 @@ struct ContentView: View {
                     .registerShortcut(name: "Populate Query", key: .return, modifiers: [.command], scope: "Global")
 
                 Button(isGuidePaneActive ? "Hide Guide" : "Troubleshooting Guide") {
-                    if isGuidePaneActive {
-                        setActivePane(.sessionNotes)
-                    } else {
-                        setActivePane(.guideNotes)
-                    }
+                    setActivePane(isGuidePaneActive ? nil : .guideNotes)
                 }
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.accent)
@@ -5670,7 +5642,7 @@ struct ContentView: View {
                 guideNotesDraft = templateGuideStore.currentNotes(for: t)
             } else {
                 if activeBottomPane == .guideNotes {
-                    activeBottomPane = .sessionNotes
+                    setActivePane(nil)
                 }
                 guideNotesDraft = ""
             }
@@ -5729,7 +5701,7 @@ struct ContentView: View {
             } else {
                 selectedTemplate = nil
                 if activeBottomPane == .guideNotes {
-                    activeBottomPane = .sessionNotes
+                    setActivePane(nil)
                 }
                 guideNotesDraft = ""
             }
@@ -5920,9 +5892,8 @@ struct ContentView: View {
         private func populateQuery() {
             commitDraftsForCurrentSession()
             guard let t = selectedTemplate else { return }
-            if activeBottomPane == .guideNotes {
-                activeBottomPane = .sessionNotes
-            }
+            setActivePane(nil)
+            isOutputVisible = true
             var sql = t.rawSQL
             
             // Static placeholders that should always use static field values
@@ -8712,6 +8683,7 @@ struct ContentView: View {
         var onLinkOpen: (URL, NSEvent.ModifierFlags) -> Void
         var onImageAttachment: (MarkdownEditor.ImageDropInfo) -> MarkdownEditor.ImageInsertion?
         var showsModePicker: Bool = true
+        var showsModeToolbar: Bool = true
 
         private var isDirty: Bool { draft != savedValue }
 
@@ -8726,7 +8698,9 @@ struct ContentView: View {
                     .labelsHidden()
                 }
 
-                modeToolbar
+                if showsModeToolbar {
+                    modeToolbar
+                }
 
                 Group {
                     if mode == .notes {

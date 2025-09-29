@@ -431,6 +431,8 @@ private struct JSONTreeCanvas: View {
 
     private func drawConnections(context: inout GraphicsContext) {
         let radius: CGFloat = 6
+        let branchOffset: CGFloat = 22
+        let columnPadding: CGFloat = 36
         for positioned in layout.positionedNodes {
             guard !positioned.node.children.isEmpty else { continue }
             let startPoint = CGPoint(x: positioned.position.x - radius, y: positioned.position.y)
@@ -439,10 +441,15 @@ private struct JSONTreeCanvas: View {
                 let endPoint = CGPoint(x: childPointRaw.x - radius, y: childPointRaw.y)
                 var path = Path()
                 path.move(to: startPoint)
-                let columnXBase = min(startPoint.x, endPoint.x) - 40
-                let columnX = max(columnXBase, 10)
+                let columnXBase = min(startPoint.x, endPoint.x) - columnPadding
+                let columnX = max(columnXBase, 8)
+                let horizontalApproach = endPoint.x - columnPadding
+                let approachX = max(min(horizontalApproach, endPoint.x - 12), columnX + 8)
+                let approachY = endPoint.y - branchOffset
                 path.addLine(to: CGPoint(x: columnX, y: startPoint.y))
-                path.addLine(to: CGPoint(x: columnX, y: endPoint.y))
+                path.addLine(to: CGPoint(x: columnX, y: approachY))
+                path.addLine(to: CGPoint(x: approachX, y: approachY))
+                path.addLine(to: CGPoint(x: approachX, y: endPoint.y))
                 path.addLine(to: endPoint)
                 context.stroke(path, with: .color(Theme.aqua), lineWidth: 1.0)
             }
@@ -486,9 +493,9 @@ private final class JSONTreeLayout {
     private(set) var size: CGSize = .zero
     private var positions: [UUID: CGPoint] = [:]
 
-    private let horizontalSpacing: CGFloat = 160
-    private let verticalSpacing: CGFloat = 80
-    private let padding: CGFloat = 60
+    private let horizontalSpacing: CGFloat = 220
+    private let verticalSpacing: CGFloat = 120
+    private let padding: CGFloat = 80
     private var nextY: CGFloat = 0
 
     struct PositionedNode {
