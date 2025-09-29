@@ -20,7 +20,8 @@ final class SessionNotesAutosaveCoordinator: ObservableObject {
     func schedule(for session: TicketSession, delay: TimeInterval, action: @escaping () -> Void) {
         cancel(for: session)
         let workItem = DispatchWorkItem { [weak self] in
-            guard self?.entries.removeValue(forKey: session) != nil else { return }
+            guard let self = self,
+                  self.entries.removeValue(forKey: session) != nil else { return }
             action()
         }
         entries[session] = Entry(workItem: workItem, action: action)
@@ -46,11 +47,83 @@ final class SessionNotesAutosaveCoordinator: ObservableObject {
         }
     }
 }
+@MainActor
+final class SavedFileAutosaveCoordinator: ObservableObject {
+    private struct Key: Hashable {
+        var session: TicketSession
+        var fileId: UUID
+    }
+
+    private struct Entry {
+        let workItem: DispatchWorkItem
+        let action: () -> Void
+    }
+
+    private var entries: [Key: Entry] = [:]
+
+    func schedule(session: TicketSession, fileId: UUID, delay: TimeInterval, action: @escaping () -> Void) {
+        let key = Key(session: session, fileId: fileId)
+        cancel(session: session, fileId: fileId)
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let entry = self?.entries.removeValue(forKey: key) else { return }
+            entry.action()
+        }
+        entries[key] = Entry(workItem: workItem, action: action)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+    }
+
+    func flush(session: TicketSession, fileId: UUID) {
+        let key = Key(session: session, fileId: fileId)
+        guard let entry = entries.removeValue(forKey: key) else { return }
+        entry.workItem.cancel()
+        DispatchQueue.main.async(execute: entry.action)
+    }
+
+    func cancel(session: TicketSession, fileId: UUID) {
+        let key = Key(session: session, fileId: fileId)
+        if let entry = entries.removeValue(forKey: key) {
+            entry.workItem.cancel()
+        }
+    }
+
+    func cancelAll(for session: TicketSession) {
+        let keys = entries.keys.filter { $0.session == session }
+        for key in keys {
+            entries.removeValue(forKey: key)?.workItem.cancel()
+        }
+    }
+
+    func cancelAll() {
+        entries.values.forEach { $0.workItem.cancel() }
+        entries.removeAll()
+    }
+}
 
 enum SessionTemplateTab {
     case sessionImages
     case guideImages
     case templateLinks
+}
+
+enum SessionNotesPaneMode: Hashable {
+    case notes
+    case savedFiles
+}
+
+enum JSONValidationState: Equatable {
+    case valid
+    case invalid(String)
+
+    var isValid: Bool {
+        if case .valid = self { return true }
+        return false
+    }
+}
+
+struct SavedFileTreePreviewContext: Identifiable {
+    let id = UUID()
+    let fileName: String
+    let content: String
 }
 
 // MARK: - Temporary Shims (compile-time stand-ins)
@@ -986,7 +1059,22 @@ struct ContentView: View {
     @StateObject private var sessionNotesEditor = MarkdownEditorController()
     @StateObject private var guideNotesEditor = MarkdownEditorController()
     @StateObject private var sessionNotesAutosave = SessionNotesAutosaveCoordinator()
+    @StateObject private var savedFileAutosave = SavedFileAutosaveCoordinator()
     @State private var isPreviewMode: Bool = true
+    @State private var sessionNotesMode: [TicketSession: SessionNotesPaneMode] = [
+        .one: .notes,
+        .two: .notes,
+        .three: .notes
+    ]
+    @State private var savedFileDrafts: [TicketSession: [UUID: String]] = [:]
+    @State private var selectedSavedFile: [TicketSession: UUID?] = [
+        .one: nil,
+        .two: nil,
+        .three: nil
+    ]
+    @State private var savedFileValidation: [TicketSession: [UUID: JSONValidationState]] = [:]
+    @State private var savedFileTreePreview: SavedFileTreePreviewContext?
+    @State private var isSavedFileEditorFocused: Bool = false
     
     @State private var searchText: String = ""
     @State private var showShortcutsSheet: Bool = false
@@ -1147,6 +1235,7 @@ struct ContentView: View {
                 .keyboardShortcut("f", modifiers: [.command])
                 .hidden()
                 .registerShortcut(name: "Search Queries", keyLabel: "F", modifiers: [.command], scope: "Global")
+                .disabled(isSavedFileEditorFocused)
             }
             .padding()
             .background(Theme.grayBG)
@@ -1292,6 +1381,28 @@ struct ContentView: View {
                 ),
                 sessionSavedValue: sessions.sessionNotes[activeSession] ?? "",
                 sessionController: sessionNotesEditor,
+                sessionNotesMode: Binding(
+                    get: { sessionNotesMode[activeSession] ?? .notes },
+                    set: { sessionNotesMode[activeSession] = $0 }
+                ),
+                savedFiles: savedFiles(for: activeSession),
+                selectedSavedFileID: currentSavedFileSelection(for: activeSession),
+                savedFileDraftProvider: { savedFileDraft(for: activeSession, fileId: $0) },
+                savedFileValidationProvider: { validationState(for: activeSession, fileId: $0) },
+                onSavedFileSelect: { setSavedFileSelection($0, for: activeSession) },
+                onSavedFileAdd: { addSavedFile(for: activeSession) },
+                onSavedFileDelete: { removeSavedFile($0, in: activeSession) },
+                onSavedFileRename: { renameSavedFile($0, in: activeSession) },
+                onSavedFileContentChange: { fileId, newValue in
+                    setSavedFileDraft(newValue,
+                                      for: fileId,
+                                      session: activeSession,
+                                      source: "editor-popout")
+                },
+                onSavedFileFocusChange: { focused in
+                    isSavedFileEditorFocused = focused
+                },
+                onSavedFileOpenTree: { presentTreeView(for: $0, session: activeSession) },
                 onSessionSave: { saveSessionNotes() },
                 onSessionRevert: revertSessionNotes,
                 onSessionLinkRequested: handleSessionNotesLink(selectedText:source:completion:),
@@ -1372,6 +1483,16 @@ struct ContentView: View {
                     .frame(minWidth: 320, minHeight: 240)
             }
         }
+        .sheet(item: $savedFileTreePreview) { preview in
+            JSONTreePreview(fileName: preview.fileName, content: preview.content)
+                .background(
+                    SheetWindowConfigurator(
+                        minSize: CGSize(width: 640, height: 480),
+                        preferredSize: CGSize(width: 900, height: 600),
+                        sizeStorageKey: "SavedFileTreePreviewSize"
+                    )
+                )
+        }
 
         .onAppear {
             LOG("App started")
@@ -1389,6 +1510,7 @@ struct ContentView: View {
                 UsedTemplatesStore.shared.clearSession(s)
                 let initialNotes = sessions.sessionNotes[s] ?? ""
                 setSessionNotesDraft(initialNotes, for: s, source: "onAppear")
+                ensureSavedFileState(for: s)
             }
             orgId = ""
             acctId = ""
@@ -1431,6 +1553,11 @@ struct ContentView: View {
                 }
             }
 #endif
+        }
+        .onReceive(sessions.$sessionSavedFiles) { _ in
+            for session in TicketSession.allCases {
+                ensureSavedFileState(for: session)
+            }
         }
         .onDisappear {
 #if os(macOS)
@@ -1479,68 +1606,69 @@ struct ContentView: View {
                 }
             }
         }
-        }
-    
+
+    }
+
     // MARK: – Templates Pane (split to help the type checker)
     @ViewBuilder
     private var templatesPane: some View {
-    TemplatesSidebar {
-    templatesHeader
-    } search: {
-    templatesSearch
-    } list: {
-    templatesList
-    } footer: {
-    templatesFooter
-    }
-    .padding()
-    .background(Theme.grayBG)
-    .frame(minWidth: 300, idealWidth: 320)
+        TemplatesSidebar {
+            templatesHeader
+        } search: {
+            templatesSearch
+        } list: {
+            templatesList
+        } footer: {
+            templatesFooter
+        }
+        .padding()
+        .background(Theme.grayBG)
+        .frame(minWidth: 300, idealWidth: 320)
     }
 
     @ViewBuilder
     private var templatesFooter: some View {
-    if !trimmedSearchText.isEmpty {
-        if isTagSearch {
-            let count = tagSearchResults.count
-            Text("\(count) matching tag\(count == 1 ? "" : "s")")
-                .font(.system(size: fontSize - 2))
-                .foregroundStyle(.secondary)
-        } else {
-            Text("\(filteredTemplates.count) of \(templates.templates.count) templates")
-                .font(.system(size: fontSize - 2))
-                .foregroundStyle(.secondary)
+        if !trimmedSearchText.isEmpty {
+            if isTagSearch {
+                let count = tagSearchResults.count
+                Text("\(count) matching tag\(count == 1 ? "" : "s")")
+                    .font(.system(size: fontSize - 2))
+                    .foregroundStyle(.secondary)
+            } else {
+                Text("\(filteredTemplates.count) of \(templates.templates.count) templates")
+                    .font(.system(size: fontSize - 2))
+                    .foregroundStyle(.secondary)
+            }
         }
-    }
     }
 
     @ViewBuilder
     private var templatesHeader: some View {
-    HStack(spacing: 8) {
-    Text("Query Templates")
-    .font(.system(size: fontSize + 4, weight: .semibold))
-    .foregroundStyle(Theme.purple)
-    .lineLimit(1)
-    .minimumScaleFactor(0.85)
-    .layoutPriority(1)
-    Spacer()
-    Button("New Template") { createNewTemplateFlow() }
-    .buttonStyle(.borderedProminent)
-    .tint(Theme.purple)
-    .font(.system(size: fontSize))
-    Button("Reload") {
-    templates.loadTemplates()
-    withAnimation { toastReloaded = true }
-    DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
-    withAnimation { toastReloaded = false }
-    }
-    }
-    .buttonStyle(.borderedProminent)
-    .tint(Theme.accent)
-    .font(.system(size: fontSize))
-    .keyboardShortcut("r", modifiers: [.command])
-    .registerShortcut(name: "Reload Templates", keyLabel: "R", modifiers: [.command], scope: "Templates")
-    }
+        HStack(spacing: 8) {
+            Text("Query Templates")
+                .font(.system(size: fontSize + 4, weight: .semibold))
+                .foregroundStyle(Theme.purple)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+                .layoutPriority(1)
+            Spacer()
+            Button("New Template") { createNewTemplateFlow() }
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.purple)
+                .font(.system(size: fontSize))
+            Button("Reload") {
+                templates.loadTemplates()
+                withAnimation { toastReloaded = true }
+                DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+                    withAnimation { toastReloaded = false }
+                }
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(Theme.accent)
+            .font(.system(size: fontSize))
+            .keyboardShortcut("r", modifiers: [.command])
+            .registerShortcut(name: "Reload Templates", keyLabel: "R", modifiers: [.command], scope: "Templates")
+        }
     }
 
     @ViewBuilder
@@ -2234,6 +2362,7 @@ struct ContentView: View {
             ])
 
             saveSessionNotes(for: cur, reason: "commitDrafts")
+            commitSavedFileDrafts(for: cur)
         }
 
         private func setSessionNotesDraft(_ value: String,
@@ -2324,6 +2453,218 @@ struct ContentView: View {
         private func scheduleSessionNotesAutosave(for session: TicketSession) {
             sessionNotesAutosave.schedule(for: session, delay: 1.0) { [self] in
                 saveSessionNotes(for: session, reason: "autosave")
+            }
+        }
+
+        // MARK: – Saved Files
+
+        private func savedFiles(for session: TicketSession) -> [SessionSavedFile] {
+            sessions.sessionSavedFiles[session] ?? []
+        }
+
+        private func currentSavedFileSelection(for session: TicketSession) -> UUID? {
+            if let stored = selectedSavedFile[session] {
+                return stored
+            }
+            return nil
+        }
+
+        private func setSavedFileSelection(_ id: UUID?, for session: TicketSession) {
+            selectedSavedFile[session] = id
+        }
+
+        private func savedFileDraft(for session: TicketSession, fileId: UUID) -> String {
+            if let text = savedFileDrafts[session]?[fileId] {
+                return text
+            }
+            return savedFiles(for: session).first(where: { $0.id == fileId })?.content ?? ""
+        }
+
+        private func validationState(for session: TicketSession, fileId: UUID) -> JSONValidationState {
+            if let value = savedFileValidation[session]?[fileId] {
+                return value
+            }
+            let draft = savedFileDraft(for: session, fileId: fileId)
+            let validation = validateJSON(draft)
+            var validations = savedFileValidation[session] ?? [:]
+            validations[fileId] = validation
+            savedFileValidation[session] = validations
+            return validation
+        }
+
+        private func ensureSavedFileState(for session: TicketSession) {
+            let files = savedFiles(for: session)
+            guard !files.isEmpty else {
+                savedFileDrafts[session] = [:]
+                savedFileValidation[session] = [:]
+                sessionNotesMode[session] = .notes
+                if currentSavedFileSelection(for: session) != nil {
+                    setSavedFileSelection(nil, for: session)
+                }
+                return
+            }
+
+            var drafts = savedFileDrafts[session] ?? [:]
+            var validations = savedFileValidation[session] ?? [:]
+            let identifiers = Set(files.map { $0.id })
+
+            for file in files {
+                if drafts[file.id] == nil {
+                    drafts[file.id] = file.content
+                }
+                let current = drafts[file.id] ?? file.content
+                validations[file.id] = validateJSON(current)
+            }
+
+            for key in drafts.keys where !identifiers.contains(key) {
+                drafts.removeValue(forKey: key)
+                validations.removeValue(forKey: key)
+                savedFileAutosave.cancel(session: session, fileId: key)
+            }
+
+            savedFileDrafts[session] = drafts
+            savedFileValidation[session] = validations
+
+            if let selected = currentSavedFileSelection(for: session), !identifiers.contains(selected) {
+                setSavedFileSelection(files.first?.id, for: session)
+            } else if currentSavedFileSelection(for: session) == nil {
+                setSavedFileSelection(files.first?.id, for: session)
+            }
+        }
+
+        private func addSavedFile(for session: TicketSession) {
+            ensureSavedFileState(for: session)
+            let defaultName = sessions.generateDefaultFileName(for: session)
+            let message = "Enter a name for the new JSON file. '.json' will be added automatically."
+            let provided = promptForString(title: "New Saved File", message: message, defaultValue: defaultName)?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            let finalName: String
+            if let provided, !provided.isEmpty {
+                finalName = provided
+            } else {
+                finalName = defaultName
+            }
+            let file = sessions.addSavedFile(name: finalName, for: session)
+            ensureSavedFileState(for: session)
+            setSavedFileSelection(file.id, for: session)
+            sessionNotesMode[session] = .savedFiles
+            LOG("Saved file added", ctx: ["session": "\(session.rawValue)", "file": file.displayName])
+        }
+
+        private func removeSavedFile(_ fileId: UUID, in session: TicketSession) {
+            guard let file = savedFiles(for: session).first(where: { $0.id == fileId }) else { return }
+#if canImport(AppKit)
+            let alert = NSAlert()
+            alert.messageText = "Delete Saved File?"
+            alert.informativeText = "This will remove '\(file.displayName)' from Session #\(session.rawValue)."
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: "Delete")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+#endif
+            savedFileAutosave.cancel(session: session, fileId: fileId)
+            sessions.removeSavedFile(id: fileId, from: session)
+            savedFileDrafts[session]?.removeValue(forKey: fileId)
+            savedFileValidation[session]?.removeValue(forKey: fileId)
+            if currentSavedFileSelection(for: session) == fileId {
+                let remaining = savedFiles(for: session)
+                setSavedFileSelection(remaining.first?.id, for: session)
+            }
+            ensureSavedFileState(for: session)
+            LOG("Saved file removed", ctx: ["session": "\(session.rawValue)", "file": file.displayName])
+        }
+
+        private func renameSavedFile(_ fileId: UUID, in session: TicketSession) {
+            guard let file = savedFiles(for: session).first(where: { $0.id == fileId }) else { return }
+            let prompt = "Update the display name for this JSON file."
+            guard let newName = promptForString(title: "Rename Saved File",
+                                               message: prompt,
+                                               defaultValue: file.name)?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+                  !newName.isEmpty else { return }
+            sessions.renameSavedFile(id: fileId, to: newName, in: session)
+            ensureSavedFileState(for: session)
+        }
+
+        private func presentTreeView(for fileId: UUID, session: TicketSession) {
+            guard let file = savedFiles(for: session).first(where: { $0.id == fileId }) else { return }
+            let content = savedFileDraft(for: session, fileId: fileId)
+            savedFileTreePreview = SavedFileTreePreviewContext(fileName: file.displayName, content: content)
+            LOG("Saved file tree preview", ctx: ["session": "\(session.rawValue)", "file": file.displayName])
+        }
+
+        private func setSavedFileDraft(_ value: String,
+                                       for fileId: UUID,
+                                       session: TicketSession,
+                                       source: String) {
+            var drafts = savedFileDrafts[session] ?? [:]
+            let previous = drafts[fileId] ?? savedFiles(for: session).first(where: { $0.id == fileId })?.content ?? ""
+            if previous == value {
+                var validations = savedFileValidation[session] ?? [:]
+                validations[fileId] = validateJSON(value)
+                savedFileValidation[session] = validations
+                return
+            }
+            drafts[fileId] = value
+            savedFileDrafts[session] = drafts
+
+            var validations = savedFileValidation[session] ?? [:]
+            let validation = validateJSON(value)
+            validations[fileId] = validation
+            savedFileValidation[session] = validations
+
+            let delta = value.count - previous.count
+            LOG("Saved file draft updated", ctx: [
+                "session": "\(session.rawValue)",
+                "fileId": fileId.uuidString,
+                "chars": "\(value.count)",
+                "delta": "\(delta)",
+                "valid": validation.isValid ? "true" : "false",
+                "source": source
+            ])
+
+            scheduleSavedFileAutosave(for: session, fileId: fileId)
+        }
+
+        private func scheduleSavedFileAutosave(for session: TicketSession, fileId: UUID) {
+            savedFileAutosave.schedule(session: session, fileId: fileId, delay: 0.8) { [self] in
+                saveSavedFile(for: session, fileId: fileId, reason: "autosave")
+            }
+        }
+
+        private func saveSavedFile(for session: TicketSession, fileId: UUID, reason: String) {
+            savedFileAutosave.cancel(session: session, fileId: fileId)
+            guard let draft = savedFileDrafts[session]?[fileId] else { return }
+            guard let current = savedFiles(for: session).first(where: { $0.id == fileId }) else { return }
+            if current.content == draft { return }
+            sessions.updateSavedFileContent(draft, for: fileId, in: session)
+            LOG("Saved file committed", ctx: [
+                "session": "\(session.rawValue)",
+                "file": current.displayName,
+                "chars": "\(draft.count)",
+                "reason": reason
+            ])
+        }
+
+        private func commitSavedFileDrafts(for session: TicketSession) {
+            guard let drafts = savedFileDrafts[session] else { return }
+            for fileId in drafts.keys {
+                savedFileAutosave.flush(session: session, fileId: fileId)
+                saveSavedFile(for: session, fileId: fileId, reason: "commit")
+            }
+        }
+
+        private func validateJSON(_ text: String) -> JSONValidationState {
+            let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { return .invalid("JSON content is empty") }
+            guard let data = text.data(using: .utf8) else {
+                return .invalid("Unable to encode text as UTF-8")
+            }
+            do {
+                _ = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
+                return .valid
+            } catch {
+                return .invalid(error.localizedDescription)
             }
         }
 
@@ -4252,6 +4593,28 @@ struct ContentView: View {
                                 get: { isPreviewMode },
                                 set: { setPreviewMode($0) }
                             ),
+                            mode: Binding(
+                                get: { sessionNotesMode[activeSession] ?? .notes },
+                                set: { sessionNotesMode[activeSession] = $0 }
+                            ),
+                            savedFiles: savedFiles(for: activeSession),
+                            selectedSavedFileID: currentSavedFileSelection(for: activeSession),
+                            savedFileDraft: { savedFileDraft(for: activeSession, fileId: $0) },
+                            savedFileValidation: { validationState(for: activeSession, fileId: $0) },
+                            onSavedFileSelect: { setSavedFileSelection($0, for: activeSession) },
+                            onSavedFileAdd: { addSavedFile(for: activeSession) },
+                            onSavedFileDelete: { removeSavedFile($0, in: activeSession) },
+                            onSavedFileRename: { renameSavedFile($0, in: activeSession) },
+                            onSavedFileContentChange: { fileId, newValue in
+                                setSavedFileDraft(newValue,
+                                                 for: fileId,
+                                                 session: activeSession,
+                                                 source: "savedFile.inline")
+                            },
+                            onSavedFileFocusChanged: { focused in
+                                isSavedFileEditorFocused = focused
+                            },
+                            onSavedFileOpenTree: { presentTreeView(for: $0, session: activeSession) },
                             onSave: { saveSessionNotes() },
                             onRevert: revertSessionNotes,
                             onLinkRequested: handleSessionNotesLink(selectedText:source:completion:),
@@ -4555,6 +4918,15 @@ struct ContentView: View {
             var fileName: String
         }
 
+        struct SavedFileSnapshot: Equatable {
+            var name: String
+            var content: String
+
+            var hasContent: Bool {
+                !content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            }
+        }
+
         var staticFields: StaticFields
         var sessionName: String
         var sessionLink: String
@@ -4562,6 +4934,7 @@ struct ContentView: View {
         var storedValues: [String: String]
         var dbTables: [String]
         var images: [ImageSnapshot]
+        var savedFiles: [SavedFileSnapshot]
 
         var hasAnyContent: Bool {
             staticFields.hasContent ||
@@ -4570,7 +4943,8 @@ struct ContentView: View {
             alternateFields.contains { $0.hasContent } ||
             storedValues.values.contains { !$0.isEmpty } ||
             dbTables.contains { !$0.isEmpty } ||
-            !images.isEmpty
+            !images.isEmpty ||
+            savedFiles.contains { $0.hasContent }
         }
     }
 
@@ -4617,6 +4991,13 @@ struct ContentView: View {
             SessionSnapshot.ImageSnapshot(id: $0.id, fileName: $0.fileName)
         }
 
+        let savedFiles = (sessions.sessionSavedFiles[session] ?? []).map { file in
+            SessionSnapshot.SavedFileSnapshot(
+                name: file.name,
+                content: file.content
+            )
+        }
+
         return SessionSnapshot(
             staticFields: staticFields,
             sessionName: normalizedName,
@@ -4624,7 +5005,8 @@ struct ContentView: View {
             alternateFields: alternates,
             storedValues: stored,
             dbTables: dbTables,
-            images: images
+            images: images,
+            savedFiles: savedFiles
         )
     }
 
@@ -4854,7 +5236,8 @@ struct ContentView: View {
                 "toNotesDirty": incomingDraft == incomingSaved ? "clean" : "dirty",
                 "sample": String(incomingDraft.prefix(80).replacingOccurrences(of: "\n", with: "⏎"))
             ])
-            
+            ensureSavedFileState(for: newSession)
+
             // Load new session's static fields
             let staticData = sessionStaticFields[newSession] ?? ("", "", "", "")
             orgId = staticData.orgId
@@ -5218,6 +5601,39 @@ struct ContentView: View {
                 let mysqlDb: String
                 let companyLabel: String
             }
+            struct SavedFile: Codable {
+                let id: UUID
+                let name: String
+                let content: String
+                let createdAt: Date?
+                let updatedAt: Date?
+
+                init(id: UUID = UUID(), name: String, content: String, createdAt: Date? = nil, updatedAt: Date? = nil) {
+                    self.id = id
+                    self.name = name
+                    self.content = content
+                    self.createdAt = createdAt
+                    self.updatedAt = updatedAt
+                }
+
+                private enum CodingKeys: String, CodingKey {
+                    case id
+                    case name
+                    case content
+                    case createdAt
+                    case updatedAt
+                }
+
+                init(from decoder: Decoder) throws {
+                    let container = try decoder.container(keyedBy: CodingKeys.self)
+                    self.id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
+                    self.name = try container.decode(String.self, forKey: .name)
+                    self.content = try container.decode(String.self, forKey: .content)
+                    self.createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
+                    self.updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt)
+                }
+            }
+
             let version: Int
             let sessionName: String
             let sessionLink: String?
@@ -5229,7 +5645,64 @@ struct ContentView: View {
             let notes: String
             let alternateFields: [String: String]
             let sessionImages: [SessionImage]
-            
+            let savedFiles: [SavedFile]
+
+            private enum CodingKeys: String, CodingKey {
+                case version
+                case sessionName
+                case sessionLink
+                case templateId
+                case templateName
+                case staticFields
+                case placeholders
+                case dbTables
+                case notes
+                case alternateFields
+                case sessionImages
+                case savedFiles
+            }
+
+            init(version: Int,
+                 sessionName: String,
+                 sessionLink: String?,
+                 templateId: String?,
+                 templateName: String?,
+                 staticFields: StaticFields,
+                 placeholders: [String : String],
+                 dbTables: [String],
+                 notes: String,
+                 alternateFields: [String : String],
+                 sessionImages: [SessionImage],
+                 savedFiles: [SavedFile]) {
+                self.version = version
+                self.sessionName = sessionName
+                self.sessionLink = sessionLink
+                self.templateId = templateId
+                self.templateName = templateName
+                self.staticFields = staticFields
+                self.placeholders = placeholders
+                self.dbTables = dbTables
+                self.notes = notes
+                self.alternateFields = alternateFields
+                self.sessionImages = sessionImages
+                self.savedFiles = savedFiles
+            }
+
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.version = try container.decodeIfPresent(Int.self, forKey: .version) ?? 1
+                self.sessionName = try container.decode(String.self, forKey: .sessionName)
+                self.sessionLink = try container.decodeIfPresent(String.self, forKey: .sessionLink)
+                self.templateId = try container.decodeIfPresent(String.self, forKey: .templateId)
+                self.templateName = try container.decodeIfPresent(String.self, forKey: .templateName)
+                self.staticFields = try container.decode(StaticFields.self, forKey: .staticFields)
+                self.placeholders = try container.decode([String:String].self, forKey: .placeholders)
+                self.dbTables = try container.decode([String].self, forKey: .dbTables)
+                self.notes = try container.decode(String.self, forKey: .notes)
+                self.alternateFields = try container.decode([String:String].self, forKey: .alternateFields)
+                self.sessionImages = try container.decodeIfPresent([SessionImage].self, forKey: .sessionImages) ?? []
+                self.savedFiles = try container.decodeIfPresent([SavedFile].self, forKey: .savedFiles) ?? []
+            }
         }
         
         private func sanitizeFileName(_ name: String) -> String {
@@ -5287,8 +5760,10 @@ struct ContentView: View {
                 return []
             }()
             
+            let savedFiles = sessions.sessionSavedFiles[sessions.current] ?? []
+
             let saved = SavedTicketSession(
-                version: 1,
+                version: 2,
                 sessionName: sessions.sessionNames[sessions.current] ?? "#\(sessions.current.rawValue)",
                 sessionLink: sessions.sessionLinks[sessions.current],
                 templateId: selectedTemplate.map { "\($0.id)" },
@@ -5301,7 +5776,16 @@ struct ContentView: View {
                     .reduce(into: [String:String]()) { dict, field in
                         dict[field.name] = field.value
                     } ?? [:],
-                sessionImages: sessions.sessionImages[sessions.current] ?? []
+                sessionImages: sessions.sessionImages[sessions.current] ?? [],
+                savedFiles: savedFiles.map { file in
+                    SavedTicketSession.SavedFile(
+                        id: file.id,
+                        name: file.name,
+                        content: file.content,
+                        createdAt: file.createdAt,
+                        updatedAt: file.updatedAt
+                    )
+                }
             )
             
             do {
@@ -5399,7 +5883,18 @@ struct ContentView: View {
             sessions.sessionAlternateFields[sessions.current] =
                 loaded.alternateFields.map { AlternateField(name: $0.key, value: $0.value) }
             sessions.sessionImages[sessions.current] = loaded.sessionImages
-            
+            let restoredFiles = loaded.savedFiles.map { item in
+                SessionSavedFile(
+                    id: item.id,
+                    name: item.name,
+                    content: item.content,
+                    createdAt: item.createdAt ?? Date(),
+                    updatedAt: item.updatedAt ?? Date()
+                )
+            }
+            sessions.setSavedFiles(restoredFiles, for: sessions.current)
+            ensureSavedFileState(for: sessions.current)
+
             // Restore template if matched
             if let t = matched {
                 loadTemplate(t)
@@ -5604,6 +6099,11 @@ struct ContentView: View {
             companyLabel = ""
             draftDynamicValues[sessions.current] = [:]
             sessionStaticFields[sessions.current] = ("", "", "", "")
+            savedFileAutosave.cancelAll(for: sessions.current)
+            savedFileDrafts[sessions.current] = [:]
+            savedFileValidation[sessions.current] = [:]
+            setSavedFileSelection(nil, for: sessions.current)
+            sessionNotesMode[sessions.current] = .notes
             setSessionNotesDraft("",
                                  for: sessions.current,
                                  source: "clearSession")
@@ -7325,10 +7825,9 @@ struct ContentView: View {
             } catch {
                 LOG("Failed to save pasted image", ctx: ["error": error.localizedDescription])
             }
-        }
     }
-    
-    
+
+
     // MARK: – Session Notes Sheet (Markdown editor + preview)
     struct SessionNotesSheet: View {
         var fontSize: CGFloat
@@ -7714,6 +8213,18 @@ struct ContentView: View {
         var savedValue: String
         @ObservedObject var controller: MarkdownEditorController
         @Binding var isPreview: Bool
+        @Binding var mode: SessionNotesPaneMode
+        var savedFiles: [SessionSavedFile]
+        var selectedSavedFileID: UUID?
+        var savedFileDraft: (UUID) -> String
+        var savedFileValidation: (UUID) -> JSONValidationState
+        var onSavedFileSelect: (UUID?) -> Void
+        var onSavedFileAdd: () -> Void
+        var onSavedFileDelete: (UUID) -> Void
+        var onSavedFileRename: (UUID) -> Void
+        var onSavedFileContentChange: (UUID, String) -> Void
+        var onSavedFileFocusChanged: (Bool) -> Void
+        var onSavedFileOpenTree: (UUID) -> Void
         var onSave: () -> Void
         var onRevert: () -> Void
         var onLinkRequested: (_ selectedText: String, _ source: MarkdownEditor.LinkRequestSource, _ completion: @escaping (MarkdownEditor.LinkInsertion?) -> Void) -> Void
@@ -7723,6 +8234,46 @@ struct ContentView: View {
         private var isDirty: Bool { draft != savedValue }
 
         var body: some View {
+            VStack(alignment: .leading, spacing: 12) {
+                Picker("Notes Mode", selection: $mode) {
+                    Text("Session Notes").tag(SessionNotesPaneMode.notes)
+                    Text("Saved Files").tag(SessionNotesPaneMode.savedFiles)
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+
+                if mode == .notes {
+                    notesPane
+                } else {
+                    SavedFilesEditor(
+                        fontSize: fontSize,
+                        files: savedFiles,
+                        selectedID: selectedSavedFileID,
+                        draftProvider: savedFileDraft,
+                        validationProvider: savedFileValidation,
+                        onAdd: onSavedFileAdd,
+                        onSelect: onSavedFileSelect,
+                        onDelete: onSavedFileDelete,
+                        onRename: onSavedFileRename,
+                        onContentChange: onSavedFileContentChange,
+                        onFocusChange: onSavedFileFocusChanged,
+                        onOpenTree: onSavedFileOpenTree
+                    )
+                }
+
+                EditorSectionBadge(title: mode == .notes ? "Session Notes" : "Saved Files")
+                    .padding(.top, 4)
+            }
+            .padding(6)
+            .frame(maxWidth: .infinity)
+            .onChange(of: mode) { _, newValue in
+                if newValue != .savedFiles {
+                    onSavedFileFocusChanged(false)
+                }
+            }
+        }
+
+        private var notesPane: some View {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .center, spacing: 12) {
                     MarkdownToolbar(iconSize: fontSize + 2, isEnabled: !isPreview, controller: controller)
@@ -7771,12 +8322,152 @@ struct ContentView: View {
                                 .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
                         )
                 )
-
-                EditorSectionBadge(title: "Session Notes")
-                    .padding(.top, 4)
             }
-            .padding(6)
-            .frame(maxWidth: .infinity)
+        }
+
+        private struct SavedFilesEditor: View {
+            var fontSize: CGFloat
+            var files: [SessionSavedFile]
+            var selectedID: UUID?
+            var draftProvider: (UUID) -> String
+            var validationProvider: (UUID) -> JSONValidationState
+            var onAdd: () -> Void
+            var onSelect: (UUID?) -> Void
+            var onDelete: (UUID) -> Void
+            var onRename: (UUID) -> Void
+            var onContentChange: (UUID, String) -> Void
+            var onFocusChange: (Bool) -> Void
+            var onOpenTree: (UUID) -> Void
+
+            var body: some View {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack(alignment: .center, spacing: 10) {
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 8) {
+                                ForEach(files) { file in
+                                    let isSelected = file.id == selectedID
+                                    Button {
+                                        onSelect(file.id)
+                                    } label: {
+                                        Text(file.displayName)
+                                            .font(.system(size: fontSize - 1, weight: isSelected ? .semibold : .regular))
+                                            .padding(.horizontal, 12)
+                                            .padding(.vertical, 6)
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .tint(isSelected ? Theme.purple : Theme.purple.opacity(0.3))
+                                    .contextMenu {
+                                        Button("Structure View") { onOpenTree(file.id) }
+                                        Button("Rename…") { onRename(file.id) }
+                                        Divider()
+                                        Button("Delete", role: .destructive) { onDelete(file.id) }
+                                    }
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+
+                        Button {
+                            onAdd()
+                        } label: {
+                            Label("Add", systemImage: "plus")
+                                .font(.system(size: fontSize - 1, weight: .semibold))
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(Theme.aqua)
+
+                        Button {
+                            if let id = selectedID {
+                                onOpenTree(id)
+                            }
+                        } label: {
+                            Label("Structure", systemImage: "point.3.connected.trianglepath.dotted")
+                                .font(.system(size: fontSize - 1, weight: .semibold))
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(Theme.gold)
+                        .disabled(selectedID == nil)
+                        .help("Open a tree visualization for the selected JSON file")
+                    }
+
+                    if let selectedID, files.contains(where: { $0.id == selectedID }) {
+                        let binding = Binding<String>(
+                            get: { draftProvider(selectedID) },
+                            set: { onContentChange(selectedID, $0) }
+                        )
+
+                        JSONEditor(
+                            text: binding,
+                            fontSize: fontSize * 1.35,
+                            onFocusChanged: onFocusChange
+                        )
+                        .frame(maxWidth: .infinity, minHeight: 220)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Theme.grayBG.opacity(0.25))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
+                                )
+                        )
+
+                        validationView(for: validationProvider(selectedID))
+                            .padding(.top, 4)
+                    } else {
+                        emptyState
+                    }
+                }
+                .onChange(of: selectedID) { _, newValue in
+                    if newValue == nil {
+                        onFocusChange(false)
+                    }
+                }
+            }
+
+            @ViewBuilder
+            private func validationView(for state: JSONValidationState) -> some View {
+                switch state {
+                case .valid:
+                    Label("Valid JSON", systemImage: "checkmark.circle.fill")
+                        .font(.system(size: fontSize - 2))
+                        .foregroundStyle(Theme.accent)
+                case .invalid(let message):
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label("Invalid JSON", systemImage: "exclamationmark.triangle.fill")
+                            .font(.system(size: fontSize - 2, weight: .semibold))
+                            .foregroundStyle(Color.red)
+                        Text(message)
+                            .font(.system(size: fontSize - 3, weight: .regular, design: .monospaced))
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                    }
+                }
+            }
+
+            private var emptyState: some View {
+                VStack(spacing: 12) {
+                    Text("Create a saved JSON file to get started.")
+                        .font(.system(size: fontSize - 1))
+                        .foregroundStyle(.secondary)
+                    Button {
+                        onAdd()
+                    } label: {
+                        Label("Add Saved File", systemImage: "plus")
+                            .font(.system(size: fontSize - 1, weight: .semibold))
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.purple)
+                }
+                .frame(maxWidth: .infinity, minHeight: 220)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Theme.grayBG.opacity(0.2))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(Theme.purple.opacity(0.15), lineWidth: 1)
+                        )
+                )
+            }
         }
     }
 
@@ -7950,6 +8641,18 @@ struct ContentView: View {
         @Binding var sessionDraft: String
         var sessionSavedValue: String
         @ObservedObject var sessionController: MarkdownEditorController
+        @Binding var sessionNotesMode: SessionNotesPaneMode
+        var savedFiles: [SessionSavedFile]
+        var selectedSavedFileID: UUID?
+        var savedFileDraftProvider: (UUID) -> String
+        var savedFileValidationProvider: (UUID) -> JSONValidationState
+        let onSavedFileSelect: (UUID?) -> Void
+        let onSavedFileAdd: () -> Void
+        let onSavedFileDelete: (UUID) -> Void
+        let onSavedFileRename: (UUID) -> Void
+        let onSavedFileContentChange: (UUID, String) -> Void
+        let onSavedFileFocusChange: (Bool) -> Void
+        let onSavedFileOpenTree: (UUID) -> Void
         let onSessionSave: () -> Void
         let onSessionRevert: () -> Void
         let onSessionLinkRequested: (_ selectedText: String, _ source: MarkdownEditor.LinkRequestSource, _ completion: @escaping (MarkdownEditor.LinkInsertion?) -> Void) -> Void
@@ -8003,6 +8706,18 @@ struct ContentView: View {
                         savedValue: sessionSavedValue,
                         controller: sessionController,
                         isPreview: $isPreview,
+                        mode: $sessionNotesMode,
+                        savedFiles: savedFiles,
+                        selectedSavedFileID: selectedSavedFileID,
+                        savedFileDraft: savedFileDraftProvider,
+                        savedFileValidation: savedFileValidationProvider,
+                        onSavedFileSelect: onSavedFileSelect,
+                        onSavedFileAdd: onSavedFileAdd,
+                        onSavedFileDelete: onSavedFileDelete,
+                        onSavedFileRename: onSavedFileRename,
+                        onSavedFileContentChange: onSavedFileContentChange,
+                        onSavedFileFocusChanged: onSavedFileFocusChange,
+                        onSavedFileOpenTree: onSavedFileOpenTree,
                         onSave: onSessionSave,
                         onRevert: onSessionRevert,
                         onLinkRequested: onSessionLinkRequested,
@@ -8234,3 +8949,5 @@ struct ContentView: View {
                 .drawingGroup()
         }
     }
+
+}

@@ -17,6 +17,24 @@ struct SessionImage: Identifiable, Codable {
     }
 }
 
+struct SessionSavedFile: Identifiable, Codable, Equatable {
+    let id: UUID
+    var name: String
+    var content: String
+    var createdAt: Date
+    var updatedAt: Date
+
+    init(id: UUID = UUID(), name: String, content: String, createdAt: Date = Date(), updatedAt: Date = Date()) {
+        self.id = id
+        self.name = name
+        self.content = content
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
+    }
+
+    var displayName: String { "\(name).json" }
+}
+
 // MARK: – Model for alternate fields
 struct AlternateField: Identifiable, Codable, Equatable {
     var id = UUID()
@@ -50,6 +68,13 @@ final class SessionManager: ObservableObject {
         .one: "",
         .two: "",
         .three: ""
+    ]
+
+    // Per-session saved JSON files
+    @Published var sessionSavedFiles: [TicketSession: [SessionSavedFile]] = [
+        .one: [],
+        .two: [],
+        .three: []
     ]
 
     // Optional per-session link (URL as string)
@@ -133,9 +158,10 @@ final class SessionManager: ObservableObject {
         sessionLinks.removeValue(forKey: session)
         clearSessionImages(for: session)
         sessionAlternateFields[session] = []
+        sessionSavedFiles[session] = []
         LOG("Cleared fields", ctx: ["session":"\(session.rawValue)"])
     }
-    
+
     func clearAllFieldsForCurrentSession() {
         sessionValues[current] = [:]
         sessionNames[current] = "#\(current.rawValue)"
@@ -143,6 +169,7 @@ final class SessionManager: ObservableObject {
         sessionLinks.removeValue(forKey: current)
         clearSessionImages(for: current)
         sessionAlternateFields[current] = []
+        sessionSavedFiles[current] = []
         LOG("Cleared fields", ctx: ["session":"\(current.rawValue)"])
     }
     
@@ -192,5 +219,96 @@ final class SessionManager: ObservableObject {
             "fileName": fileName,
             "newName": normalized ?? "(default)"
         ])
+    }
+
+    // MARK: – Saved file helpers
+    func savedFiles(for session: TicketSession) -> [SessionSavedFile] {
+        sessionSavedFiles[session] ?? []
+    }
+
+    func setSavedFiles(_ files: [SessionSavedFile], for session: TicketSession) {
+        sessionSavedFiles[session] = files
+    }
+
+    func addSavedFile(name: String, content: String = "{\n  \"key\": \"value\"\n}\n", for session: TicketSession) -> SessionSavedFile {
+        var files = sessionSavedFiles[session] ?? []
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized = trimmed.isEmpty ? generateDefaultFileName(for: session, existing: files) : resolveDuplicateName(trimmed, within: files)
+        let now = Date()
+        let file = SessionSavedFile(name: normalized, content: content, createdAt: now, updatedAt: now)
+        files.append(file)
+        sessionSavedFiles[session] = files
+        LOG("Saved file created", ctx: [
+            "session": "\(session.rawValue)",
+            "file": file.displayName
+        ])
+        return file
+    }
+
+    func updateSavedFileContent(_ content: String, for fileId: SessionSavedFile.ID, in session: TicketSession) {
+        guard var files = sessionSavedFiles[session], let index = files.firstIndex(where: { $0.id == fileId }) else { return }
+        if files[index].content == content { return }
+        files[index].content = content
+        files[index].updatedAt = Date()
+        sessionSavedFiles[session] = files
+        LOG("Saved file content updated", ctx: [
+            "session": "\(session.rawValue)",
+            "file": files[index].displayName,
+            "chars": "\(content.count)"
+        ])
+    }
+
+    func renameSavedFile(id: SessionSavedFile.ID, to newName: String, in session: TicketSession) {
+        let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard var files = sessionSavedFiles[session], let index = files.firstIndex(where: { $0.id == id }) else { return }
+        let resolved = resolveDuplicateName(trimmed.isEmpty ? files[index].name : trimmed, within: files, excluding: id)
+        if files[index].name == resolved { return }
+        files[index].name = resolved
+        files[index].updatedAt = Date()
+        sessionSavedFiles[session] = files
+        LOG("Saved file renamed", ctx: [
+            "session": "\(session.rawValue)",
+            "fileId": id.uuidString,
+            "newName": resolved
+        ])
+    }
+
+    func removeSavedFile(id: SessionSavedFile.ID, from session: TicketSession) {
+        guard var files = sessionSavedFiles[session], let index = files.firstIndex(where: { $0.id == id }) else { return }
+        let removed = files.remove(at: index)
+        sessionSavedFiles[session] = files
+        LOG("Saved file removed", ctx: [
+            "session": "\(session.rawValue)",
+            "file": removed.displayName
+        ])
+    }
+
+    func generateDefaultFileName(for session: TicketSession) -> String {
+        let files = sessionSavedFiles[session] ?? []
+        return generateDefaultFileName(for: session, existing: files)
+    }
+
+    // MARK: – Helpers
+    private func resolveDuplicateName(_ name: String, within files: [SessionSavedFile], excluding id: SessionSavedFile.ID? = nil) -> String {
+        let base = name
+        var candidate = base
+        var suffix = 1
+        let existingNames = Set(files.filter { $0.id != id }.map { $0.name.lowercased() })
+        while existingNames.contains(candidate.lowercased()) {
+            candidate = "\(base)\(suffix)"
+            suffix += 1
+        }
+        return candidate
+    }
+
+    private func generateDefaultFileName(for session: TicketSession, existing: [SessionSavedFile]) -> String {
+        let base = "name"
+        let existingNames = Set(existing.map { $0.name.lowercased() })
+        if !existingNames.contains(base) { return base }
+        var suffix = 1
+        while existingNames.contains("\(base)\(suffix)".lowercased()) {
+            suffix += 1
+        }
+        return "\(base)\(suffix)"
     }
 }
