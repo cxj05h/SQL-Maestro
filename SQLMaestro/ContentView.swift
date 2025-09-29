@@ -3885,27 +3885,27 @@ struct ContentView: View {
                     .font(.system(size: fontSize - 1))
                     .help("Open the troubleshooting guide and session notes in a larger window")
 
-                    Spacer(minLength: 0)
-
                     if showTroubleshootingGuide, guideDirty {
-                        Button("Save Guide") {
-                            guard let template = selectedTemplate else { return }
-                            if templateGuideStore.saveNotes(for: template) {
-                                guideNotesDraft = templateGuideStore.currentNotes(for: template)
-                                touchTemplateActivity(for: template)
+                        HStack(spacing: 8) {
+                            Button("Save Guide") {
+                                guard let template = selectedTemplate else { return }
+                                if templateGuideStore.saveNotes(for: template) {
+                                    guideNotesDraft = templateGuideStore.currentNotes(for: template)
+                                    touchTemplateActivity(for: template)
+                                }
                             }
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(Theme.purple)
-                        .font(.system(size: fontSize - 1))
+                            .buttonStyle(.borderedProminent)
+                            .tint(Theme.purple)
+                            .font(.system(size: fontSize - 1))
 
-                        Button("Revert") {
-                            guard let template = selectedTemplate else { return }
-                            guideNotesDraft = templateGuideStore.revertNotes(for: template)
+                            Button("Revert") {
+                                guard let template = selectedTemplate else { return }
+                                guideNotesDraft = templateGuideStore.revertNotes(for: template)
+                            }
+                            .buttonStyle(.bordered)
+                            .tint(Theme.pink)
+                            .font(.system(size: fontSize - 1))
                         }
-                        .buttonStyle(.bordered)
-                        .tint(Theme.pink)
-                        .font(.system(size: fontSize - 1))
                     }
 
                     Spacer(minLength: 12)
