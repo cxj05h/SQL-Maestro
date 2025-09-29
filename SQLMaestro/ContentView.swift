@@ -914,6 +914,7 @@ struct ContentView: View {
     @State private var toastOpenDB: Bool = false
     @State private var toastReloaded: Bool = false
     @State private var imageAttachmentToast: String? = nil
+    @State private var toastPreviewBehind: Bool = false
 
     @State private var alternateFieldsLocked: Bool = true
 
@@ -1129,6 +1130,14 @@ struct ContentView: View {
                         .font(.system(size: fontSize))
                         .padding(.horizontal, 12).padding(.vertical, 6)
                         .background(Theme.accent.opacity(0.9)).foregroundStyle(.black)
+                        .clipShape(Capsule())
+                        .transition(.move(edge: .top).combined(with: .opacity))
+                }
+                if toastPreviewBehind {
+                    Text("Close editor to view preview")
+                        .font(.system(size: fontSize))
+                        .padding(.horizontal, 12).padding(.vertical, 6)
+                        .background(Theme.purple.opacity(0.9)).foregroundStyle(.black)
                         .clipShape(Capsule())
                         .transition(.move(edge: .top).combined(with: .opacity))
                 }
@@ -1832,6 +1841,14 @@ struct ContentView: View {
             }
         }
 
+        private func notifyPreviewBehindIfNeeded() {
+            guard showGuideNotesPopout else { return }
+            withAnimation { toastPreviewBehind = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) {
+                withAnimation { toastPreviewBehind = false }
+            }
+        }
+
         private func handleGuideEditorImageAttachment(_ info: MarkdownEditor.ImageDropInfo) -> MarkdownEditor.ImageInsertion? {
             guard let template = selectedTemplate else {
 #if canImport(AppKit)
@@ -1887,11 +1904,13 @@ struct ContentView: View {
                 if wantsPreview {
                     if let sessionImage = sessionImage(forFileURL: url) {
                         previewingSessionImage = sessionImage
+                        notifyPreviewBehindIfNeeded()
                         return
                     }
                     if let template = selectedTemplate,
                        let guideImage = guideImage(forFileURL: url, template: template) {
                         previewingGuideImage = guideImage
+                        notifyPreviewBehindIfNeeded()
                         return
                     }
                 }
@@ -3462,6 +3481,7 @@ struct ContentView: View {
                                     },
                                     onPreview: { imageToPreview in
                                         previewingSessionImage = imageToPreview
+                                        notifyPreviewBehindIfNeeded()
                                     }
                                 )
                             }
@@ -3533,7 +3553,10 @@ struct ContentView: View {
                                         onOpen: { openGuideImage(image) },
                                         onRename: { renameGuideImage(image) },
                                         onDelete: { deleteGuideImage(image) },
-                                        onPreview: { previewingGuideImage = image }
+                                        onPreview: {
+                                            previewingGuideImage = image
+                                            notifyPreviewBehindIfNeeded()
+                                        }
                                     )
                                 }
                             }
