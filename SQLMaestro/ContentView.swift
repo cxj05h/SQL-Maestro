@@ -3856,38 +3856,17 @@ struct ContentView: View {
         private var outputView: some View {
             let guideDirty = templateGuideStore.isNotesDirty(for: selectedTemplate)
             return VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    Text(showTroubleshootingGuide ? "Troubleshooting Guide" : "Output SQL")
-                        .font(.system(size: fontSize + 4, weight: .semibold))
-                        .foregroundStyle(Theme.aqua)
-
+                HStack(alignment: .center, spacing: 12) {
                     if showTroubleshootingGuide {
-                        if guideDirty {
-                            Button("Save Guide") {
-                                guard let template = selectedTemplate else { return }
-                                if templateGuideStore.saveNotes(for: template) {
-                                    guideNotesDraft = templateGuideStore.currentNotes(for: template)
-                                    touchTemplateActivity(for: template)
-                                }
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(Theme.purple)
-                            .font(.system(size: fontSize - 1))
-
-                            Button("Revert") {
-                                guard let template = selectedTemplate else { return }
-                                guideNotesDraft = templateGuideStore.revertNotes(for: template)
-                            }
-                            .buttonStyle(.bordered)
-                            .tint(Theme.pink)
-                            .font(.system(size: fontSize - 1))
-                        }
-
                         MarkdownToolbar(iconSize: fontSize + 2, isEnabled: !isPreviewMode, controller: guideNotesEditor)
                         PreviewModeToggle(isPreview: Binding(
                             get: { isPreviewMode },
                             set: { setPreviewMode($0) }
                         ))
+                    } else {
+                        Text("Output SQL")
+                            .font(.system(size: fontSize + 4, weight: .semibold))
+                            .foregroundStyle(Theme.aqua)
                     }
 
                     Button(showGuideNotesPopout ? "Hide Popout" : "Pop Out Editors") {
@@ -3906,6 +3885,29 @@ struct ContentView: View {
                     .font(.system(size: fontSize - 1))
                     .help("Open the troubleshooting guide and session notes in a larger window")
 
+                    Spacer(minLength: 0)
+
+                    if showTroubleshootingGuide, guideDirty {
+                        Button("Save Guide") {
+                            guard let template = selectedTemplate else { return }
+                            if templateGuideStore.saveNotes(for: template) {
+                                guideNotesDraft = templateGuideStore.currentNotes(for: template)
+                                touchTemplateActivity(for: template)
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Theme.purple)
+                        .font(.system(size: fontSize - 1))
+
+                        Button("Revert") {
+                            guard let template = selectedTemplate else { return }
+                            guideNotesDraft = templateGuideStore.revertNotes(for: template)
+                        }
+                        .buttonStyle(.bordered)
+                        .tint(Theme.pink)
+                        .font(.system(size: fontSize - 1))
+                    }
+
                     Spacer(minLength: 12)
 
                     Button {
@@ -3922,58 +3924,68 @@ struct ContentView: View {
                 let leftPane = Group {
                     if showTroubleshootingGuide {
                         if let template = selectedTemplate {
-                            Group {
-                                if isPreviewMode {
-                                    MarkdownPreviewView(
-                                        text: guideNotesDraft,
-                                        fontSize: fontSize * 1.5,
-                                        onLinkOpen: { url, modifiers in
-                                            openLink(url, modifiers: modifiers)
-                                        }
-                                    )
-                                } else {
-                                    MarkdownEditor(
-                                        text: $guideNotesDraft,
-                                        fontSize: fontSize * 1.5,
-                                        controller: guideNotesEditor,
-                                        onLinkRequested: handleTroubleshootingLink(selectedText:source:completion:),
-                                        onImageAttachment: { info in
-                                            handleGuideEditorImageAttachment(info)
-                                        }
-                                    )
+                            VStack(spacing: 10) {
+                                Group {
+                                    if isPreviewMode {
+                                        MarkdownPreviewView(
+                                            text: guideNotesDraft,
+                                            fontSize: fontSize * 1.5,
+                                            onLinkOpen: { url, modifiers in
+                                                openLink(url, modifiers: modifiers)
+                                            }
+                                        )
+                                    } else {
+                                        MarkdownEditor(
+                                            text: $guideNotesDraft,
+                                            fontSize: fontSize * 1.5,
+                                            controller: guideNotesEditor,
+                                            onLinkRequested: handleTroubleshootingLink(selectedText:source:completion:),
+                                            onImageAttachment: { info in
+                                                handleGuideEditorImageAttachment(info)
+                                            }
+                                        )
+                                    }
                                 }
-                            }
-                            .frame(minHeight: 200)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(Theme.grayBG.opacity(0.25))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
-                                    )
-                            )
-                            .onChange(of: guideNotesDraft) { _, newVal in
-                                if templateGuideStore.setNotes(newVal, for: template) {
-                                    touchTemplateActivity(for: template)
+                                .frame(minHeight: 200)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .fill(Theme.grayBG.opacity(0.25))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 8)
+                                                .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
+                                        )
+                                )
+                                .onChange(of: guideNotesDraft) { _, newVal in
+                                    if templateGuideStore.setNotes(newVal, for: template) {
+                                        touchTemplateActivity(for: template)
+                                    }
                                 }
+
+                                EditorSectionBadge(title: "Troubleshooting Guide")
+                                    .padding(.top, 4)
                             }
                         } else {
-                            VStack {
-                                Text("Select a template to view its troubleshooting guide")
-                                    .font(.system(size: fontSize - 1))
-                                    .foregroundStyle(.secondary)
-                                Spacer()
+                            VStack(spacing: 10) {
+                                VStack {
+                                    Text("Select a template to view its troubleshooting guide")
+                                        .font(.system(size: fontSize - 1))
+                                        .foregroundStyle(.secondary)
+                                    Spacer()
+                                }
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .fill(Theme.grayBG.opacity(0.25))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 8)
+                                                .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
+                                        )
+                                )
+                                .frame(minHeight: 160)
+
+                                EditorSectionBadge(title: "Troubleshooting Guide")
+                                    .padding(.top, 4)
                             }
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(Theme.grayBG.opacity(0.25))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
-                                    )
-                            )
-                            .frame(minHeight: 160)
                         }
                     } else {
                         TextEditor(text: $populatedSQL)
@@ -7396,6 +7408,30 @@ struct ContentView: View {
         }
     }
 
+    private struct EditorSectionBadge: View {
+        var title: String
+
+        var body: some View {
+            HStack {
+                Spacer(minLength: 0)
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Theme.aqua)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 6)
+                    .background(Color.clear)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Theme.pink.opacity(0.85), lineWidth: 1)
+                    )
+                    .lineLimit(1)
+                    .fixedSize(horizontal: true, vertical: true)
+                    .accessibilityLabel(title)
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
     struct SessionNotesInline: View {
         var fontSize: CGFloat
         var session: TicketSession
@@ -7412,12 +7448,8 @@ struct ContentView: View {
         private var isDirty: Bool { draft != savedValue }
 
         var body: some View {
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    Text("Session Notes")
-                        .font(.system(size: fontSize - 1, weight: .semibold))
-                        .foregroundStyle(Theme.aqua)
-
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(alignment: .center, spacing: 12) {
                     MarkdownToolbar(iconSize: fontSize + 2, isEnabled: !isPreview, controller: controller)
                     PreviewModeToggle(isPreview: $isPreview)
 
@@ -7464,6 +7496,9 @@ struct ContentView: View {
                                 .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
                         )
                 )
+
+                EditorSectionBadge(title: "Session Notes")
+                    .padding(.top, 4)
             }
             .padding(6)
             .frame(maxWidth: .infinity)
@@ -7676,8 +7711,8 @@ struct ContentView: View {
 
                 HSplitView {
                     guideColumn
-                        .frame(minWidth: 620, idealWidth: 700, maxWidth: .infinity, maxHeight: .infinity)
-                        .layoutPriority(2)
+                        .frame(minWidth: 540, idealWidth: 560, maxWidth: .infinity, maxHeight: .infinity)
+                        .layoutPriority(1)
 
                     SessionNotesInline(
                         fontSize: fontSize,
@@ -7692,7 +7727,7 @@ struct ContentView: View {
                         onLinkOpen: onSessionLinkOpen,
                         onImageAttachment: onSessionImageAttachment
                     )
-                    .frame(minWidth: 440, idealWidth: 500, maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(minWidth: 540, idealWidth: 560, maxWidth: .infinity, maxHeight: .infinity)
                     .frame(minHeight: 320)
                     .layoutPriority(1)
                 }
@@ -7715,10 +7750,11 @@ struct ContentView: View {
         @ViewBuilder
         private var guideColumn: some View {
             VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .firstTextBaseline, spacing: 12) {
-                    Text("Troubleshooting Guide")
-                        .font(.system(size: fontSize - 1, weight: .semibold))
-                        .foregroundStyle(Theme.aqua)
+                HStack(alignment: .center, spacing: 12) {
+                    MarkdownToolbar(iconSize: fontSize + 2, isEnabled: !isPreview, controller: guideController)
+                    PreviewModeToggle(isPreview: $isPreview)
+
+                    Spacer()
 
                     if guideDirty {
                         Button("Save Guide") {
@@ -7735,11 +7771,6 @@ struct ContentView: View {
                         .tint(Theme.pink)
                         .font(.system(size: fontSize - 1))
                     }
-
-                    MarkdownToolbar(iconSize: fontSize + 2, isEnabled: !isPreview, controller: guideController)
-                    PreviewModeToggle(isPreview: $isPreview)
-
-                    Spacer()
                 }
 
                 Group {
@@ -7794,6 +7825,9 @@ struct ContentView: View {
                         .frame(minHeight: 280)
                     }
                 }
+
+                EditorSectionBadge(title: "Troubleshooting Guide")
+                    .padding(.top, 4)
             }
         }
     }
