@@ -3,6 +3,50 @@ import MarkdownUI
 import AppKit
 import UniformTypeIdentifiers
 
+private let markdownFileLinkRegex: NSRegularExpression = {
+    let pattern = #"!?\[([^\]]*)\]\(([^)]+)\)"#
+    return try! NSRegularExpression(pattern: pattern, options: [])
+}()
+
+@MainActor
+final class SessionNotesAutosaveCoordinator: ObservableObject {
+    private struct Entry {
+        let workItem: DispatchWorkItem
+        let action: () -> Void
+    }
+
+    private var entries: [TicketSession: Entry] = [:]
+
+    func schedule(for session: TicketSession, delay: TimeInterval, action: @escaping () -> Void) {
+        cancel(for: session)
+        let workItem = DispatchWorkItem { [weak self] in
+            guard self?.entries.removeValue(forKey: session) != nil else { return }
+            action()
+        }
+        entries[session] = Entry(workItem: workItem, action: action)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+    }
+
+    func flush(for session: TicketSession) {
+        guard let entry = entries.removeValue(forKey: session) else { return }
+        entry.workItem.cancel()
+        DispatchQueue.main.async(execute: entry.action)
+    }
+
+    func cancel(for session: TicketSession) {
+        guard let entry = entries.removeValue(forKey: session) else { return }
+        entry.workItem.cancel()
+    }
+
+    func cancelAll() {
+        let toCancel = Array(entries.values)
+        entries.removeAll(keepingCapacity: false)
+        for entry in toCancel {
+            entry.workItem.cancel()
+        }
+    }
+}
+
 enum SessionTemplateTab {
     case sessionImages
     case guideImages
@@ -941,6 +985,7 @@ struct ContentView: View {
     @State private var sessionNotesDrafts: [TicketSession: String] = [:]
     @StateObject private var sessionNotesEditor = MarkdownEditorController()
     @StateObject private var guideNotesEditor = MarkdownEditorController()
+    @StateObject private var sessionNotesAutosave = SessionNotesAutosaveCoordinator()
     @State private var isPreviewMode: Bool = true
     
     @State private var searchText: String = ""
@@ -1247,7 +1292,7 @@ struct ContentView: View {
                 ),
                 sessionSavedValue: sessions.sessionNotes[activeSession] ?? "",
                 sessionController: sessionNotesEditor,
-                onSessionSave: saveSessionNotes,
+                onSessionSave: { saveSessionNotes() },
                 onSessionRevert: revertSessionNotes,
                 onSessionLinkRequested: handleSessionNotesLink(selectedText:source:completion:),
                 onSessionImageAttachment: { info in
@@ -2003,6 +2048,7 @@ struct ContentView: View {
             let updatedSaved = replaceLinkLabels(in: currentSaved, fileURL: fileURL, newLabel: newLabel)
             if updatedSaved != currentSaved {
                 sessions.sessionNotes[session] = updatedSaved
+                syncSessionImageNames(with: updatedSaved, for: session)
             }
         }
 
@@ -2033,6 +2079,7 @@ struct ContentView: View {
             let updatedStore = replaceLinkLabels(in: existingStore, fileURL: fileURL, newLabel: newLabel)
             if updatedStore != existingStore {
                 _ = templateGuideStore.setNotes(updatedStore, for: template)
+                syncGuideImageNames(with: updatedStore, for: template)
             }
         }
 
@@ -2048,6 +2095,7 @@ struct ContentView: View {
             let cleanedStore = removingImageLinks(from: existingStore, fileURL: fileURL)
             if cleanedStore != existingStore {
                 _ = templateGuideStore.setNotes(cleanedStore, for: template)
+                syncGuideImageNames(with: cleanedStore, for: template)
                 changed = true
             }
             return changed
@@ -2184,6 +2232,8 @@ struct ContentView: View {
                 "notesDirty": finalDraft == savedValue ? "clean" : "dirty",
                 "sample": String(finalDraft.prefix(80).replacingOccurrences(of: "\n", with: "⏎"))
             ])
+
+            saveSessionNotes(for: cur, reason: "commitDrafts")
         }
 
         private func setSessionNotesDraft(_ value: String,
@@ -2192,6 +2242,11 @@ struct ContentView: View {
                                           logChange: Bool = true) {
             let previous = sessionNotesDrafts[session] ?? ""
             sessionNotesDrafts[session] = value
+
+            if value != previous {
+                syncSessionImageNames(with: value, for: session)
+                scheduleSessionNotesAutosave(for: session)
+            }
             guard logChange else { return }
 
             let saved = sessions.sessionNotes[session] ?? ""
@@ -2205,6 +2260,71 @@ struct ContentView: View {
                 "sample": String(sample),
                 "source": source
             ])
+        }
+
+        private func extractFileLinkLabels(from text: String) -> [String: String] {
+            guard !text.isEmpty else { return [:] }
+            let range = NSRange(text.startIndex..<text.endIndex, in: text)
+            var results: [String: String] = [:]
+
+            markdownFileLinkRegex.enumerateMatches(in: text, options: [], range: range) { match, _, _ in
+                guard let match,
+                      match.numberOfRanges >= 3,
+                      let labelRange = Range(match.range(at: 1), in: text),
+                      let urlRange = Range(match.range(at: 2), in: text) else { return }
+
+                let label = String(text[labelRange])
+                var target = String(text[urlRange]).trimmingCharacters(in: .whitespacesAndNewlines)
+
+                if target.hasPrefix("<"), target.hasSuffix(">"), target.count >= 2 {
+                    target = String(target.dropFirst().dropLast())
+                }
+
+                var resolvedURL: URL?
+                if let direct = URL(string: target), direct.isFileURL {
+                    resolvedURL = direct
+                } else if target.hasPrefix("file://") {
+                    let prefixCount = "file://".count
+                    var path = String(target.dropFirst(prefixCount))
+                    if let decoded = path.removingPercentEncoding {
+                        path = decoded
+                    }
+                    if !path.hasPrefix("/") {
+                        path = "/" + path
+                    }
+                    resolvedURL = URL(fileURLWithPath: path)
+                }
+
+                guard let url = resolvedURL else { return }
+                let fileName = url.lastPathComponent
+                results[fileName] = label
+            }
+
+            return results
+        }
+
+        private func syncSessionImageNames(with notes: String, for session: TicketSession) {
+            let labels = extractFileLinkLabels(from: notes)
+            guard !labels.isEmpty else { return }
+
+            for (fileName, label) in labels {
+                sessions.setSessionImageName(fileName: fileName, to: label, for: session)
+            }
+        }
+
+        private func syncGuideImageNames(with notes: String, for template: TemplateItem) {
+            let labels = extractFileLinkLabels(from: notes)
+            guard !labels.isEmpty else { return }
+
+            for (fileName, label) in labels {
+                templateGuideStore.setImageCustomName(fileName: fileName, to: label, for: template)
+            }
+        }
+
+        private func scheduleSessionNotesAutosave(for session: TicketSession) {
+            sessionNotesAutosave.schedule(for: session, delay: 1.0) { [self] in
+                saveSessionNotes(for: session, reason: "autosave")
+            }
         }
 
         private var filteredTemplates: [TemplateItem] {
@@ -4052,6 +4172,7 @@ struct ContentView: View {
                                         )
                                 )
                                 .onChange(of: guideNotesDraft) { _, newVal in
+                                    syncGuideImageNames(with: newVal, for: template)
                                     if templateGuideStore.setNotes(newVal, for: template) {
                                         touchTemplateActivity(for: template)
                                     }
@@ -4131,7 +4252,7 @@ struct ContentView: View {
                                 get: { isPreviewMode },
                                 set: { setPreviewMode($0) }
                             ),
-                            onSave: saveSessionNotes,
+                            onSave: { saveSessionNotes() },
                             onRevert: revertSessionNotes,
                             onLinkRequested: handleSessionNotesLink(selectedText:source:completion:),
                             onLinkOpen: { url, modifiers in
@@ -4534,11 +4655,31 @@ struct ContentView: View {
         return false
     }
 
-        private func saveSessionNotes() {
-            let currentSession = sessions.current
-            let draft = sessionNotesDrafts[currentSession] ?? ""
-            sessions.sessionNotes[currentSession] = draft
-            LOG("Session notes saved", ctx: ["session": "\(currentSession.rawValue)", "length": "\(draft.count)"])
+        private func saveSessionNotes(reason: String = "manual") {
+            saveSessionNotes(for: sessions.current, reason: reason)
+        }
+
+        private func saveSessionNotes(for session: TicketSession, reason: String) {
+            sessionNotesAutosave.cancel(for: session)
+            let draft = sessionNotesDrafts[session] ?? ""
+            let previous = sessions.sessionNotes[session] ?? ""
+            if previous == draft {
+                LOG("Session notes save skipped", ctx: [
+                    "session": "\(session.rawValue)",
+                    "length": "\(draft.count)",
+                    "reason": reason,
+                    "status": "unchanged"
+                ])
+                return
+            }
+            sessions.sessionNotes[session] = draft
+            let delta = draft.count - previous.count
+            LOG("Session notes saved", ctx: [
+                "session": "\(session.rawValue)",
+                "length": "\(draft.count)",
+                "delta": "\(delta)",
+                "reason": reason
+            ])
         }
 
         private func revertSessionNotes() {

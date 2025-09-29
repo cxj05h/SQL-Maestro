@@ -170,4 +170,27 @@ final class SessionManager: ObservableObject {
             ])
         }
     }
+
+    func setSessionImageName(fileName: String, to newName: String?, for session: TicketSession) {
+        guard var images = sessionImages[session],
+              let index = images.firstIndex(where: { $0.fileName == fileName }) else { return }
+
+        let trimmed = newName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized: String?
+        if let trimmed, !trimmed.isEmpty {
+            normalized = trimmed
+        } else {
+            normalized = nil
+        }
+
+        if images[index].customName == normalized { return }
+
+        images[index].customName = normalized
+        sessionImages[session] = images
+        LOG("Session image name synced from notes", ctx: [
+            "session": "\(session.rawValue)",
+            "fileName": fileName,
+            "newName": normalized ?? "(default)"
+        ])
+    }
 }

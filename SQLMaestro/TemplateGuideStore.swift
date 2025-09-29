@@ -108,6 +108,31 @@ final class TemplateGuideStore: ObservableObject {
         return true
     }
     
+    func setImageCustomName(fileName: String, to newName: String?, for template: TemplateItem) {
+        let trimmed = newName?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalized: String?
+        if let trimmed, !trimmed.isEmpty {
+            normalized = trimmed
+        } else {
+            normalized = nil
+        }
+
+        let key = key(for: template)
+        guard var images = imageCache[key],
+              let index = images.firstIndex(where: { $0.fileName == fileName }) else { return }
+
+        if images[index].customName == normalized { return }
+
+        images[index].customName = normalized
+        imageCache[key] = images
+        persistImages(for: template, images: images)
+        LOG("Template guide image name synced from notes", ctx: [
+            "template": template.name,
+            "fileName": fileName,
+            "newName": normalized ?? "(default)"
+        ])
+    }
+
     func imageURL(for image: TemplateGuideImage, template: TemplateItem) -> URL {
         imageURL(fileName: image.fileName, for: template)
     }
