@@ -6841,6 +6841,9 @@ struct ContentView: View {
                 .frame(width: resolvedWidth,
                        height: resolvedHeight,
                        alignment: .topLeading)
+#if canImport(AppKit)
+                .background(FloatingWindowConfigurator(level: .floating))
+#endif
             }
         }
 
@@ -6964,6 +6967,9 @@ struct ContentView: View {
                 .frame(width: resolvedWidth,
                        height: resolvedHeight,
                        alignment: .topLeading)
+#if canImport(AppKit)
+                .background(FloatingWindowConfigurator(level: .floating))
+#endif
             }
         }
         private func handleImagePaste() {
@@ -7529,6 +7535,33 @@ struct ContentView: View {
         }
     }
 
+    private struct FloatingWindowConfigurator: NSViewRepresentable {
+        let level: NSWindow.Level
+
+        func makeNSView(context: Context) -> NSView {
+            let view = NSView(frame: .zero)
+            DispatchQueue.main.async {
+                configureWindow(for: view)
+            }
+            return view
+        }
+
+        func updateNSView(_ nsView: NSView, context: Context) {
+            DispatchQueue.main.async {
+                configureWindow(for: nsView)
+            }
+        }
+
+        private func configureWindow(for view: NSView) {
+            guard let window = view.window else { return }
+            window.level = level
+            window.collectionBehavior.insert(.fullScreenAuxiliary)
+            window.isMovableByWindowBackground = true
+            window.orderFrontRegardless()
+            NSApp.activate(ignoringOtherApps: true)
+        }
+    }
+
     private struct KeyboardShortcutOverlay: View {
         let onTrigger: () -> Void
 
@@ -7548,6 +7581,12 @@ struct ContentView: View {
         let minSize: CGSize
         let preferredSize: CGSize
         let sizeStorageKey: String
+
+        var body: some View { EmptyView() }
+    }
+
+    private struct FloatingWindowConfigurator: View {
+        let level: Int
 
         var body: some View { EmptyView() }
     }
