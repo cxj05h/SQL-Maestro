@@ -96,6 +96,86 @@ private extension String {
         return result
     }
 }
+#if canImport(AppKit)
+private final class MainWindowConfigurator {
+    static let shared = MainWindowConfigurator()
+
+    private var observer: NSObjectProtocol?
+
+    func activate() {
+        guard observer == nil else { return }
+
+        observer = NotificationCenter.default.addObserver(forName: NSWindow.didBecomeMainNotification,
+                                                          object: nil,
+                                                          queue: .main) { [weak self] note in
+            guard let window = note.object as? NSWindow else { return }
+            self?.apply(to: window)
+        }
+
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            for window in NSApplication.shared.windows {
+                self.apply(to: window)
+            }
+        }
+    }
+
+    deinit {
+        if let observer {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+
+    private func apply(to window: NSWindow) {
+        window.styleMask.insert([.titled, .resizable, .fullSizeContentView])
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.title = ""
+        window.isMovableByWindowBackground = true
+        window.titlebarSeparatorStyle = .line
+
+        let hasAccessory = window.titlebarAccessoryViewControllers.contains { controller in
+            controller is AppTitleAccessoryViewController
+        }
+        if !hasAccessory {
+            window.addTitlebarAccessoryViewController(AppTitleAccessoryViewController())
+        }
+    }
+}
+
+private final class AppTitleAccessoryViewController: NSTitlebarAccessoryViewController {
+    override init(nibName nibNameOrNil: NSNib.Name?, bundle nibBundleOrNil: Bundle?) {
+        super.init(nibName: nibNameOrNil, bundle: nibBundleOrNil)
+        layoutAttribute = .leading
+    }
+
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func loadView() {
+        let label = NSTextField(labelWithString: "SQL Maestro")
+        label.font = NSFont.systemFont(ofSize: 14, weight: .medium)
+        label.textColor = NSColor.labelColor
+        label.alignment = .left
+        label.translatesAutoresizingMaskIntoConstraints = false
+
+        let container = NSView(frame: NSRect(x: 0, y: 0, width: 160, height: 28))
+        container.translatesAutoresizingMaskIntoConstraints = false
+        container.addSubview(label)
+
+        NSLayoutConstraint.activate([
+            container.widthAnchor.constraint(greaterThanOrEqualToConstant: 100),
+            container.heightAnchor.constraint(equalToConstant: 28),
+            label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 6),
+            label.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -6),
+            label.centerYAnchor.constraint(equalTo: container.centerYAnchor)
+        ])
+
+        view = container
+    }
+}
+#endif
 @main
 struct SQLMaestroApp: App {
     @StateObject private var templates = TemplateManager()
@@ -104,6 +184,9 @@ struct SQLMaestroApp: App {
         AppPaths.ensureAll()
             AppPaths.copyBundledAssets() // Add this line
         _ = AppLogger.shared
+#if canImport(AppKit)
+        MainWindowConfigurator.shared.activate()
+#endif
         GlobalShortcutManager.shared.registerBeginShortcut {
             NSApplication.shared.activate(ignoringOtherApps: true)
             NotificationCenter.default.post(name: .beginQuickCaptureRequested, object: nil)

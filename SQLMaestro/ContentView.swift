@@ -116,6 +116,23 @@ enum BottomPaneContent: Hashable {
     case savedFiles
 }
 
+enum PopoutPaneContext: Identifiable {
+    case guide
+    case session(TicketSession)
+    case saved(TicketSession)
+
+    var id: String {
+        switch self {
+        case .guide:
+            return "guide"
+        case .session(let session):
+            return "session-\(session.rawValue)"
+        case .saved(let session):
+            return "saved-\(session.rawValue)"
+        }
+    }
+}
+
 enum JSONValidationState: Equatable {
     case valid
     case invalid(String)
@@ -1047,13 +1064,11 @@ struct ContentView: View {
     @State private var previewingGuideImage: TemplateGuideImage? = nil
     @State private var activeBottomPane: BottomPaneContent? = nil
     @State private var isOutputVisible: Bool = false
-    @State private var showGuideNotesPopout: Bool = false
     @State private var guideNotesDraft: String = ""
     @State private var hoveredTemplateLinkID: UUID? = nil
     @State private var tagEditorTemplate: TemplateItem?
     @State private var tagExplorerContext: TagExplorerContext?
-    @State private var showSavedFilesPopout: Bool = false
-    @State private var savedFilesPopoutSession: TicketSession = .one
+    @State private var activePopoutPane: PopoutPaneContext? = nil
     @State private var isSidebarVisible: Bool = false
     struct TagExplorerContext: Identifiable {
         let tag: String
@@ -1383,9 +1398,24 @@ struct ContentView: View {
         .sheet(isPresented: $showDatabaseSettings) {
             DatabaseSettingsSheet(userConfig: userConfig)
         }
-        .sheet(isPresented: $showGuideNotesPopout) {
-            let activeSession = sessions.current
-            GuideAndNotesPopoutSheet(
+        .sheet(item: $activePopoutPane) { pane in
+            let session: TicketSession = {
+                switch pane {
+                case .guide: return sessions.current
+                case .session(let s): return s
+                case .saved(let s): return s
+                }
+            }()
+
+            let closeAction: () -> Void = {
+                if case .saved = pane {
+                    commitSavedFileDrafts(for: session)
+                }
+                activePopoutPane = nil
+            }
+
+            PanePopoutSheet(
+                pane: pane,
                 fontSize: fontSize,
                 selectedTemplate: selectedTemplate,
                 guideText: $guideNotesDraft,
@@ -1419,91 +1449,18 @@ struct ContentView: View {
                 onGuideLinkOpen: { url, modifiers in
                     openLink(url, modifiers: modifiers)
                 },
-                session: activeSession,
-                sessionDraft: Binding(
-                    get: { sessionNotesDrafts[activeSession] ?? "" },
-                    set: { newValue in
-                        setSessionNotesDraft(newValue,
-                                             for: activeSession,
-                                             source: "editor-popout-inline",
-                                             logChange: false)
-                    }
-                ),
-                sessionSavedValue: sessions.sessionNotes[activeSession] ?? "",
-                sessionController: sessionNotesEditor,
-                sessionNotesMode: Binding(
-                    get: { sessionNotesMode[activeSession] ?? .notes },
-                    set: { sessionNotesMode[activeSession] = $0 }
-                ),
-                savedFiles: savedFiles(for: activeSession),
-                selectedSavedFileID: currentSavedFileSelection(for: activeSession),
-                savedFileDraftProvider: { savedFileDraft(for: activeSession, fileId: $0) },
-                savedFileValidationProvider: { validationState(for: activeSession, fileId: $0) },
-                onSavedFileSelect: { setSavedFileSelection($0, for: activeSession) },
-                onSavedFileAdd: { addSavedFile(for: activeSession) },
-                onSavedFileDelete: { removeSavedFile($0, in: activeSession) },
-                onSavedFileRename: { renameSavedFile($0, in: activeSession) },
-                onSavedFileContentChange: { fileId, newValue in
-                    setSavedFileDraft(newValue,
-                                      for: fileId,
-                                      session: activeSession,
-                                      source: "editor-popout")
-                },
-                onSavedFileFocusChange: { focused in
-                    isSavedFileEditorFocused = focused
-                },
-                onSavedFileOpenTree: { presentTreeView(for: $0, session: activeSession) },
-                onSavedFilesModeExit: { commitSavedFileDrafts(for: activeSession) },
-                onSessionSave: { saveSessionNotes() },
-                onSessionRevert: revertSessionNotes,
-                onSessionLinkRequested: handleSessionNotesLink(selectedText:source:completion:),
-                onSessionImageAttachment: { info in
-                    handleSessionEditorImageAttachment(info)
-                },
-                onSessionLinkOpen: { url, modifiers in
-                    openLink(url, modifiers: modifiers)
-                },
-                onSessionDraftChanged: { session, newValue in
-                    if sessionNotesDrafts[session] == newValue { return }
-                    setSessionNotesDraft(newValue,
-                                         for: session,
-                                         source: "editor-popout",
-                                         logChange: false)
-                },
-                onHide: {
-                    showGuideNotesPopout = false
-                },
-                onTogglePreview: {
-                    togglePreviewShortcut()
-                }
-            )
-            .id(activeSession)
-            .frame(minWidth: 1100, minHeight: 720)
-        }
-        .sheet(isPresented: $showSavedFilesPopout) {
-            let session = savedFilesPopoutSession
-            SavedFilesPopoutSheet(
-                fontSize: fontSize,
                 session: session,
                 sessionDraft: Binding(
                     get: { sessionNotesDrafts[session] ?? "" },
                     set: { newValue in
                         setSessionNotesDraft(newValue,
                                              for: session,
-                                             source: "savedFile-popout",
+                                             source: "popout",
                                              logChange: false)
                     }
                 ),
                 sessionSavedValue: sessions.sessionNotes[session] ?? "",
                 sessionController: sessionNotesEditor,
-                sessionNotesMode: Binding(
-                    get: { sessionNotesMode[session] ?? .savedFiles },
-                    set: { sessionNotesMode[session] = $0 }
-                ),
-                isPreview: Binding(
-                    get: { isPreviewMode },
-                    set: { setPreviewMode($0) }
-                ),
                 savedFiles: savedFiles(for: session),
                 selectedSavedFileID: currentSavedFileSelection(for: session),
                 savedFileDraftProvider: { savedFileDraft(for: session, fileId: $0) },
@@ -1518,11 +1475,9 @@ struct ContentView: View {
                                       session: session,
                                       source: "savedFile.popout")
                 },
-                onSavedFileFocusChange: { focused in
-                    isSavedFileEditorFocused = focused
-                },
+                onSavedFileFocusChange: { _ in },
                 onSavedFileOpenTree: { presentTreeView(for: $0, session: session) },
-                onSavedFileModeExit: { commitSavedFileDrafts(for: session) },
+                onSavedFilesModeExit: { commitSavedFileDrafts(for: session) },
                 onSessionSave: { saveSessionNotes() },
                 onSessionRevert: revertSessionNotes,
                 onSessionLinkRequested: handleSessionNotesLink(selectedText:source:completion:),
@@ -1532,22 +1487,13 @@ struct ContentView: View {
                 onSessionLinkOpen: { url, modifiers in
                     openLink(url, modifiers: modifiers)
                 },
-                onSessionDraftChanged: { _, newValue in
-                    setSessionNotesDraft(newValue,
-                                         for: session,
-                                         source: "savedFile-popout",
-                                         logChange: false)
-                },
-                onTogglePreview: {
-                    togglePreviewShortcut()
-                },
-                onClose: {
-                    commitSavedFileDrafts(for: session)
-                    showSavedFilesPopout = false
-                }
+                onClose: { activePopoutPane = nil },
+                onTogglePreview: togglePreviewShortcut
             )
             .id(session)
         }
+
+        
         .sheet(item: $tagEditorTemplate) { template in
             TemplateTagEditorSheet(
                 template: template,
@@ -1741,7 +1687,7 @@ struct ContentView: View {
         } footer: {
             templatesFooter
         }
-        .padding()
+        .padding(EdgeInsets(top: 5, leading: 16, bottom: 16, trailing: 16))
         .background(Theme.grayBG)
         .frame(minWidth: 300, idealWidth: 320)
     }
@@ -2174,7 +2120,7 @@ struct ContentView: View {
         }
 
         private func notifyPreviewBehindIfNeeded() {
-            guard showGuideNotesPopout else { return }
+            guard case .guide? = activePopoutPane else { return }
             withAnimation { toastPreviewBehind = true }
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) {
                 withAnimation { toastPreviewBehind = false }
@@ -4535,7 +4481,6 @@ struct ContentView: View {
         }
         
         // MARK: — Output area
-        private var isGuidePaneActive: Bool { activeBottomPane == .guideNotes }
 
         private func setActivePane(_ pane: BottomPaneContent?) {
             let normalized: BottomPaneContent?
@@ -4582,6 +4527,7 @@ struct ContentView: View {
                     bottomPaneContainer(pane: pane, guideDirty: guideDirty, activeSession: activeSession)
                 }
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
 
         private var outputSQLSection: some View {
@@ -4629,22 +4575,28 @@ struct ContentView: View {
         private func bottomPaneContainer(pane: BottomPaneContent, guideDirty: Bool, activeSession: TicketSession) -> some View {
             VStack(spacing: 0) {
                 bottomPaneHeader(for: pane, guideDirty: guideDirty, activeSession: activeSession)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 12)
-                    .background(
-                        RoundedRectangle(cornerRadius: 14)
-                            .fill(Theme.grayBG.opacity(0.3))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 14)
-                                    .stroke(Theme.purple.opacity(0.18), lineWidth: 1)
-                            )
-                    )
-                    .padding(.bottom, 2)
+                    .padding(.horizontal, 20)
+                    .padding(.top, 18)
+                    .padding(.bottom, 12)
+
+                Divider().opacity(0.15)
 
                 bottomPaneContent(for: pane, activeSession: activeSession)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 16)
+                    .padding(.top, pane == .savedFiles ? 28 : 16)
+                    .padding(.horizontal, 20)
+                    .padding(.bottom, 30)
+                    .frame(maxHeight: .infinity, alignment: .top)
             }
+            .background(
+                RoundedRectangle(cornerRadius: 18)
+                    .fill(Theme.grayBG.opacity(0.28))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 18)
+                            .stroke(Theme.purple.opacity(0.22), lineWidth: 1)
+                    )
+            )
+            .padding(.horizontal, 4)
+            .frame(maxHeight: .infinity, alignment: .top)
         }
 
         private func bottomPaneHeader(for pane: BottomPaneContent, guideDirty: Bool, activeSession: TicketSession) -> some View {
@@ -4726,11 +4678,23 @@ struct ContentView: View {
         }
 
         private func paneTitle(for pane: BottomPaneContent) -> some View {
-            let info = paneInfo(for: pane)
-            return Label(info.title, systemImage: info.systemImage)
-                .labelStyle(.titleAndIcon)
-                .font(.system(size: fontSize + 2, weight: .semibold))
-                .foregroundStyle(Theme.aqua)
+            switch pane {
+            case .guideNotes:
+                return Label("Guide Notes", systemImage: "text.book.closed")
+                    .labelStyle(.titleAndIcon)
+                    .font(.system(size: fontSize + 2, weight: .semibold))
+                    .foregroundStyle(Theme.aqua)
+            case .sessionNotes:
+                return Label("Session Notes", systemImage: "pencil.and.list.clipboard")
+                    .labelStyle(.titleAndIcon)
+                    .font(.system(size: fontSize + 2, weight: .semibold))
+                    .foregroundStyle(Theme.aqua)
+            case .savedFiles:
+                return Label("Saved Files", systemImage: "doc.richtext")
+                    .labelStyle(.titleAndIcon)
+                    .font(.system(size: fontSize + 2, weight: .semibold))
+                    .foregroundStyle(Theme.aqua)
+            }
         }
 
         private var commandSidebar: some View {
@@ -5026,7 +4990,9 @@ struct ContentView: View {
                     handleSessionEditorImageAttachment(info)
                 },
                 showsModePicker: false,
-                showsModeToolbar: true
+                showsModeToolbar: false,
+                showsOuterBackground: true,
+                showsContentBackground: false
             )
         }
 
@@ -5079,27 +5045,27 @@ struct ContentView: View {
                     handleSessionEditorImageAttachment(info)
                 },
                 showsModePicker: false,
-                showsModeToolbar: false
+                showsModeToolbar: false,
+                showsOuterBackground: true,
+                showsContentBackground: false
             )
         }
 
         private func triggerPopOut(for activeSession: TicketSession) {
-            switch activeBottomPane {
-            case .guideNotes, .sessionNotes:
-                if activeBottomPane == .guideNotes, selectedTemplate == nil {
-                    return
-                }
+            guard let pane = activeBottomPane else { return }
+            switch pane {
+            case .guideNotes:
+                guard selectedTemplate != nil else { return }
                 if let template = selectedTemplate {
                     templateGuideStore.prepare(for: template)
                     guideNotesDraft = templateGuideStore.currentNotes(for: template)
                 }
-                showGuideNotesPopout = true
+                activePopoutPane = .guide
+            case .sessionNotes:
+                activePopoutPane = .session(activeSession)
             case .savedFiles:
-                savedFilesPopoutSession = activeSession
                 sessionNotesMode[activeSession] = .savedFiles
-                showSavedFilesPopout = true
-            case nil:
-                break
+                activePopoutPane = .saved(activeSession)
             }
         }
 
@@ -5138,14 +5104,6 @@ struct ContentView: View {
                     .keyboardShortcut(.return, modifiers: [.command])
                     .font(.system(size: fontSize))
                     .registerShortcut(name: "Populate Query", key: .return, modifiers: [.command], scope: "Global")
-
-                Button(isGuidePaneActive ? "Hide Guide" : "Troubleshooting Guide") {
-                    setActivePane(isGuidePaneActive ? nil : .guideNotes)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.accent)
-                .font(.system(size: fontSize))
-                .disabled(selectedTemplate == nil && !isGuidePaneActive)
 
                 Button("Clear Session #\(sessions.current.rawValue)") {
                     attemptClearCurrentSession()
@@ -8684,10 +8642,35 @@ struct ContentView: View {
         var onImageAttachment: (MarkdownEditor.ImageDropInfo) -> MarkdownEditor.ImageInsertion?
         var showsModePicker: Bool = true
         var showsModeToolbar: Bool = true
+        var showsOuterBackground: Bool = true
+        var showsContentBackground: Bool = true
 
         private var isDirty: Bool { draft != savedValue }
 
         var body: some View {
+            Group {
+                if showsOuterBackground {
+                    contentStack
+                        .padding(18)
+                        .background(
+                            RoundedRectangle(cornerRadius: 14)
+                                .fill(Theme.grayBG.opacity(0.22))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 14)
+                                        .stroke(Theme.purple.opacity(0.2), lineWidth: 1)
+                                )
+                        )
+                } else {
+                    contentStack
+                        .padding(.top, 12)
+                        .padding(.bottom, 20)
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+
+        @ViewBuilder
+        private var contentStack: some View {
             VStack(alignment: .leading, spacing: 16) {
                 if showsModePicker {
                     Picker("Notes Mode", selection: $mode) {
@@ -8702,42 +8685,37 @@ struct ContentView: View {
                     modeToolbar
                 }
 
-                Group {
-                    if mode == .notes {
-                        notesPane
-                    } else {
-                        SavedFilesWorkspace(
-                            fontSize: fontSize,
-                            files: savedFiles,
-                            selectedID: selectedSavedFileID,
-                            draftProvider: savedFileDraft,
-                            validationProvider: savedFileValidation,
-                            onAdd: onSavedFileAdd,
-                            onSelect: onSavedFileSelect,
-                            onDelete: onSavedFileDelete,
-                            onRename: onSavedFileRename,
-                            onContentChange: onSavedFileContentChange,
-                            onFocusChange: onSavedFileFocusChanged,
-                            onOpenTree: onSavedFileOpenTree
-                        )
-                    }
-                }
+                contentBody
             }
-            .padding(18)
-            .frame(maxWidth: .infinity)
-            .background(
-                RoundedRectangle(cornerRadius: 14)
-                    .fill(Theme.grayBG.opacity(0.22))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 14)
-                            .stroke(Theme.purple.opacity(0.2), lineWidth: 1)
-                    )
-            )
             .onChange(of: mode) { previous, newValue in
                 if newValue != .savedFiles {
                     onSavedFileFocusChanged(false)
                     onSavedFilesModeExit()
                 }
+            }
+        }
+
+        @ViewBuilder
+        private var contentBody: some View {
+            if mode == .notes {
+                notesPane
+                    .padding(.top, showsContentBackground ? 4 : 12)
+            } else {
+                SavedFilesWorkspace(
+                    fontSize: fontSize,
+                    files: savedFiles,
+                    selectedID: selectedSavedFileID,
+                    draftProvider: savedFileDraft,
+                    validationProvider: savedFileValidation,
+                    onAdd: onSavedFileAdd,
+                    onSelect: onSavedFileSelect,
+                    onDelete: onSavedFileDelete,
+                    onRename: onSavedFileRename,
+                    onContentChange: onSavedFileContentChange,
+                    onFocusChange: onSavedFileFocusChanged,
+                    onOpenTree: onSavedFileOpenTree
+                )
+                .padding(.top, 18)
             }
         }
 
@@ -8786,8 +8764,9 @@ struct ContentView: View {
             )
         }
 
+        @ViewBuilder
         private var notesPane: some View {
-            Group {
+            let base = Group {
                 if isPreview {
                     MarkdownPreviewView(
                         text: draft,
@@ -8807,14 +8786,20 @@ struct ContentView: View {
                 }
             }
             .frame(maxWidth: .infinity, minHeight: 220)
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Theme.grayBG.opacity(0.25))
-                    .overlay(
+
+            if showsContentBackground {
+                base
+                    .background(
                         RoundedRectangle(cornerRadius: 10)
-                            .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
+                            .fill(Theme.grayBG.opacity(0.25))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
+                            )
                     )
-            )
+            } else {
+                base
+            }
         }
 
         struct SavedFilesWorkspace: View {
@@ -8974,9 +8959,10 @@ struct ContentView: View {
                         validationView(for: validationProvider(selectedID))
                             .padding(.top, 4)
                     } else {
-                        emptyState
+                            emptyState
                     }
                 }
+                .padding(.top, 12)
                 .onChange(of: selectedID) { _, newValue in
                     searchStatus = .idle
                     searchQuery = ""
@@ -9267,7 +9253,8 @@ struct ContentView: View {
 #endif
 
     // MARK: – Guide + Session Notes Popout
-    struct GuideAndNotesPopoutSheet: View {
+    struct PanePopoutSheet: View {
+        let pane: PopoutPaneContext
         var fontSize: CGFloat
         var selectedTemplate: TemplateItem?
         @Binding var guideText: String
@@ -9285,7 +9272,6 @@ struct ContentView: View {
         @Binding var sessionDraft: String
         var sessionSavedValue: String
         @ObservedObject var sessionController: MarkdownEditorController
-        @Binding var sessionNotesMode: SessionNotesPaneMode
         var savedFiles: [SessionSavedFile]
         var selectedSavedFileID: UUID?
         var savedFileDraftProvider: (UUID) -> String
@@ -9303,15 +9289,33 @@ struct ContentView: View {
         let onSessionLinkRequested: (_ selectedText: String, _ source: MarkdownEditor.LinkRequestSource, _ completion: @escaping (MarkdownEditor.LinkInsertion?) -> Void) -> Void
         let onSessionImageAttachment: (MarkdownEditor.ImageDropInfo) -> MarkdownEditor.ImageInsertion?
         let onSessionLinkOpen: (URL, NSEvent.ModifierFlags) -> Void
-        let onSessionDraftChanged: (TicketSession, String) -> Void
-        let onHide: () -> Void
+        let onClose: () -> Void
         let onTogglePreview: () -> Void
 
         var body: some View {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 18) {
+                header
+                content
+            }
+            .padding(20)
+            .frame(minWidth: preferredSize.width, minHeight: preferredSize.height)
+            .background(
+                SheetWindowConfigurator(
+                    minSize: preferredSize,
+                    preferredSize: CGSize(width: preferredSize.width, height: preferredSize.height + 40),
+                    sizeStorageKey: storageKey
+                )
+            )
+            .onDisappear(perform: onClose)
+        }
+
+        @ViewBuilder
+        private var header: some View {
+            HStack(alignment: .center, spacing: 12) {
+                switch pane {
+                case .guide:
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Guide & Session Notes")
+                        Text("Guide Notes")
                             .font(.system(size: fontSize + 4, weight: .semibold))
                             .foregroundStyle(Theme.aqua)
                         if let template = selectedTemplate {
@@ -9324,208 +9328,70 @@ struct ContentView: View {
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    Spacer()
-                }
-
-                HSplitView {
-                    guideColumn
-                        .frame(minWidth: 540, idealWidth: 560, maxWidth: .infinity, maxHeight: .infinity)
-                        .layoutPriority(1)
-
-                    SessionNotesInline(
-                        fontSize: fontSize,
-                        session: session,
-                        draft: Binding(
-                            get: { sessionDraft },
-                            set: { newValue in
-                                sessionDraft = newValue
-                                onSessionDraftChanged(session, newValue)
-                            }
-                        ),
-                        savedValue: sessionSavedValue,
-                        controller: sessionController,
-                        isPreview: $isPreview,
-                        mode: $sessionNotesMode,
-                        savedFiles: savedFiles,
-                        selectedSavedFileID: selectedSavedFileID,
-                        savedFileDraft: savedFileDraftProvider,
-                        savedFileValidation: savedFileValidationProvider,
-                        onSavedFileSelect: onSavedFileSelect,
-                        onSavedFileAdd: onSavedFileAdd,
-                        onSavedFileDelete: onSavedFileDelete,
-                        onSavedFileRename: onSavedFileRename,
-                        onSavedFileContentChange: onSavedFileContentChange,
-                        onSavedFileFocusChanged: onSavedFileFocusChange,
-                        onSavedFileOpenTree: onSavedFileOpenTree,
-                        onSavedFilesModeExit: onSavedFilesModeExit,
-                        onSave: onSessionSave,
-                        onRevert: onSessionRevert,
-                        onLinkRequested: onSessionLinkRequested,
-                        onLinkOpen: onSessionLinkOpen,
-                        onImageAttachment: onSessionImageAttachment
-                    )
-                    .frame(minWidth: 540, idealWidth: 560, maxWidth: .infinity, maxHeight: .infinity)
-                    .frame(minHeight: 320)
-                    .layoutPriority(1)
-                }
-                .frame(minHeight: 420, maxHeight: .infinity)
-            }
-            .padding(20)
-            .frame(minWidth: 1100, minHeight: 720)
-            .background(
-                SheetWindowConfigurator(
-                    minSize: CGSize(width: 1100, height: 720),
-                    preferredSize: CGSize(width: 1220, height: 800),
-                    sizeStorageKey: "GuideNotesPopoutSize"
-                )
-            )
-            .overlay(
-                KeyboardShortcutOverlay(onTrigger: onTogglePreview)
-            )
-        }
-
-        @ViewBuilder
-        private var guideColumn: some View {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .center, spacing: 12) {
-                    MarkdownToolbar(iconSize: fontSize + 2, isEnabled: !isPreview, controller: guideController)
-                    PreviewModeToggle(isPreview: $isPreview)
-
-                    Spacer()
-
-                    if guideDirty {
-                        Button("Save Guide") {
-                            onGuideSave()
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .tint(Theme.purple)
-                        .font(.system(size: fontSize - 1))
-
-                        Button("Revert") {
-                            onGuideRevert()
-                        }
-                        .buttonStyle(.bordered)
-                        .tint(Theme.pink)
-                        .font(.system(size: fontSize - 1))
-                    }
-                }
-
-                Group {
-                    if selectedTemplate != nil {
-                        Group {
-                            if isPreview {
-                                MarkdownPreviewView(
-                                    text: guideText,
-                                    fontSize: fontSize * 1.5,
-                                    onLinkOpen: onGuideLinkOpen
-                                )
-                            } else {
-                                MarkdownEditor(
-                                    text: $guideText,
-                                    fontSize: fontSize * 1.5,
-                                    controller: guideController,
-                                    onLinkRequested: onGuideLinkRequested,
-                                    onImageAttachment: { info in
-                                        onGuideImageAttachment(info)
-                                    }
-                                )
-                            }
-                        }
-                        .frame(minHeight: 280)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Theme.grayBG.opacity(0.25))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
-                                )
-                        )
-                        .onChange(of: guideText) { _, newValue in
-                            onGuideTextChanged(newValue)
-                        }
-                    } else {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Select a template to view its troubleshooting guide")
-                                .font(.system(size: fontSize - 1))
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8)
-                                .fill(Theme.grayBG.opacity(0.25))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 8)
-                                        .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
-                                )
-                        )
-                        .frame(minHeight: 280)
-                    }
-                }
-
-                EditorSectionBadge(title: "Troubleshooting Guide")
-                    .padding(.top, 4)
-            }
-        }
-    }
-
-    struct SavedFilesPopoutSheet: View {
-        var fontSize: CGFloat
-        var session: TicketSession
-        @Binding var sessionDraft: String
-        var sessionSavedValue: String
-        @ObservedObject var sessionController: MarkdownEditorController
-        @Binding var sessionNotesMode: SessionNotesPaneMode
-        @Binding var isPreview: Bool
-        var savedFiles: [SessionSavedFile]
-        var selectedSavedFileID: UUID?
-        var savedFileDraftProvider: (UUID) -> String
-        var savedFileValidationProvider: (UUID) -> JSONValidationState
-        let onSavedFileSelect: (UUID?) -> Void
-        let onSavedFileAdd: () -> Void
-        let onSavedFileDelete: (UUID) -> Void
-        let onSavedFileRename: (UUID) -> Void
-        let onSavedFileContentChange: (UUID, String) -> Void
-        let onSavedFileFocusChange: (Bool) -> Void
-        let onSavedFileOpenTree: (UUID) -> Void
-        let onSavedFileModeExit: () -> Void
-        let onSessionSave: () -> Void
-        let onSessionRevert: () -> Void
-        let onSessionLinkRequested: (_ selectedText: String, _ source: MarkdownEditor.LinkRequestSource, _ completion: @escaping (MarkdownEditor.LinkInsertion?) -> Void) -> Void
-        let onSessionImageAttachment: (MarkdownEditor.ImageDropInfo) -> MarkdownEditor.ImageInsertion?
-        let onSessionLinkOpen: (URL, NSEvent.ModifierFlags) -> Void
-        let onSessionDraftChanged: (TicketSession, String) -> Void
-        let onTogglePreview: () -> Void
-        let onClose: () -> Void
-
-        var body: some View {
-            VStack(alignment: .leading, spacing: 16) {
-                HStack(alignment: .center, spacing: 12) {
+                case .session(let s):
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Saved Files Workspace")
+                        Text("Session Notes")
                             .font(.system(size: fontSize + 4, weight: .semibold))
                             .foregroundStyle(Theme.aqua)
-                        Text("Session #\(session.rawValue)")
+                        Text("Session #\(s.rawValue)")
                             .font(.system(size: fontSize - 1, weight: .medium))
                             .foregroundStyle(.secondary)
                     }
-                    Spacer()
+                case .saved(let s):
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Saved Files")
+                            .font(.system(size: fontSize + 4, weight: .semibold))
+                            .foregroundStyle(Theme.aqua)
+                        Text("Session #\(s.rawValue)")
+                            .font(.system(size: fontSize - 1, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
                 }
 
+                Spacer()
+
+                Button("Close") { onClose() }
+                    .buttonStyle(.bordered)
+                    .font(.system(size: fontSize - 1))
+
+                if case .guide = pane, guideDirty {
+                    Button("Save") { onGuideSave() }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Theme.purple)
+                        .font(.system(size: fontSize - 1))
+                    Button("Revert") { onGuideRevert() }
+                        .buttonStyle(.bordered)
+                        .tint(Theme.pink)
+                        .font(.system(size: fontSize - 1))
+                }
+
+                if case .session = pane, sessionDraft != sessionSavedValue {
+                    Button("Save") { onSessionSave() }
+                        .buttonStyle(.borderedProminent)
+                        .tint(Theme.purple)
+                        .font(.system(size: fontSize - 1))
+                    Button("Revert") { onSessionRevert() }
+                        .buttonStyle(.bordered)
+                        .tint(Theme.pink)
+                        .font(.system(size: fontSize - 1))
+                }
+            }
+        }
+
+        @ViewBuilder
+        private var content: some View {
+            switch pane {
+            case .guide:
+                guideBody
+            case .session:
                 SessionNotesInline(
                     fontSize: fontSize,
                     session: session,
-                    draft: Binding(
-                        get: { sessionDraft },
-                        set: { newValue in
-                            sessionDraft = newValue
-                            onSessionDraftChanged(session, newValue)
-                        }
-                    ),
+                    draft: $sessionDraft,
                     savedValue: sessionSavedValue,
                     controller: sessionController,
                     isPreview: $isPreview,
-                    mode: $sessionNotesMode,
+                    mode: .constant(.notes),
                     savedFiles: savedFiles,
                     selectedSavedFileID: selectedSavedFileID,
                     savedFileDraft: savedFileDraftProvider,
@@ -9537,27 +9403,132 @@ struct ContentView: View {
                     onSavedFileContentChange: onSavedFileContentChange,
                     onSavedFileFocusChanged: onSavedFileFocusChange,
                     onSavedFileOpenTree: onSavedFileOpenTree,
-                    onSavedFilesModeExit: onSavedFileModeExit,
+                    onSavedFilesModeExit: onSavedFilesModeExit,
+                    onSavedFilesPopout: nil,
                     onSave: onSessionSave,
                     onRevert: onSessionRevert,
                     onLinkRequested: onSessionLinkRequested,
                     onLinkOpen: onSessionLinkOpen,
-                    onImageAttachment: onSessionImageAttachment
+                    onImageAttachment: onSessionImageAttachment,
+                    showsModePicker: false,
+                    showsModeToolbar: true,
+                    showsOuterBackground: true
                 )
-                .frame(minHeight: 360)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .overlay(
+                    KeyboardShortcutOverlay(onTrigger: onTogglePreview)
+                )
+            case .saved:
+                SessionNotesInline(
+                    fontSize: fontSize,
+                    session: session,
+                    draft: $sessionDraft,
+                    savedValue: sessionSavedValue,
+                    controller: sessionController,
+                    isPreview: $isPreview,
+                    mode: .constant(.savedFiles),
+                    savedFiles: savedFiles,
+                    selectedSavedFileID: selectedSavedFileID,
+                    savedFileDraft: savedFileDraftProvider,
+                    savedFileValidation: savedFileValidationProvider,
+                    onSavedFileSelect: onSavedFileSelect,
+                    onSavedFileAdd: onSavedFileAdd,
+                    onSavedFileDelete: onSavedFileDelete,
+                    onSavedFileRename: onSavedFileRename,
+                    onSavedFileContentChange: onSavedFileContentChange,
+                    onSavedFileFocusChanged: onSavedFileFocusChange,
+                    onSavedFileOpenTree: onSavedFileOpenTree,
+                    onSavedFilesModeExit: onSavedFilesModeExit,
+                    onSavedFilesPopout: nil,
+                    onSave: onSessionSave,
+                    onRevert: onSessionRevert,
+                    onLinkRequested: onSessionLinkRequested,
+                    onLinkOpen: onSessionLinkOpen,
+                    onImageAttachment: onSessionImageAttachment,
+                    showsModePicker: false,
+                    showsModeToolbar: true,
+                    showsOuterBackground: true
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .overlay(
+                    KeyboardShortcutOverlay(onTrigger: onTogglePreview)
+                )
             }
-            .padding(20)
-            .frame(minWidth: 900, minHeight: 600)
-            .background(
-                SheetWindowConfigurator(
-                    minSize: CGSize(width: 900, height: 600),
-                    preferredSize: CGSize(width: 1040, height: 680),
-                    sizeStorageKey: "SavedFilesPopoutSize"
-                )
-            )
+        }
+
+        private var guideBody: some View {
+            Group {
+                if selectedTemplate != nil {
+                    Group {
+                        if isPreview {
+                            MarkdownPreviewView(
+                                text: guideText,
+                                fontSize: fontSize * 1.5,
+                                onLinkOpen: onGuideLinkOpen
+                            )
+                        } else {
+                            MarkdownEditor(
+                                text: $guideText,
+                                fontSize: fontSize * 1.5,
+                                controller: guideController,
+                                onLinkRequested: onGuideLinkRequested,
+                                onImageAttachment: { info in
+                                    onGuideImageAttachment(info)
+                                }
+                            )
+                            .onChange(of: guideText) { _, newValue in
+                                onGuideTextChanged(newValue)
+                            }
+                        }
+                    }
+                    .frame(minHeight: 320)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Theme.grayBG.opacity(0.25))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
+                            )
+                    )
+                } else {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Select a template to view its troubleshooting guide")
+                            .font(.system(size: fontSize - 1))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 320)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Theme.grayBG.opacity(0.2))
+                    )
+                }
+            }
             .overlay(
                 KeyboardShortcutOverlay(onTrigger: onTogglePreview)
             )
+        }
+
+        private var preferredSize: CGSize {
+            switch pane {
+            case .guide:
+                return CGSize(width: 960, height: 720)
+            case .session:
+                return CGSize(width: 940, height: 700)
+            case .saved:
+                return CGSize(width: 940, height: 700)
+            }
+        }
+
+        private var storageKey: String {
+            switch pane {
+            case .guide:
+                return "GuidePanePopoutSize"
+            case .session:
+                return "SessionPanePopoutSize"
+            case .saved:
+                return "SavedFilesPanePopoutSize"
+            }
         }
     }
 
@@ -9600,11 +9571,11 @@ struct ContentView: View {
                     Button("Open") { onOpen() }
                         .buttonStyle(.bordered)
                         .font(.system(size: fontSize - 3))
-                    
+
                     Button("Edit") { onEdit() }
                         .buttonStyle(.bordered)
                         .font(.system(size: fontSize - 3))
-                    
+
                     Button("Delete") { onDelete() }
                         .buttonStyle(.bordered)
                         .tint(.red)

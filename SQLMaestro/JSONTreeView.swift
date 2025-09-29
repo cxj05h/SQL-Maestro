@@ -431,25 +431,25 @@ private struct JSONTreeCanvas: View {
 
     private func drawConnections(context: inout GraphicsContext) {
         let radius: CGFloat = 6
-        let branchOffset: CGFloat = 22
-        let columnPadding: CGFloat = 36
+        let columnPadding: CGFloat = 48
+        let approachInset: CGFloat = 12
         for positioned in layout.positionedNodes {
             guard !positioned.node.children.isEmpty else { continue }
             let startPoint = CGPoint(x: positioned.position.x - radius, y: positioned.position.y)
             for child in positioned.node.children {
                 guard let childPointRaw = layout.position(for: child.id) else { continue }
                 let endPoint = CGPoint(x: childPointRaw.x - radius, y: childPointRaw.y)
+                let approachY = endPoint.y + 18
                 var path = Path()
                 path.move(to: startPoint)
                 let columnXBase = min(startPoint.x, endPoint.x) - columnPadding
                 let columnX = max(columnXBase, 8)
-                let horizontalApproach = endPoint.x - columnPadding
-                let approachX = max(min(horizontalApproach, endPoint.x - 12), columnX + 8)
-                let approachY = endPoint.y - branchOffset
+                let horizontalEndCandidate = min(endPoint.x - radius * 2 - approachInset, endPoint.x - 8)
+                let horizontalEnd = max(horizontalEndCandidate, columnX + 12)
                 path.addLine(to: CGPoint(x: columnX, y: startPoint.y))
                 path.addLine(to: CGPoint(x: columnX, y: approachY))
-                path.addLine(to: CGPoint(x: approachX, y: approachY))
-                path.addLine(to: CGPoint(x: approachX, y: endPoint.y))
+                path.addLine(to: CGPoint(x: horizontalEnd, y: approachY))
+                path.addLine(to: CGPoint(x: horizontalEnd, y: endPoint.y))
                 path.addLine(to: endPoint)
                 context.stroke(path, with: .color(Theme.aqua), lineWidth: 1.0)
             }
@@ -493,9 +493,9 @@ private final class JSONTreeLayout {
     private(set) var size: CGSize = .zero
     private var positions: [UUID: CGPoint] = [:]
 
-    private let horizontalSpacing: CGFloat = 220
-    private let verticalSpacing: CGFloat = 120
-    private let padding: CGFloat = 80
+    private let horizontalSpacing: CGFloat = 240
+    private let verticalSpacing: CGFloat = 140
+    private let padding: CGFloat = 90
     private var nextY: CGFloat = 0
 
     struct PositionedNode {
