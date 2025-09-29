@@ -4,6 +4,27 @@ Having a helper like Maestro provides a kind of "wokrstation" for organizing the
 
 Instead of needing to hold everything in your mind, on Clipy, on a sticky note, etc., this Maestro becomes the AIO for any information about any ticket at any time. 
 
+## Layout Overrides (temporary tooling)
+
+While the layout edit tooling is enabled, any custom positions or sizes you commit are written to `~/Library/Application Support/SQLMaestro/layout-overrides.json`. The file uses a simple schema:
+
+```json
+{
+  "frames": {
+    "layout.sessionToolbar.actions.populateButton": {
+      "x": 24.0,
+      "y": 512.0,
+      "width": 180.0,
+      "height": 36.0
+    }
+  }
+}
+```
+
+- Each key under `frames` is the stable element identifier shown in the layout editor overlay.
+- `x`/`y` are measured in points from the top-left of the lower workspace canvas; `width`/`height` are absolute sizes in points.
+- Delete the file (or use **Debug ▸ Reset Layout Overrides**) to fall back to the baked-in SwiftUI layout.
+
 ## Quick Begin Capture (Org/Acct + ad-hoc IDs)
 
 Use the new **Begin** button in the Static Info header – or press **⌃⇧B** from anywhere on macOS – to pop open a lightweight capture window without picking a query template first. Paste the customer’s **Org ID** and **Account ID** into the first two fields, press **Tab** to move between them. **To add additional rows for Alternate Fields** for other identifiers, hit **Cmd+Return**. When you’re done, press **Enter** to **Save**.

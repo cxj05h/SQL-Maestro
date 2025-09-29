@@ -180,6 +180,7 @@ private final class AppTitleAccessoryViewController: NSTitlebarAccessoryViewCont
 struct SQLMaestroApp: App {
     @StateObject private var templates = TemplateManager()
     @StateObject private var sessions = SessionManager()
+    @StateObject private var layoutOverrides = LayoutOverrideManager()
     init() {
         AppPaths.ensureAll()
             AppPaths.copyBundledAssets() // Add this line
@@ -198,6 +199,7 @@ struct SQLMaestroApp: App {
             ContentView()
                 .environmentObject(templates)
                 .environmentObject(sessions)
+                .environmentObject(layoutOverrides)
         }
         .commands {
             CommandGroup(replacing: .appInfo) {
@@ -205,7 +207,7 @@ struct SQLMaestroApp: App {
                     AboutWindowController.shared.show()
                 }
             }
-            AppMenuCommands(tmpl: templates, sessions: sessions)
+            AppMenuCommands(tmpl: templates, sessions: sessions, layout: layoutOverrides)
             CommandGroup(after: .help) {
                 Button("Keyboard Shortcuts…") {
                     NotificationCenter.default.post(name: .showKeyboardShortcuts, object: nil)

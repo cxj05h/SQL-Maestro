@@ -11,6 +11,7 @@ enum AppPaths {
     static let logs = appSupport.appendingPathComponent("logs", isDirectory: true)
     static let mappings = appSupport.appendingPathComponent("mappings", isDirectory: true)
     static let templateGuides = appSupport.appendingPathComponent("template_guides", isDirectory: true)
+    static let layoutOverrides = appSupport.appendingPathComponent("layout-overrides.json", conformingTo: .json)
     static let orgMysqlMap = mappings.appendingPathComponent("org_mysql_map.json", conformingTo: .json)
     static let mysqlHostsMap = mappings.appendingPathComponent("mysql_hosts_map.json", conformingTo: .json)
     static let userConfig = mappings.appendingPathComponent("user_config.json", conformingTo: .json)
