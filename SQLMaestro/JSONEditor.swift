@@ -61,11 +61,11 @@ struct JSONEditor: NSViewRepresentable {
             context.coordinator.handleFindCommand()
         }
 
-       let scrollView = NSScrollView()
-       scrollView.drawsBackground = false
-       scrollView.hasVerticalScroller = true
-       scrollView.hasHorizontalScroller = false
-       scrollView.documentView = textView
+        let scrollView = NSScrollView()
+        scrollView.drawsBackground = false
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.documentView = textView
 
         scrollView.setContentHuggingPriority(.init(1), for: .vertical)
         scrollView.setContentCompressionResistancePriority(.init(1), for: .vertical)
