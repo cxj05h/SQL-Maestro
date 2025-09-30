@@ -47,6 +47,46 @@ final class SessionNotesAutosaveCoordinator: ObservableObject {
         }
     }
 }
+
+@MainActor
+final class GuideNotesAutosaveCoordinator: ObservableObject {
+    private struct Entry {
+        let workItem: DispatchWorkItem
+        let action: () -> Void
+    }
+
+    private var entries: [UUID: Entry] = [:]
+
+    func schedule(for templateId: UUID, delay: TimeInterval, action: @escaping () -> Void) {
+        cancel(for: templateId)
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let self,
+                  self.entries.removeValue(forKey: templateId) != nil else { return }
+            action()
+        }
+        entries[templateId] = Entry(workItem: workItem, action: action)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+    }
+
+    func flush(for templateId: UUID) {
+        guard let entry = entries.removeValue(forKey: templateId) else { return }
+        entry.workItem.cancel()
+        DispatchQueue.main.async(execute: entry.action)
+    }
+
+    func cancel(for templateId: UUID) {
+        guard let entry = entries.removeValue(forKey: templateId) else { return }
+        entry.workItem.cancel()
+    }
+
+    func cancelAll() {
+        let existing = entries.values
+        entries.removeAll(keepingCapacity: false)
+        for entry in existing {
+            entry.workItem.cancel()
+        }
+    }
+}
 @MainActor
 final class SavedFileAutosaveCoordinator: ObservableObject {
     private struct Key: Hashable {
@@ -1089,6 +1129,7 @@ struct ContentView: View {
     @StateObject private var sessionNotesEditor = MarkdownEditorController()
     @StateObject private var guideNotesEditor = MarkdownEditorController()
     @StateObject private var sessionNotesAutosave = SessionNotesAutosaveCoordinator()
+    @StateObject private var guideNotesAutosave = GuideNotesAutosaveCoordinator()
     @StateObject private var savedFileAutosave = SavedFileAutosaveCoordinator()
     @State private var isPreviewMode: Bool = true
     @State private var sessionNotesMode: [TicketSession: SessionNotesPaneMode] = [
@@ -1347,17 +1388,22 @@ struct ContentView: View {
             isPreview: $isPreviewMode,
             onGuideSave: {
                 guard let template = selectedTemplate else { return }
+                guideNotesAutosave.flush(for: template.id)
                 if templateGuideStore.saveNotes(for: template) {
                     guideNotesDraft = templateGuideStore.currentNotes(for: template)
+                    guideNotesAutosave.cancel(for: template.id)
                 }
             },
             onGuideRevert: {
                 guard let template = selectedTemplate else { return }
+                guideNotesAutosave.cancel(for: template.id)
                 guideNotesDraft = templateGuideStore.revertNotes(for: template)
             },
             onGuideTextChanged: { newValue in
                 guard let template = selectedTemplate else { return }
-                _ = templateGuideStore.setNotes(newValue, for: template)
+                handleGuideNotesChange(newValue,
+                                       for: template,
+                                       source: "popout")
             },
             onGuideLinkRequested: handleTroubleshootingLink(selectedText:source:completion:),
             onGuideImageAttachment: { info in
@@ -1410,6 +1456,9 @@ struct ContentView: View {
             onClose: {
                 if case .saved(let savedSession) = pane {
                     commitSavedFileDrafts(for: savedSession)
+                }
+                if case .guide = pane {
+                    finalizeGuideNotesAutosave(for: selectedTemplate, reason: "guide-popout-close")
                 }
                 isSavedFileEditorFocused = false
                 activePopoutPane = nil
@@ -2472,6 +2521,58 @@ struct ContentView: View {
 
             for (fileName, label) in labels {
                 templateGuideStore.setImageCustomName(fileName: fileName, to: label, for: template)
+            }
+        }
+
+        private func scheduleGuideNotesAutosave(for template: TemplateItem, lastKnownText: String) {
+            guideNotesAutosave.schedule(for: template.id, delay: 1.0) {
+                if templateGuideStore.saveNotes(for: template) {
+                    touchTemplateActivity(for: template)
+                    let savedText = templateGuideStore.currentNotes(for: template)
+                    LOG("Guide notes autosaved", ctx: [
+                        "template": template.name,
+                        "reason": "autosave",
+                        "chars": "\(savedText.count)",
+                        "delta": "\(savedText.count - lastKnownText.count)"
+                    ])
+                }
+            }
+        }
+
+        private func handleGuideNotesChange(_ value: String,
+                                            for template: TemplateItem,
+                                            source: String,
+                                            logChange: Bool = true) {
+            let previous = templateGuideStore.currentNotes(for: template)
+            let changed = templateGuideStore.setNotes(value, for: template)
+            guard changed else { return }
+
+            syncGuideImageNames(with: value, for: template)
+            scheduleGuideNotesAutosave(for: template, lastKnownText: previous)
+
+            guard logChange else { return }
+            LOG("Guide notes draft updated", ctx: [
+                "template": template.name,
+                "chars": "\(value.count)",
+                "delta": "\(value.count - previous.count)",
+                "dirty": templateGuideStore.isNotesDirty(for: template) ? "dirty" : "clean",
+                "source": source
+            ])
+        }
+
+        private func finalizeGuideNotesAutosave(for template: TemplateItem?, reason: String) {
+            guard let template else { return }
+
+            guideNotesAutosave.flush(for: template.id)
+            if templateGuideStore.isNotesDirty(for: template) {
+                if templateGuideStore.saveNotes(for: template) {
+                    touchTemplateActivity(for: template)
+                    LOG("Guide notes saved", ctx: [
+                        "template": template.name,
+                        "reason": reason,
+                        "chars": "\(templateGuideStore.currentNotes(for: template).count)"
+                    ])
+                }
             }
         }
 
@@ -4502,16 +4603,17 @@ struct ContentView: View {
             if activeBottomPane == .savedFiles && normalized != .savedFiles {
                 commitSavedFileDrafts(for: sessions.current)
             }
+            if activeBottomPane == .guideNotes && normalized != .guideNotes {
+                finalizeGuideNotesAutosave(for: selectedTemplate, reason: "pane-switch")
+            }
             if let pane = normalized {
                 switch pane {
                 case .guideNotes:
                     guard let template = selectedTemplate else { return }
                     templateGuideStore.prepare(for: template)
                     guideNotesDraft = templateGuideStore.currentNotes(for: template)
-                    setPreviewMode(true)
                     sessionNotesMode[sessions.current] = .notes
                 case .sessionNotes:
-                    setPreviewMode(true)
                     sessionNotesMode[sessions.current] = .notes
                 case .savedFiles:
                     sessionNotesMode[sessions.current] = .savedFiles
@@ -4930,7 +5032,16 @@ struct ContentView: View {
                                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                             } else {
                                 MarkdownEditor(
-                                    text: $guideNotesDraft,
+                                    text: Binding(
+                                        get: { guideNotesDraft },
+                                        set: { newValue in
+                                            guideNotesDraft = newValue
+                                            guard let template = selectedTemplate else { return }
+                                            handleGuideNotesChange(newValue,
+                                                                   for: template,
+                                                                   source: "inline-editor")
+                                        }
+                                    ),
                                     fontSize: fontSize * 1.5,
                                     controller: guideNotesEditor,
                                     onLinkRequested: handleTroubleshootingLink(selectedText:source:completion:),
@@ -5625,6 +5736,10 @@ struct ContentView: View {
 
         // Helper to set selection and persist for current session (no draft commit here for responsiveness)
         private func selectTemplate(_ t: TemplateItem?) {
+            if let previous = selectedTemplate, previous.id != t?.id {
+                finalizeGuideNotesAutosave(for: previous, reason: "template-selection")
+            }
+
             selectedTemplate = t
             if let t = t {
                 setPreviewMode(true)
@@ -5651,6 +5766,7 @@ struct ContentView: View {
         // Function to handle session switching
         private func switchToSession(_ newSession: TicketSession) {
             guard newSession != sessions.current else { return }
+            finalizeGuideNotesAutosave(for: selectedTemplate, reason: "session-switch")
             let previousSession = sessions.current
             let previousDraft = sessionNotesDrafts[previousSession] ?? ""
             let previousSaved = sessions.sessionNotes[previousSession] ?? ""
@@ -5726,6 +5842,9 @@ struct ContentView: View {
 
         private func loadTemplate(_ t: TemplateItem) {
             commitDraftsForCurrentSession()
+            if let previous = selectedTemplate, previous.id != t.id {
+                finalizeGuideNotesAutosave(for: previous, reason: "template-load")
+            }
             selectedTemplate = t
             currentSQL = t.rawSQL
             setPreviewMode(true)
