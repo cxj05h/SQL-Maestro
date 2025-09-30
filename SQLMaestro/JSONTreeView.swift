@@ -16,8 +16,13 @@ struct JSONTreePreview: View {
     @State private var searchMatches: [UUID] = []
     @State private var currentMatchIndex: Int = 0
     @State private var highlightedNodeID: UUID?
+    @State private var lastSubmittedQuery: String = ""
 
     private let zoomRange: ClosedRange<CGFloat> = 0.4...3.0
+    private let searchFocusZoom: CGFloat = 1.2
+    private let canvasInnerPadding: CGFloat = 60
+    private let canvasOuterPadding: CGFloat = 28
+    private var canvasContentInset: CGFloat { canvasInnerPadding + canvasOuterPadding }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -42,6 +47,7 @@ struct JSONTreePreview: View {
             parseContent()
         }
         .onChange(of: searchQuery) { _ in
+            lastSubmittedQuery = ""
             refreshMatches(resetIndex: true)
         }
         .onChange(of: highlightedNodeID) { _ in
@@ -77,11 +83,12 @@ struct JSONTreePreview: View {
         HStack(spacing: 8) {
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass")
-                TextField("Search keys or values", text: $searchQuery, onCommit: {
-                    refreshMatches(resetIndex: true)
-                })
+                TextField("Search keys or values", text: $searchQuery)
                 .textFieldStyle(.plain)
                 .font(.system(size: 13, weight: .regular, design: .monospaced))
+                .onSubmit {
+                    handleSearchSubmit()
+                }
                 if !searchQuery.isEmpty {
                     Button {
                         searchQuery = ""
@@ -145,9 +152,29 @@ struct JSONTreePreview: View {
             JSONTreeCanvas(
                 root: root,
                 layout: layout,
-                highlightedNodes: highlighted
+                highlightedNodes: highlighted,
+                contentInset: canvasContentInset
             )
-            .padding(24)
+            .padding(canvasInnerPadding)
+            .background(
+                RoundedRectangle(cornerRadius: 32)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(red: 0.08, green: 0.09, blue: 0.18),
+                                Color(red: 0.04, green: 0.05, blue: 0.12)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 32)
+                            .stroke(Theme.purple.opacity(0.18), lineWidth: 1.1)
+                    )
+                    .shadow(color: Theme.purple.opacity(0.25), radius: 22, x: 0, y: 18)
+            )
+            .padding(canvasOuterPadding)
         }
         .background(
             ScrollViewIntrospector { scrollView in
@@ -160,8 +187,21 @@ struct JSONTreePreview: View {
                 }
             }
         )
-        .background(Color.black.opacity(0.03))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .background(
+            LinearGradient(
+                colors: [
+                    Color(red: 0.07, green: 0.08, blue: 0.16),
+                    Color(red: 0.03, green: 0.03, blue: 0.09)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 26))
+        .overlay(
+            RoundedRectangle(cornerRadius: 26)
+                .stroke(Color.white.opacity(0.05), lineWidth: 0.8)
+        )
     }
 
     private func errorView(_ error: Error) -> some View {
@@ -222,6 +262,21 @@ struct JSONTreePreview: View {
         dispatchScrollToHighlight()
     }
 
+    private func handleSearchSubmit() {
+        let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            lastSubmittedQuery = ""
+            refreshMatches(resetIndex: true)
+            return
+        }
+        if trimmed == lastSubmittedQuery, !searchMatches.isEmpty {
+            advanceMatch(step: 1)
+        } else {
+            lastSubmittedQuery = trimmed
+            refreshMatches(resetIndex: true)
+        }
+    }
+
     private func collectMatches(in node: JSONTreeGraphNode, query: String) -> [UUID] {
         var results: [UUID] = []
         let needle = query.lowercased()
@@ -262,35 +317,67 @@ struct JSONTreePreview: View {
         guard let scrollView = treeScrollView,
               let id = highlightedNodeID,
               let point = layout.position(for: id) else { return }
-        let size = layout.size
-        let padding: CGFloat = 160
-        let rect = NSRect(
-            x: max(point.x - padding, 0),
-            y: max(point.y - padding, 0),
-            width: min(padding * 2, size.width),
-            height: min(padding * 2, size.height)
-        )
-        scrollView.contentView.scrollToVisible(rect)
-        scrollView.reflectScrolledClipView(scrollView.contentView)
+
+        ensureSearchZoomIfNeeded(target: point, in: scrollView)
+
+        let docPoint = documentPoint(fromLayoutPoint: point, in: scrollView)
+        let focusRadius = max(260.0 / max(scrollView.magnification, 0.001), 180)
+        let rect = NSRect(x: docPoint.x - focusRadius,
+                          y: docPoint.y - focusRadius,
+                          width: focusRadius * 2,
+                          height: focusRadius * 2)
+        if let docView = scrollView.documentView {
+            docView.scrollToVisible(rect)
+            scrollView.reflectScrolledClipView(scrollView.contentView)
+        }
+    }
+
+    private func ensureSearchZoomIfNeeded(target point: CGPoint, in scrollView: NSScrollView) {
+        guard !searchMatches.isEmpty else { return }
+        let current = scrollView.magnification
+        let desired = max(current, searchFocusZoom)
+        guard abs(desired - current) > 0.0001 else { return }
+        let docPoint = documentPoint(fromLayoutPoint: point, in: scrollView)
+        scrollView.setMagnification(desired, centeredAt: docPoint)
+        zoomScale = desired
     }
 
     private func installScrollMonitor() {
         guard scrollEventMonitor == nil else { return }
-        scrollEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
+        scrollEventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .magnify]) { event in
             guard let scrollView = treeScrollView else { return event }
-            let modifiers = event.modifierFlags.intersection([.command, .shift])
-            guard !modifiers.isEmpty else { return event }
             guard let window = scrollView.window, event.window == window else { return event }
-            let center = scrollView.contentView.convert(event.locationInWindow, from: nil)
-            let delta = event.scrollingDeltaY
-            let multiplier: CGFloat = event.hasPreciseScrollingDeltas ? 0.02 : 0.1
-            let proposed = scrollView.magnification - delta * multiplier
-            let clamped = min(max(proposed, zoomRange.lowerBound), zoomRange.upperBound)
-            guard clamped != scrollView.magnification else { return nil }
-            scrollView.setMagnification(clamped, centeredAt: center)
-            zoomScale = clamped
-            dispatchScrollToHighlight()
-            return nil
+
+            switch event.type {
+            case .magnify:
+                let factor = 1.0 + event.magnification
+                guard abs(factor - 1.0) > 0.0001 else { return nil }
+                let center = self.documentPoint(fromWindowLocation: event.locationInWindow, in: scrollView)
+                let proposed = scrollView.magnification * factor
+                let clamped = clampZoom(proposed)
+                guard abs(clamped - scrollView.magnification) > 0.0001 else { return nil }
+                scrollView.setMagnification(clamped, centeredAt: center)
+                zoomScale = clamped
+                dispatchScrollToHighlight()
+                return nil
+
+            case .scrollWheel:
+                let modifiers = event.modifierFlags.intersection([.command, .shift])
+                guard !modifiers.isEmpty else { return event }
+                let center = self.documentPoint(fromWindowLocation: event.locationInWindow, in: scrollView)
+                let delta = event.scrollingDeltaY
+                let multiplier: CGFloat = event.hasPreciseScrollingDeltas ? 0.02 : 0.1
+                let proposed = scrollView.magnification - delta * multiplier
+                let clamped = clampZoom(proposed)
+                guard abs(clamped - scrollView.magnification) > 0.0001 else { return nil }
+                scrollView.setMagnification(clamped, centeredAt: center)
+                zoomScale = clamped
+                dispatchScrollToHighlight()
+                return nil
+
+            default:
+                return event
+            }
         }
     }
 
@@ -299,6 +386,37 @@ struct JSONTreePreview: View {
             NSEvent.removeMonitor(monitor)
             scrollEventMonitor = nil
         }
+    }
+
+    private func clampZoom(_ value: CGFloat) -> CGFloat {
+        min(max(value, zoomRange.lowerBound), zoomRange.upperBound)
+    }
+
+    private func documentPoint(fromWindowLocation location: CGPoint, in scrollView: NSScrollView) -> NSPoint {
+        guard let docView = scrollView.documentView else {
+            return scrollView.documentVisibleRect.center
+        }
+        var converted = docView.convert(location, from: nil)
+        if !converted.x.isFinite || !converted.y.isFinite {
+            converted = scrollView.documentVisibleRect.center
+        }
+        return converted
+    }
+
+    private func documentPoint(fromLayoutPoint point: CGPoint, in scrollView: NSScrollView) -> NSPoint {
+        guard let docView = scrollView.documentView else {
+            return NSPoint(x: point.x + canvasContentInset, y: point.y + canvasContentInset)
+        }
+        let yBase: CGFloat
+        if docView.isFlipped {
+            yBase = point.y + canvasContentInset
+        } else {
+            let baseHeight = docView.bounds.height
+            yBase = baseHeight - (point.y + canvasContentInset)
+        }
+        let x = min(max(point.x + canvasContentInset, 0), docView.bounds.width)
+        let y = min(max(yBase, 0), docView.bounds.height)
+        return NSPoint(x: x, y: y)
     }
 
     private struct ScrollViewIntrospector: NSViewRepresentable {
@@ -417,6 +535,7 @@ private struct JSONTreeCanvas: View {
     let root: JSONTreeGraphNode
     let layout: JSONTreeLayout
     let highlightedNodes: Set<UUID>
+    let contentInset: CGFloat
 
     var body: some View {
         let size = layout.size
@@ -424,68 +543,117 @@ private struct JSONTreeCanvas: View {
             drawConnections(context: &context)
             drawNodes(context: &context)
         }
-        .frame(width: size.width, height: size.height)
-        .background(Color.black.opacity(0.02))
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .frame(width: size.width + contentInset * 2,
+               height: size.height + contentInset * 2)
+        .background(
+            LinearGradient(
+                colors: [
+                    Color(red: 0.10, green: 0.11, blue: 0.23),
+                    Color(red: 0.06, green: 0.07, blue: 0.17)
+                ],
+                startPoint: .topLeading,
+                endPoint: .bottomTrailing
+            )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 28))
+        .overlay(
+            RoundedRectangle(cornerRadius: 28)
+                .stroke(Color.white.opacity(0.06), lineWidth: 0.6)
+        )
     }
 
     private func drawConnections(context: inout GraphicsContext) {
-        let radius: CGFloat = 6
-        let columnPadding: CGFloat = 48
-        let approachInset: CGFloat = 12
-        for positioned in layout.positionedNodes {
-            guard !positioned.node.children.isEmpty else { continue }
-            let startPoint = CGPoint(x: positioned.position.x - radius, y: positioned.position.y)
-            for child in positioned.node.children {
-                guard let childPointRaw = layout.position(for: child.id) else { continue }
-                let endPoint = CGPoint(x: childPointRaw.x - radius, y: childPointRaw.y)
-                let approachY = endPoint.y + 18
-                var path = Path()
-                path.move(to: startPoint)
-                let columnXBase = min(startPoint.x, endPoint.x) - columnPadding
-                let columnX = max(columnXBase, 8)
-                let horizontalEndCandidate = min(endPoint.x - radius * 2 - approachInset, endPoint.x - 8)
-                let horizontalEnd = max(horizontalEndCandidate, columnX + 12)
-                path.addLine(to: CGPoint(x: columnX, y: startPoint.y))
-                path.addLine(to: CGPoint(x: columnX, y: approachY))
-                path.addLine(to: CGPoint(x: horizontalEnd, y: approachY))
-                path.addLine(to: CGPoint(x: horizontalEnd, y: endPoint.y))
-                path.addLine(to: endPoint)
-                context.stroke(path, with: .color(Theme.aqua), lineWidth: 1.0)
+        context.drawLayer { layer in
+            layer.addFilter(.shadow(color: Theme.aqua.opacity(0.25), radius: 12, x: 0, y: 6))
+            for positioned in layout.positionedNodes {
+                guard !positioned.node.children.isEmpty else { continue }
+                let startPoint = positioned.position
+                for child in positioned.node.children {
+                    guard let childPoint = layout.position(for: child.id) else { continue }
+                    var path = Path()
+                    let start = CGPoint(x: startPoint.x + contentInset,
+                                        y: startPoint.y + contentInset)
+                    path.move(to: start)
+
+                    let distanceX = max(childPoint.x - startPoint.x, 160)
+                    let controlOffset = distanceX * 0.45
+                    let verticalDelta = childPoint.y - startPoint.y
+                    let end = CGPoint(x: childPoint.x + contentInset,
+                                      y: childPoint.y + contentInset)
+                    let control1 = CGPoint(
+                        x: start.x + controlOffset,
+                        y: start.y + verticalDelta * 0.18
+                    )
+                    let control2 = CGPoint(
+                        x: end.x - controlOffset,
+                        y: end.y - verticalDelta * 0.18
+                    )
+                    path.addCurve(to: end, control1: control1, control2: control2)
+
+                    let shading = GraphicsContext.Shading.linearGradient(
+                        Gradient(colors: [
+                            Theme.aqua.opacity(0.7),
+                            Theme.gold.opacity(0.45)
+                        ]),
+                        startPoint: start,
+                        endPoint: end
+                    )
+                    layer.stroke(
+                        path,
+                        with: shading,
+                        style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round)
+                    )
+                }
             }
         }
     }
 
     private func drawNodes(context: inout GraphicsContext) {
         for positioned in layout.positionedNodes {
-            let point = positioned.position
+            let point = CGPoint(x: positioned.position.x + contentInset,
+                                y: positioned.position.y + contentInset)
             let node = positioned.node
 
-            let circleRect = CGRect(x: point.x - 6, y: point.y - 6, width: 12, height: 12)
-            if highlightedNodes.contains(node.id) {
-                context.fill(Path(ellipseIn: circleRect), with: .color(Theme.gold.opacity(0.8)))
-                context.stroke(Path(ellipseIn: circleRect), with: .color(Theme.gold), lineWidth: 2)
-            } else {
-                context.fill(Path(ellipseIn: circleRect), with: .color(Theme.aquaLt))
-                context.stroke(Path(ellipseIn: circleRect), with: .color(Theme.aqua), lineWidth: 1)
+            let isHighlighted = highlightedNodes.contains(node.id)
+            let radius: CGFloat = isHighlighted ? 8 : 7
+            let circleRect = CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2)
+
+            context.drawLayer { layer in
+                let gradient = GraphicsContext.Shading.radialGradient(
+                    Gradient(colors: isHighlighted ? [Theme.gold, Theme.gold.opacity(0.25)] : [Theme.aquaLt, Theme.aqua.opacity(0.35)]),
+                    center: CGPoint(x: circleRect.midX, y: circleRect.midY),
+                    startRadius: 0,
+                    endRadius: radius * 1.8
+                )
+                layer.addFilter(.shadow(color: (isHighlighted ? Theme.gold : Theme.aqua).opacity(0.4), radius: isHighlighted ? 14 : 10, x: 0, y: 0))
+                layer.fill(Path(ellipseIn: circleRect), with: gradient)
+                layer.stroke(
+                    Path(ellipseIn: circleRect),
+                    with: .color(isHighlighted ? Theme.gold : Theme.aqua),
+                    style: StrokeStyle(lineWidth: isHighlighted ? 2.2 : 1.4)
+                )
             }
 
             var keyText = AttributedString(node.name)
-            keyText.font = .system(size: 12, weight: .semibold)
-            keyText.foregroundColor = Theme.purple
+            keyText.font = .system(size: 12, weight: .semibold, design: .rounded)
+            keyText.foregroundColor = isHighlighted ? Theme.gold : Theme.purple
 
-            let keyPoint = CGPoint(x: point.x + 12, y: point.y)
+            let keyPoint = CGPoint(x: point.x + 22, y: point.y - 8)
             context.draw(Text(keyText), at: keyPoint, anchor: .leading)
 
             if let value = node.valueDescription {
                 var valueText = AttributedString(value)
                 valueText.font = .system(size: 12, weight: .regular, design: .monospaced)
-                valueText.foregroundColor = highlightedNodes.contains(node.id) ? Theme.gold : node.valueColor
-                let valuePoint = CGPoint(x: point.x + 120, y: point.y)
+                valueText.foregroundColor = (isHighlighted ? Theme.gold : node.valueColor).opacity(0.9)
+                let valuePoint = CGPoint(x: point.x + 22, y: point.y + 14)
                 context.draw(Text(valueText), at: valuePoint, anchor: .leading)
             }
         }
     }
+}
+
+private extension NSRect {
+    var center: NSPoint { NSPoint(x: midX, y: midY) }
 }
 
 private final class JSONTreeLayout {
@@ -493,9 +661,9 @@ private final class JSONTreeLayout {
     private(set) var size: CGSize = .zero
     private var positions: [UUID: CGPoint] = [:]
 
-    private let horizontalSpacing: CGFloat = 240
+    private let horizontalSpacing: CGFloat = 340
     private let verticalSpacing: CGFloat = 140
-    private let padding: CGFloat = 90
+    private let padding: CGFloat = 160
     private var nextY: CGFloat = 0
 
     struct PositionedNode {

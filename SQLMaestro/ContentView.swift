@@ -1243,6 +1243,67 @@ struct ContentView: View {
         .sheet(item: $activePopoutPane) { pane in
             popoutSheet(for: pane)
         }
+        .sheet(item: $editorTemplate) { template in
+            TemplateInlineEditorSheet(
+                template: template,
+                text: $editorText,
+                fontSize: fontSize,
+                onSave: { newText in
+                    saveTemplateEdits(template: template, newText: newText)
+                    editorTemplate = nil
+                },
+                onCancel: {
+                    editorTemplate = nil
+                }
+            )
+            .background(
+                SheetWindowConfigurator(
+                    minSize: CGSize(width: 760, height: 520),
+                    preferredSize: CGSize(width: 820, height: 600),
+                    sizeStorageKey: "TemplateInlineEditorSize"
+                )
+            )
+        }
+        .sheet(item: $tagEditorTemplate) { template in
+            TemplateTagEditorSheet(
+                template: template,
+                existingTags: templateTagsStore.tags(for: template),
+                onSave: { newTags in
+                    persistTags(newTags, for: template)
+                    tagEditorTemplate = nil
+                },
+                onCancel: {
+                    tagEditorTemplate = nil
+                }
+            )
+            .background(
+                SheetWindowConfigurator(
+                    minSize: CGSize(width: 520, height: 360),
+                    preferredSize: CGSize(width: 560, height: 400),
+                    sizeStorageKey: "TemplateTagEditorSize"
+                )
+            )
+        }
+        .sheet(item: $tagExplorerContext) { context in
+            TemplateTagExplorerSheet(
+                tag: context.tag,
+                templates: templates.templates,
+                onSelect: { template in
+                    selectTemplate(template)
+                    tagExplorerContext = nil
+                },
+                onClose: {
+                    tagExplorerContext = nil
+                }
+            )
+            .background(
+                SheetWindowConfigurator(
+                    minSize: CGSize(width: 420, height: 320),
+                    preferredSize: CGSize(width: 460, height: 360),
+                    sizeStorageKey: "TemplateTagExplorerSize"
+                )
+            )
+        }
     }
 
     @ViewBuilder
@@ -2520,14 +2581,16 @@ struct ContentView: View {
             ensureSavedFileState(for: session)
             let defaultName = sessions.generateDefaultFileName(for: session)
             let message = "Enter a name for the new JSON file. '.json' will be added automatically."
-            let provided = promptForString(title: "New Saved File", message: message, defaultValue: defaultName)?
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-            let finalName: String
-            if let provided, !provided.isEmpty {
-                finalName = provided
-            } else {
-                finalName = defaultName
+            guard let rawInput = promptForString(
+                title: "New Saved File",
+                message: message,
+                defaultValue: defaultName
+            ) else {
+                LOG("Saved file creation cancelled", ctx: ["session": "\(session.rawValue)"])
+                return
             }
+            let provided = rawInput.trimmingCharacters(in: .whitespacesAndNewlines)
+            let finalName = provided.isEmpty ? defaultName : provided
             let file = sessions.addSavedFile(name: finalName, for: session)
             ensureSavedFileState(for: session)
             setSavedFileSelection(file.id, for: session)
