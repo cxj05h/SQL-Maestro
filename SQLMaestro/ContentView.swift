@@ -9073,9 +9073,12 @@ struct ContentView: View {
                                     onPopOut()
                                 } label: {
                                     Label("Pop Out", systemImage: "rectangle.expand.vertical")
-                                        .font(.system(size: fontSize - 1, weight: .semibold))
+                                        .font(.system(size: (fontSize - 1) * 3, weight: .semibold))
+                                        .padding(.horizontal, 36)
+                                        .padding(.vertical, 18)
                                 }
                                 .buttonStyle(.bordered)
+                                .controlSize(.extraLarge)
                                 .tint(Theme.accent)
                             }
                         }
@@ -9675,37 +9678,45 @@ struct ContentView: View {
         private var guideBody: some View {
             Group {
                 if selectedTemplate != nil {
-                    Group {
-                        if isPreview {
-                            MarkdownPreviewView(
-                                text: guideText,
-                                fontSize: fontSize * 1.5,
-                                onLinkOpen: onGuideLinkOpen
-                            )
-                        } else {
-                            MarkdownEditor(
-                                text: $guideText,
-                                fontSize: fontSize * 1.5,
-                                controller: guideController,
-                                onLinkRequested: onGuideLinkRequested,
-                                onImageAttachment: { info in
-                                    onGuideImageAttachment(info)
+                    VStack(alignment: .leading, spacing: 12) {
+                        HStack(spacing: 12) {
+                            MarkdownToolbar(iconSize: fontSize + 2, isEnabled: !isPreview, controller: guideController)
+                            PreviewModeToggle(isPreview: $isPreview)
+                            Spacer(minLength: 0)
+                        }
+
+                        Group {
+                            if isPreview {
+                                MarkdownPreviewView(
+                                    text: guideText,
+                                    fontSize: fontSize * 1.5,
+                                    onLinkOpen: onGuideLinkOpen
+                                )
+                            } else {
+                                MarkdownEditor(
+                                    text: $guideText,
+                                    fontSize: fontSize * 1.5,
+                                    controller: guideController,
+                                    onLinkRequested: onGuideLinkRequested,
+                                    onImageAttachment: { info in
+                                        onGuideImageAttachment(info)
+                                    }
+                                )
+                                .onChange(of: guideText) { _, newValue in
+                                    onGuideTextChanged(newValue)
                                 }
-                            )
-                            .onChange(of: guideText) { _, newValue in
-                                onGuideTextChanged(newValue)
                             }
                         }
+                        .frame(minHeight: 320)
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(Theme.grayBG.opacity(0.25))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
+                                )
+                        )
                     }
-                    .frame(minHeight: 320)
-                    .background(
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(Theme.grayBG.opacity(0.25))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
-                            )
-                    )
                 } else {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Select a template to view its troubleshooting guide")
