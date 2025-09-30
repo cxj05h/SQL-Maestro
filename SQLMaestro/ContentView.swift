@@ -1122,7 +1122,7 @@ struct ContentView: View {
     private let paneRegionMinHeight: CGFloat = 420
     private let outputRegionHeight: CGFloat = 236
     private let outputRegionSpacing: CGFloat = 12
-    private let mainContentTopPadding: CGFloat = 140
+    private let mainContentTopPadding: CGFloat = 130
 
     
     @FocusState private var isSearchFocused: Bool
@@ -1576,9 +1576,10 @@ struct ContentView: View {
                 LOG("Search focused via keyboard shortcut")
             }
             .keyboardShortcut("f", modifiers: [.command])
-            .hidden()
             .registerShortcut(name: "Search Queries", keyLabel: "F", modifiers: [.command], scope: "Global")
             .disabled(isSavedFileEditorFocused)
+            .frame(width: 0, height: 0)
+            .hidden()
 
             Button(action: {
                 setActivePane(.guideNotes)
@@ -1586,9 +1587,10 @@ struct ContentView: View {
                 EmptyView()
             }
             .keyboardShortcut("1", modifiers: [.command])
-            .hidden()
             .disabled(selectedTemplate == nil)
             .registerShortcut(name: "Show Guide Notes", keyLabel: "1", modifiers: [.command], scope: "Panes")
+            .frame(width: 0, height: 0)
+            .hidden()
 
             Button(action: {
                 setActivePane(.sessionNotes)
@@ -1596,8 +1598,9 @@ struct ContentView: View {
                 EmptyView()
             }
             .keyboardShortcut("2", modifiers: [.command])
-            .hidden()
             .registerShortcut(name: "Show Session Notes", keyLabel: "2", modifiers: [.command], scope: "Panes")
+            .frame(width: 0, height: 0)
+            .hidden()
 
             Button(action: {
                 setActivePane(.savedFiles)
@@ -1605,8 +1608,9 @@ struct ContentView: View {
                 EmptyView()
             }
             .keyboardShortcut("3", modifiers: [.command])
-            .hidden()
             .registerShortcut(name: "Show Saved Files", keyLabel: "3", modifiers: [.command], scope: "Panes")
+            .frame(width: 0, height: 0)
+            .hidden()
 
             Button(action: {
                 toggleSidebar()
@@ -1614,8 +1618,9 @@ struct ContentView: View {
                 EmptyView()
             }
             .keyboardShortcut("t", modifiers: [.command])
-            .hidden()
             .registerShortcut(name: "Toggle Sidebar", keyLabel: "T", modifiers: [.command], scope: "Layout")
+            .frame(width: 0, height: 0)
+            .hidden()
         }
         .padding(EdgeInsets(top: mainContentTopPadding, leading: 16, bottom: 16, trailing: 16))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -4603,7 +4608,7 @@ struct ContentView: View {
                 bottomPaneContent(for: pane, activeSession: activeSession)
                     .padding(.top, pane == .savedFiles ? 28 : 16)
                     .padding(.horizontal, 20)
-                    .padding(.bottom, 16)
+                    .padding(.bottom, 12)
                     .frame(maxHeight: .infinity, alignment: .top)
                     .layoutPriority(1)
             }
@@ -4902,64 +4907,70 @@ struct ContentView: View {
                     }
                 }
                 .frame(width: proxy.size.width,
-                       height: max(proxy.size.height, 220),
+                       height: proxy.size.height,
                        alignment: .top)
             }
         }
 
         @ViewBuilder
         private var guideNotesPane: some View {
-            if selectedTemplate != nil {
+            GeometryReader { proxy in
+                let targetHeight = max(proxy.size.height, 220)
                 Group {
-                    if isPreviewMode {
-                        MarkdownPreviewView(
-                            text: guideNotesDraft,
-                            fontSize: fontSize * 1.5,
-                            onLinkOpen: { url, modifiers in
-                                openLink(url, modifiers: modifiers)
+                    if selectedTemplate != nil {
+                        Group {
+                            if isPreviewMode {
+                                MarkdownPreviewView(
+                                    text: guideNotesDraft,
+                                    fontSize: fontSize * 1.5,
+                                    onLinkOpen: { url, modifiers in
+                                        openLink(url, modifiers: modifiers)
+                                    }
+                                )
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                            } else {
+                                MarkdownEditor(
+                                    text: $guideNotesDraft,
+                                    fontSize: fontSize * 1.5,
+                                    controller: guideNotesEditor,
+                                    onLinkRequested: handleTroubleshootingLink(selectedText:source:completion:),
+                                    onImageAttachment: { info in
+                                        handleGuideEditorImageAttachment(info)
+                                    }
+                                )
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                             }
-                        )
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    } else {
-                        MarkdownEditor(
-                            text: $guideNotesDraft,
-                            fontSize: fontSize * 1.5,
-                            controller: guideNotesEditor,
-                            onLinkRequested: handleTroubleshootingLink(selectedText:source:completion:),
-                            onImageAttachment: { info in
-                                handleGuideEditorImageAttachment(info)
-                            }
-                        )
+                        }
                         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        .layoutPriority(1)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Theme.grayBG.opacity(0.22))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(Theme.purple.opacity(0.18), lineWidth: 1)
+                                )
+                        )
+                    } else {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Select a template to view its troubleshooting guide")
+                                .font(.system(size: fontSize - 1))
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                        .layoutPriority(1)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Theme.grayBG.opacity(0.18))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 12)
+                                        .stroke(Theme.purple.opacity(0.15), lineWidth: 1)
+                                )
+                        )
                     }
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                .layoutPriority(1)
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Theme.grayBG.opacity(0.22))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(Theme.purple.opacity(0.18), lineWidth: 1)
-                        )
-                )
-            } else {
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Select a template to view its troubleshooting guide")
-                        .font(.system(size: fontSize - 1))
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                }
-                .frame(maxWidth: .infinity, minHeight: 220, maxHeight: .infinity, alignment: .top)
-                .layoutPriority(1)
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Theme.grayBG.opacity(0.18))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(Theme.purple.opacity(0.15), lineWidth: 1)
-                        )
-                )
+                .frame(width: proxy.size.width, height: targetHeight, alignment: .top)
             }
         }
 
@@ -8682,8 +8693,7 @@ struct ContentView: View {
                 if showsOuterBackground {
                     contentStack
                         .padding(.horizontal, 18)
-                        .padding(.top, 18)
-                        .padding(.bottom, 26)
+                        .padding(.vertical, 18)
                         .background(
                             RoundedRectangle(cornerRadius: 14)
                                 .fill(Theme.grayBG.opacity(0.22))
@@ -8694,8 +8704,7 @@ struct ContentView: View {
                         )
                 } else {
                     contentStack
-                        .padding(.top, 12)
-                        .padding(.bottom, 20)
+                        .padding(.vertical, 12)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
@@ -8802,42 +8811,47 @@ struct ContentView: View {
 
         @ViewBuilder
         private var notesPane: some View {
-            let base = Group {
-                if isPreview {
-                    MarkdownPreviewView(
-                        text: draft,
-                        fontSize: fontSize * 1.5,
-                        onLinkOpen: onLinkOpen
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                } else {
-                    MarkdownEditor(
-                        text: $draft,
-                        fontSize: fontSize * 1.5,
-                        controller: controller,
-                        onLinkRequested: onLinkRequested,
-                        onImageAttachment: { info in
-                            onImageAttachment(info)
-                        }
-                    )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            GeometryReader { proxy in
+                let targetHeight = max(proxy.size.height, 220)
+                let base = Group {
+                    if isPreview {
+                        MarkdownPreviewView(
+                            text: draft,
+                            fontSize: fontSize * 1.5,
+                            onLinkOpen: onLinkOpen
+                        )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    } else {
+                        MarkdownEditor(
+                            text: $draft,
+                            fontSize: fontSize * 1.5,
+                            controller: controller,
+                            onLinkRequested: onLinkRequested,
+                            onImageAttachment: { info in
+                                onImageAttachment(info)
+                            }
+                        )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    }
                 }
-            }
-            .frame(maxWidth: .infinity, minHeight: 220, maxHeight: .infinity, alignment: .top)
-            .layoutPriority(1)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .layoutPriority(1)
 
-            if showsContentBackground {
-                base
-                    .background(
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(Theme.grayBG.opacity(0.25))
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
-                            )
-                    )
-            } else {
-                base
+                if showsContentBackground {
+                    base
+                        .background(
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(Theme.grayBG.opacity(0.25))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 10)
+                                        .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
+                                )
+                        )
+                        .frame(width: proxy.size.width, height: targetHeight, alignment: .top)
+                } else {
+                    base
+                        .frame(width: proxy.size.width, height: targetHeight, alignment: .top)
+                }
             }
         }
 

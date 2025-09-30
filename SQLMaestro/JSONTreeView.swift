@@ -17,6 +17,9 @@ struct JSONTreePreview: View {
     @State private var currentMatchIndex: Int = 0
     @State private var highlightedNodeID: UUID?
     @State private var lastSubmittedQuery: String = ""
+    @State private var clipViewObserver: NSObjectProtocol?
+    @State private var lockedContentOrigin: NSPoint = .zero
+    @State private var suppressScrollRebound = false
 
     private let zoomRange: ClosedRange<CGFloat> = 0.4...3.0
     private let searchFocusZoom: CGFloat = 1.2
@@ -58,6 +61,7 @@ struct JSONTreePreview: View {
         }
         .onDisappear {
             removeScrollMonitor()
+            removeClipViewObserver()
         }
     }
 
@@ -180,10 +184,10 @@ struct JSONTreePreview: View {
             ScrollViewIntrospector { scrollView in
                 if treeScrollView !== scrollView {
                     treeScrollView = scrollView
-                    scrollView.allowsMagnification = true
-                    scrollView.minMagnification = zoomRange.lowerBound
-                    scrollView.maxMagnification = zoomRange.upperBound
+                    prepareScrollView(scrollView)
                     zoomScale = scrollView.magnification
+                } else {
+                    prepareScrollView(scrollView)
                 }
             }
         )
@@ -307,9 +311,9 @@ struct JSONTreePreview: View {
         dispatchScrollToHighlight()
     }
 
-    private func dispatchScrollToHighlight() {
+    private func dispatchScrollToHighlight(animated: Bool = true) {
         DispatchQueue.main.async {
-            scrollToHighlightedNode()
+            scrollToHighlightedNode(animated: animated)
         }
     }
 
@@ -347,19 +351,21 @@ struct JSONTreePreview: View {
                 let center = self.documentPoint(fromWindowLocation: event.locationInWindow, in: scrollView)
                 let proposed = scrollView.magnification * factor
                 self.updateZoom(to: proposed, centeredAt: center, in: scrollView, animated: false)
-                dispatchScrollToHighlight()
+                dispatchScrollToHighlight(animated: false)
                 return nil
 
             case .scrollWheel:
-                guard event.modifierFlags.contains(.command) else { return event }
-                let center = self.documentPoint(fromWindowLocation: event.locationInWindow, in: scrollView)
-                let deltaY = event.scrollingDeltaY
-                guard abs(deltaY) > 0.0001 else { return nil }
-                let direction: CGFloat = event.isDirectionInvertedFromDevice ? -1 : 1
-                let multiplier: CGFloat = event.hasPreciseScrollingDeltas ? 0.04 : 0.18
-                let proposed = scrollView.magnification - (deltaY * direction * multiplier)
-                self.updateZoom(to: proposed, centeredAt: center, in: scrollView, animated: false)
-                dispatchScrollToHighlight()
+                if event.modifierFlags.contains(.command) {
+                    let center = self.documentPoint(fromWindowLocation: event.locationInWindow, in: scrollView)
+                    let deltaY = event.scrollingDeltaY
+                    guard abs(deltaY) > 0.0001 else { return nil }
+                    let direction: CGFloat = event.isDirectionInvertedFromDevice ? -1 : 1
+                    let multiplier: CGFloat = event.hasPreciseScrollingDeltas ? 0.04 : 0.18
+                    let proposed = scrollView.magnification - (deltaY * direction * multiplier)
+                    self.updateZoom(to: proposed, centeredAt: center, in: scrollView, animated: false)
+                    dispatchScrollToHighlight(animated: false)
+                    return nil
+                }
                 return nil
 
             default:
@@ -373,23 +379,71 @@ struct JSONTreePreview: View {
             NSEvent.removeMonitor(monitor)
             scrollEventMonitor = nil
         }
+        removeClipViewObserver()
     }
 
     private func clampZoom(_ value: CGFloat) -> CGFloat {
         min(max(value, zoomRange.lowerBound), zoomRange.upperBound)
     }
 
+    private func prepareScrollView(_ scrollView: NSScrollView) {
+        scrollView.allowsMagnification = true
+        scrollView.minMagnification = zoomRange.lowerBound
+        scrollView.maxMagnification = zoomRange.upperBound
+        scrollView.hasHorizontalScroller = false
+        scrollView.hasVerticalScroller = false
+        scrollView.horizontalScrollElasticity = .none
+        scrollView.verticalScrollElasticity = .none
+        scrollView.contentView.copiesOnScroll = false
+        installClipViewObserver(for: scrollView)
+    }
+
+    private func installClipViewObserver(for scrollView: NSScrollView) {
+        removeClipViewObserver()
+        let clipView = scrollView.contentView
+        clipView.postsBoundsChangedNotifications = true
+        lockedContentOrigin = clipView.bounds.origin
+        clipViewObserver = NotificationCenter.default.addObserver(
+            forName: NSView.boundsDidChangeNotification,
+            object: clipView,
+            queue: .main
+        ) { _ in
+            guard !suppressScrollRebound else { return }
+            let current = clipView.bounds.origin
+            if !current.isApproximatelyEqual(to: lockedContentOrigin) {
+                clipView.setBoundsOrigin(lockedContentOrigin)
+                scrollView.reflectScrolledClipView(clipView)
+            }
+        }
+    }
+
+    private func removeClipViewObserver() {
+        if let token = clipViewObserver {
+            NotificationCenter.default.removeObserver(token)
+            clipViewObserver = nil
+        }
+    }
+
     private func updateZoom(to newValue: CGFloat, centeredAt docPoint: NSPoint, in scrollView: NSScrollView, animated: Bool) {
         let clamped = clampZoom(newValue)
         guard abs(clamped - scrollView.magnification) > 0.0001 else { return }
         let focusPoint = sanitizedDocumentPoint(docPoint, in: scrollView)
+        let clipView = scrollView.contentView
+        suppressScrollRebound = true
         if animated {
             NSAnimationContext.runAnimationGroup { context in
                 context.duration = 0.22
                 scrollView.animator().setMagnification(clamped, centeredAt: focusPoint)
+            } completionHandler: {
+                lockedContentOrigin = clipView.bounds.origin
+                suppressScrollRebound = false
             }
         } else {
             scrollView.setMagnification(clamped, centeredAt: focusPoint)
+            DispatchQueue.main.async {
+                lockedContentOrigin = clipView.bounds.origin
+                suppressScrollRebound = false
+            }
         }
         zoomScale = clamped
     }
@@ -412,16 +466,23 @@ struct JSONTreePreview: View {
         targetOrigin.x = min(max(targetOrigin.x, 0), maxX)
         targetOrigin.y = min(max(targetOrigin.y, 0), maxY)
 
+        suppressScrollRebound = true
         if animated {
             NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.28
+                context.duration = 0.24
                 clipView.animator().setBoundsOrigin(targetOrigin)
             } completionHandler: {
                 scrollView.reflectScrolledClipView(clipView)
+                lockedContentOrigin = clipView.bounds.origin
+                suppressScrollRebound = false
             }
         } else {
             clipView.scroll(to: targetOrigin)
             scrollView.reflectScrolledClipView(clipView)
+            lockedContentOrigin = clipView.bounds.origin
+            DispatchQueue.main.async {
+                suppressScrollRebound = false
+            }
         }
     }
 
@@ -689,6 +750,12 @@ private struct JSONTreeCanvas: View {
                 context.draw(Text(valueText), at: valuePoint, anchor: .leading)
             }
         }
+    }
+}
+
+private extension NSPoint {
+    func isApproximatelyEqual(to other: NSPoint, tolerance: CGFloat = 0.5) -> Bool {
+        abs(x - other.x) <= tolerance && abs(y - other.y) <= tolerance
     }
 }
 
