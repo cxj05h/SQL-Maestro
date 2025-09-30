@@ -144,7 +144,7 @@ private final class MainWindowConfigurator {
     }
 
     private func apply(to window: NSWindow) {
-        guard window.isVisible else { return }
+        guard shouldConfigure(window: window) else { return }
         window.styleMask.insert([.titled, .resizable])
         window.styleMask.remove(.fullSizeContentView)
         window.titleVisibility = .visible
@@ -152,6 +152,23 @@ private final class MainWindowConfigurator {
         window.title = "SQL Maestro"
         window.isMovableByWindowBackground = true
         window.titlebarSeparatorStyle = .line
+    }
+
+    private func shouldConfigure(window: NSWindow) -> Bool {
+        guard window.isVisible else { return false }
+        if window is NSPanel { return false }
+        if window.level != .normal { return false }
+        guard let contentView = window.contentView else { return false }
+        return containsHostingView(in: contentView)
+    }
+
+    private func containsHostingView(in view: NSView) -> Bool {
+        let className = NSStringFromClass(type(of: view))
+        if className.contains("NSHostingView") { return true }
+        for subview in view.subviews {
+            if containsHostingView(in: subview) { return true }
+        }
+        return false
     }
 }
 #endif
