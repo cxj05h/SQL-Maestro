@@ -2778,7 +2778,8 @@ struct ContentView: View {
             let currentSelection = currentSavedFileSelection(for: session)
             var targetId = fileId
             var rerouted = false
-            if source == "savedFile.inline",
+            let shouldReroute = source == "savedFile.inline" || source == "savedFile.popout"
+            if shouldReroute,
                let selected = currentSelection,
                selected != fileId {
                 targetId = selected
