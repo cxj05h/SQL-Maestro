@@ -258,6 +258,15 @@ final class SessionManager: ObservableObject {
         ])
     }
 
+    @discardableResult
+    func syncSavedFileDraft(_ content: String, for fileId: SessionSavedFile.ID, in session: TicketSession) -> Bool {
+        guard var files = sessionSavedFiles[session], let index = files.firstIndex(where: { $0.id == fileId }) else { return false }
+        if files[index].content == content { return false }
+        files[index].content = content
+        sessionSavedFiles[session] = files
+        return true
+    }
+
     func renameSavedFile(id: SessionSavedFile.ID, to newName: String, in session: TicketSession) {
         let trimmed = newName.trimmingCharacters(in: .whitespacesAndNewlines)
         guard var files = sessionSavedFiles[session], let index = files.firstIndex(where: { $0.id == id }) else { return }

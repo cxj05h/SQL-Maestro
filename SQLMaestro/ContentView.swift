@@ -1061,7 +1061,7 @@ struct ContentView: View {
     @State private var fontSize: CGFloat = 13
     @State private var hoverRecentKey: String? = nil
     @State private var previewingSessionImage: SessionImage? = nil
-    @State private var previewingGuideImage: TemplateGuideImage? = nil
+    @State private var previewingGuideImageContext: GuideImagePreviewContext? = nil
     @State private var activeBottomPane: BottomPaneContent? = nil
     @State private var isOutputVisible: Bool = false
     @State private var guideNotesDraft: String = ""
@@ -1079,6 +1079,11 @@ struct ContentView: View {
         let templates: [TemplateItem]
         var id: String { tag }
         var count: Int { templates.count }
+    }
+    struct GuideImagePreviewContext: Identifiable {
+        let template: TemplateItem
+        let image: TemplateGuideImage
+        var id: TemplateGuideImage.ID { image.id }
     }
     @State private var sessionNotesDrafts: [TicketSession: String] = [:]
     @StateObject private var sessionNotesEditor = MarkdownEditorController()
@@ -1117,7 +1122,7 @@ struct ContentView: View {
     private let paneRegionMinHeight: CGFloat = 420
     private let outputRegionHeight: CGFloat = 236
     private let outputRegionSpacing: CGFloat = 12
-    private let mainContentTopPadding: CGFloat = 142
+    private let mainContentTopPadding: CGFloat = 145
 
     
     @FocusState private var isSearchFocused: Bool
@@ -1228,6 +1233,12 @@ struct ContentView: View {
         }
         .sheet(item: $savedFileTreePreview) { preview in
             savedFileTreePreviewSheet(preview)
+        }
+        .sheet(item: $previewingSessionImage) { sessionImage in
+            SessionImagePreviewSheet(sessionImage: sessionImage)
+        }
+        .sheet(item: $previewingGuideImageContext) { context in
+            TemplateGuideImagePreviewSheet(template: context.template, guideImage: context.image)
         }
         .sheet(item: $activePopoutPane) { pane in
             popoutSheet(for: pane)
@@ -2069,7 +2080,7 @@ struct ContentView: View {
                     }
                     if let template = selectedTemplate,
                        let guideImage = guideImage(forFileURL: url, template: template) {
-                        previewingGuideImage = guideImage
+                        previewingGuideImageContext = GuideImagePreviewContext(template: template, image: guideImage)
                         notifyPreviewBehindIfNeeded()
                         return
                     }
@@ -2454,6 +2465,9 @@ struct ContentView: View {
                 if currentSavedFileSelection(for: session) != nil {
                     setSavedFileSelection(nil, for: session)
                 }
+                LOG("Saved file state reset", ctx: [
+                    "session": "\(session.rawValue)"
+                ])
                 return
             }
 
@@ -2461,22 +2475,34 @@ struct ContentView: View {
             var validations = savedFileValidation[session] ?? [:]
             let identifiers = Set(files.map { $0.id })
 
+            var hydratedCount = 0
             for file in files {
                 if drafts[file.id] == nil {
                     drafts[file.id] = file.content
+                    hydratedCount += 1
                 }
                 let current = drafts[file.id] ?? file.content
                 validations[file.id] = validateJSON(current)
             }
 
+            var removedCount = 0
             for key in drafts.keys where !identifiers.contains(key) {
                 drafts.removeValue(forKey: key)
                 validations.removeValue(forKey: key)
                 savedFileAutosave.cancel(session: session, fileId: key)
+                removedCount += 1
             }
 
             savedFileDrafts[session] = drafts
             savedFileValidation[session] = validations
+
+            LOG("Saved file state ensured", ctx: [
+                "session": "\(session.rawValue)",
+                "files": "\(files.count)",
+                "drafts": "\(drafts.count)",
+                "hydrated": "\(hydratedCount)",
+                "removed": "\(removedCount)"
+            ])
 
             if let selected = currentSavedFileSelection(for: session), !identifiers.contains(selected) {
                 setSavedFileSelection(files.first?.id, for: session)
@@ -2566,13 +2592,16 @@ struct ContentView: View {
             validations[fileId] = validation
             savedFileValidation[session] = validations
 
+            let synced = sessions.syncSavedFileDraft(value, for: fileId, in: session)
             let delta = value.count - previous.count
             LOG("Saved file draft updated", ctx: [
                 "session": "\(session.rawValue)",
                 "fileId": fileId.uuidString,
                 "chars": "\(value.count)",
                 "delta": "\(delta)",
+                "drafts": "\(drafts.count)",
                 "valid": validation.isValid ? "true" : "false",
+                "synced": synced ? "true" : "false",
                 "source": source
             ])
 
@@ -4067,7 +4096,7 @@ struct ContentView: View {
                                         onRename: { renameGuideImage(image) },
                                         onDelete: { deleteGuideImage(image) },
                                         onPreview: {
-                                            previewingGuideImage = image
+                                            previewingGuideImageContext = GuideImagePreviewContext(template: template, image: image)
                                             notifyPreviewBehindIfNeeded()
                                         }
                                     )
