@@ -18,8 +18,9 @@ struct JSONTreePreview: View {
     @State private var highlightedNodeID: UUID?
     @State private var lastSubmittedQuery: String = ""
     @State private var shouldCenterTree: Bool = true
+    @State private var panStartOffset: CGSize = .zero
 
-    private let zoomRange: ClosedRange<CGFloat> = 0.4...3.0
+    private let zoomRange: ClosedRange<CGFloat> = 0.2...3.0
     private let searchFocusZoom: CGFloat = 1.2
     private let canvasInnerPadding: CGFloat = 60
     private let canvasOuterPadding: CGFloat = 28
@@ -199,6 +200,15 @@ struct JSONTreePreview: View {
                     },
                     onMagnify: { payload in
                         handleMagnification(delta: payload.delta, location: payload.location)
+                    },
+                    onPanBegan: { location in
+                        handlePanBegan(at: location)
+                    },
+                    onPanChanged: { translation in
+                        handlePanChanged(translation: translation)
+                    },
+                    onPanEnded: {
+                        handlePanEnded()
                     }
                 )
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -367,6 +377,22 @@ struct JSONTreePreview: View {
         let contentPoint = contentPoint(at: location)
         shouldCenterTree = false
         applyZoom(to: proposed, focusContentPoint: contentPoint, focusScreenPoint: location, animated: false)
+    }
+
+    private func handlePanBegan(at _: CGPoint) {
+        shouldCenterTree = false
+        panStartOffset = contentOffset
+    }
+
+    private func handlePanChanged(translation: CGSize) {
+        contentOffset = CGSize(
+            width: panStartOffset.width + translation.width,
+            height: panStartOffset.height + translation.height
+        )
+    }
+
+    private func handlePanEnded() {
+        panStartOffset = contentOffset
     }
 
     private func focusOnHighlightedNode(animated: Bool) {
@@ -569,23 +595,35 @@ private struct ZoomEventCatcher: NSViewRepresentable {
 
     let onCommandScroll: (ScrollPayload) -> Void
     let onMagnify: (MagnifyPayload) -> Void
+    let onPanBegan: (CGPoint) -> Void
+    let onPanChanged: (CGSize) -> Void
+    let onPanEnded: () -> Void
 
     func makeNSView(context: Context) -> ZoomEventView {
         let view = ZoomEventView()
         view.onCommandScroll = onCommandScroll
         view.onMagnify = onMagnify
+        view.onPanBegan = onPanBegan
+        view.onPanChanged = onPanChanged
+        view.onPanEnded = onPanEnded
         return view
     }
 
     func updateNSView(_ nsView: ZoomEventView, context: Context) {
         nsView.onCommandScroll = onCommandScroll
         nsView.onMagnify = onMagnify
+        nsView.onPanBegan = onPanBegan
+        nsView.onPanChanged = onPanChanged
+        nsView.onPanEnded = onPanEnded
     }
 
     final class ZoomEventView: NSView {
         var onCommandScroll: ((ScrollPayload) -> Void)?
         var onMagnify: ((MagnifyPayload) -> Void)?
-        private var trackingArea: NSTrackingArea?
+        var onPanBegan: ((CGPoint) -> Void)?
+        var onPanChanged: ((CGSize) -> Void)?
+        var onPanEnded: (() -> Void)?
+        private var panStartPoint: CGPoint?
 
         override var acceptsFirstResponder: Bool { true }
         override var isFlipped: Bool { true }
@@ -593,32 +631,6 @@ private struct ZoomEventCatcher: NSViewRepresentable {
 
         override init(frame frameRect: NSRect) {
             super.init(frame: frameRect)
-        }
-
-        @available(*, unavailable)
-        required init?(coder: NSCoder) {
-            fatalError("init(coder:) has not been implemented")
-        }
-
-        override func viewDidMoveToWindow() {
-            super.viewDidMoveToWindow()
-            window?.makeFirstResponder(self)
-        }
-
-        override func updateTrackingAreas() {
-            super.updateTrackingAreas()
-            if let trackingArea {
-                removeTrackingArea(trackingArea)
-            }
-            let options: NSTrackingArea.Options = [.activeInKeyWindow, .inVisibleRect, .mouseEnteredAndExited]
-            let area = NSTrackingArea(rect: bounds, options: options, owner: self, userInfo: nil)
-            addTrackingArea(area)
-            trackingArea = area
-        }
-
-        override func mouseEntered(with event: NSEvent) {
-            super.mouseEntered(with: event)
-            window?.makeFirstResponder(self)
         }
 
         override func scrollWheel(with event: NSEvent) {
@@ -640,6 +652,42 @@ private struct ZoomEventCatcher: NSViewRepresentable {
             let location = convert(event.locationInWindow, from: nil)
             let payload = MagnifyPayload(delta: event.magnification, location: location)
             onMagnify?(payload)
+        }
+
+        override func mouseDown(with event: NSEvent) {
+            guard event.type == .leftMouseDown else {
+                super.mouseDown(with: event)
+                return
+            }
+            window?.makeFirstResponder(self)
+            let location = convert(event.locationInWindow, from: nil)
+            panStartPoint = location
+            onPanBegan?(location)
+        }
+
+        override func mouseDragged(with event: NSEvent) {
+            guard let start = panStartPoint else {
+                super.mouseDragged(with: event)
+                return
+            }
+            let location = convert(event.locationInWindow, from: nil)
+            let translation = CGSize(width: location.x - start.x,
+                                     height: location.y - start.y)
+            onPanChanged?(translation)
+        }
+
+        override func mouseUp(with event: NSEvent) {
+            defer { panStartPoint = nil }
+            guard panStartPoint != nil else {
+                super.mouseUp(with: event)
+                return
+            }
+            onPanEnded?()
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) has not been implemented")
         }
     }
 }

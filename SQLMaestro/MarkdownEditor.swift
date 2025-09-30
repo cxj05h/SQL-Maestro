@@ -105,6 +105,12 @@ struct MarkdownEditor: NSViewRepresentable {
             .init("public.heic")
         ])
 
+        // Allow the editor to expand to the height dictated by SwiftUI layouts.
+        scrollView.setContentHuggingPriority(.init(1), for: .vertical)
+        scrollView.setContentCompressionResistancePriority(.init(1), for: .vertical)
+        textView.setContentHuggingPriority(.init(1), for: .vertical)
+        textView.setContentCompressionResistancePriority(.init(1), for: .vertical)
+
         let coordinator = context.coordinator
         textView.handlePaste = { [weak coordinator] pasteboard in
             guard let coordinator else { return false }
