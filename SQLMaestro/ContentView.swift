@@ -4603,8 +4603,11 @@ struct ContentView: View {
                 bottomPaneContent(for: pane, activeSession: activeSession)
                     .padding(.top, pane == .savedFiles ? 28 : 16)
                     .padding(.horizontal, 20)
-                    .padding(.bottom, 30)
+                    .padding(.bottom, 16)
+                    .frame(maxHeight: .infinity, alignment: .top)
+                    .layoutPriority(1)
             }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .background(
                 RoundedRectangle(cornerRadius: 18)
                     .fill(Theme.grayBG.opacity(0.28))
@@ -4887,17 +4890,21 @@ struct ContentView: View {
         }
 
         private func bottomPaneContent(for pane: BottomPaneContent, activeSession: TicketSession) -> some View {
-            Group {
-                switch pane {
-                case .guideNotes:
-                    guideNotesPane
-                case .sessionNotes:
-                    sessionNotesPane(for: activeSession)
-                case .savedFiles:
-                    savedFilesPane(for: activeSession)
+            GeometryReader { proxy in
+                Group {
+                    switch pane {
+                    case .guideNotes:
+                        guideNotesPane
+                    case .sessionNotes:
+                        sessionNotesPane(for: activeSession)
+                    case .savedFiles:
+                        savedFilesPane(for: activeSession)
+                    }
                 }
+                .frame(width: proxy.size.width,
+                       height: max(proxy.size.height, 220),
+                       alignment: .top)
             }
-            .frame(minHeight: 220)
         }
 
         @ViewBuilder
@@ -4912,6 +4919,7 @@ struct ContentView: View {
                                 openLink(url, modifiers: modifiers)
                             }
                         )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     } else {
                         MarkdownEditor(
                             text: $guideNotesDraft,
@@ -4922,8 +4930,11 @@ struct ContentView: View {
                                 handleGuideEditorImageAttachment(info)
                             }
                         )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     }
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .layoutPriority(1)
                 .background(
                     RoundedRectangle(cornerRadius: 12)
                         .fill(Theme.grayBG.opacity(0.22))
@@ -4939,7 +4950,8 @@ struct ContentView: View {
                         .foregroundStyle(.secondary)
                     Spacer()
                 }
-                .frame(maxWidth: .infinity, minHeight: 220)
+                .frame(maxWidth: .infinity, minHeight: 220, maxHeight: .infinity, alignment: .top)
+                .layoutPriority(1)
                 .background(
                     RoundedRectangle(cornerRadius: 12)
                         .fill(Theme.grayBG.opacity(0.18))
@@ -8686,7 +8698,7 @@ struct ContentView: View {
                         .padding(.bottom, 20)
                 }
             }
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
 
         @ViewBuilder
@@ -8713,6 +8725,8 @@ struct ContentView: View {
                     onSavedFilesModeExit()
                 }
             }
+            .frame(maxHeight: .infinity, alignment: .top)
+            .layoutPriority(1)
         }
 
         @ViewBuilder
@@ -8720,6 +8734,7 @@ struct ContentView: View {
             if mode == .notes {
                 notesPane
                     .padding(.top, showsContentBackground ? 4 : 12)
+                    .frame(maxHeight: .infinity, alignment: .top)
             } else {
                 SavedFilesWorkspace(
                     fontSize: fontSize,
@@ -8736,6 +8751,7 @@ struct ContentView: View {
                     onOpenTree: onSavedFileOpenTree
                 )
                 .padding(.top, 2)
+                .frame(maxHeight: .infinity, alignment: .top)
             }
         }
 
@@ -8793,6 +8809,7 @@ struct ContentView: View {
                         fontSize: fontSize * 1.5,
                         onLinkOpen: onLinkOpen
                     )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 } else {
                     MarkdownEditor(
                         text: $draft,
@@ -8803,9 +8820,11 @@ struct ContentView: View {
                             onImageAttachment(info)
                         }
                     )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 }
             }
-            .frame(maxWidth: .infinity, minHeight: 220)
+            .frame(maxWidth: .infinity, minHeight: 220, maxHeight: .infinity, alignment: .top)
+            .layoutPriority(1)
 
             if showsContentBackground {
                 base
@@ -8966,7 +8985,8 @@ struct ContentView: View {
                                 }
                             }
                         )
-                        .frame(maxWidth: .infinity, minHeight: 240)
+                        .frame(maxWidth: .infinity, minHeight: 240, maxHeight: .infinity, alignment: .top)
+                        .layoutPriority(1)
                         .background(
                             RoundedRectangle(cornerRadius: 10)
                                 .fill(Theme.grayBG.opacity(0.25))
@@ -8993,6 +9013,8 @@ struct ContentView: View {
                     }
                     isSearchFieldFocused = false
                 }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                .layoutPriority(1)
             }
 
             private var searchControls: some View {
