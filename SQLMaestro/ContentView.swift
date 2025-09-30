@@ -1223,6 +1223,124 @@ struct ContentView: View {
         .sheet(isPresented: $showDatabaseSettings) {
             DatabaseSettingsSheet(userConfig: userConfig)
         }
+        .sheet(item: $savedFileTreePreview) { preview in
+            savedFileTreePreviewSheet(preview)
+        }
+        .sheet(item: $activePopoutPane) { pane in
+            popoutSheet(for: pane)
+        }
+    }
+
+    @ViewBuilder
+    private func savedFileTreePreviewSheet(_ preview: SavedFileTreePreviewContext) -> some View {
+        JSONTreePreview(fileName: preview.fileName, content: preview.content)
+            .frame(minWidth: 720, minHeight: 540)
+            .background(
+                SheetWindowConfigurator(
+                    minSize: CGSize(width: 640, height: 500),
+                    preferredSize: CGSize(width: 760, height: 560),
+                    sizeStorageKey: "SavedFilesTreePreviewSize"
+                )
+            )
+    }
+
+    private func popoutSheet(for pane: PopoutPaneContext) -> some View {
+        let targetSession: TicketSession
+        switch pane {
+        case .guide:
+            targetSession = sessions.current
+        case .session(let session), .saved(let session):
+            targetSession = session
+        }
+
+        let sessionDraftBinding = Binding<String>(
+            get: { sessionNotesDrafts[targetSession] ?? "" },
+            set: { newValue in
+                setSessionNotesDraft(newValue,
+                                     for: targetSession,
+                                     source: "session.popout")
+            }
+        )
+
+        return PanePopoutSheet(
+            pane: pane,
+            fontSize: fontSize,
+            selectedTemplate: selectedTemplate,
+            guideText: $guideNotesDraft,
+            guideDirty: templateGuideStore.isNotesDirty(for: selectedTemplate),
+            guideController: guideNotesEditor,
+            isPreview: $isPreviewMode,
+            onGuideSave: {
+                guard let template = selectedTemplate else { return }
+                if templateGuideStore.saveNotes(for: template) {
+                    guideNotesDraft = templateGuideStore.currentNotes(for: template)
+                }
+            },
+            onGuideRevert: {
+                guard let template = selectedTemplate else { return }
+                guideNotesDraft = templateGuideStore.revertNotes(for: template)
+            },
+            onGuideTextChanged: { newValue in
+                guard let template = selectedTemplate else { return }
+                _ = templateGuideStore.setNotes(newValue, for: template)
+            },
+            onGuideLinkRequested: handleTroubleshootingLink(selectedText:source:completion:),
+            onGuideImageAttachment: { info in
+                handleGuideEditorImageAttachment(info)
+            },
+            onGuideLinkOpen: { url, modifiers in
+                openLink(url, modifiers: modifiers)
+            },
+            session: targetSession,
+            sessionDraft: sessionDraftBinding,
+            sessionSavedValue: sessions.sessionNotes[targetSession] ?? "",
+            sessionController: sessionNotesEditor,
+            savedFiles: savedFiles(for: targetSession),
+            selectedSavedFileID: currentSavedFileSelection(for: targetSession),
+            savedFileDraftProvider: { savedFileDraft(for: targetSession, fileId: $0) },
+            savedFileValidationProvider: { validationState(for: targetSession, fileId: $0) },
+            onSavedFileSelect: { setSavedFileSelection($0, for: targetSession) },
+            onSavedFileAdd: { addSavedFile(for: targetSession) },
+            onSavedFileDelete: { removeSavedFile($0, in: targetSession) },
+            onSavedFileRename: { renameSavedFile($0, in: targetSession) },
+            onSavedFileContentChange: { fileId, newValue in
+                setSavedFileDraft(newValue,
+                                  for: fileId,
+                                  session: targetSession,
+                                  source: "savedFile.popout")
+            },
+            onSavedFileFocusChange: { focus in
+                isSavedFileEditorFocused = focus
+            },
+            onSavedFileOpenTree: { fileId in
+                presentTreeView(for: fileId, session: targetSession)
+            },
+            onSavedFilesModeExit: { commitSavedFileDrafts(for: targetSession) },
+            onSessionSave: {
+                saveSessionNotes(for: targetSession, reason: "popout-manual")
+            },
+            onSessionRevert: {
+                let saved = sessions.sessionNotes[targetSession] ?? ""
+                setSessionNotesDraft(saved,
+                                     for: targetSession,
+                                     source: "popout-revert")
+            },
+            onSessionLinkRequested: handleSessionNotesLink(selectedText:source:completion:),
+            onSessionImageAttachment: { info in
+                handleSessionEditorImageAttachment(info)
+            },
+            onSessionLinkOpen: { url, modifiers in
+                openLink(url, modifiers: modifiers)
+            },
+            onClose: {
+                if case .saved(let savedSession) = pane {
+                    commitSavedFileDrafts(for: savedSession)
+                }
+                isSavedFileEditorFocused = false
+                activePopoutPane = nil
+            },
+            onTogglePreview: togglePreviewShortcut
+        )
     }
 
     private var hardStopTitleRow: some View {
@@ -4427,7 +4545,7 @@ struct ContentView: View {
                         onOpenTree: { presentTreeView(for: $0, session: activeSession) },
                         onRename: { renameSavedFile($0, in: activeSession) },
                         onDelete: { removeSavedFile($0, in: activeSession) },
-                        onPopOut: { triggerPopOut(for: activeSession) }
+                        onPopOut: nil
                     )
                 }
 
