@@ -147,10 +147,11 @@ private final class MainWindowConfigurator {
         guard window.isVisible else { return }
         window.styleMask.insert([.titled, .resizable, .fullSizeContentView])
         window.titleVisibility = .hidden
-        window.titlebarAppearsTransparent = true
+        window.titlebarAppearsTransparent = false
         window.title = ""
         window.isMovableByWindowBackground = true
         window.titlebarSeparatorStyle = .line
+        installTitlebarBackground(for: window)
 
         if let accessory = window.titlebarAccessoryViewControllers.first(where: { $0 is AppTitleAccessoryViewController }) as? AppTitleAccessoryViewController {
             accessory.refresh()
@@ -159,6 +160,27 @@ private final class MainWindowConfigurator {
             window.addTitlebarAccessoryViewController(accessory)
             accessory.refresh()
         }
+    }
+
+    private func installTitlebarBackground(for window: NSWindow) {
+        guard let titlebarContainer = window.standardWindowButton(.closeButton)?.superview else { return }
+
+        if let background = titlebarContainer.subviews.compactMap({ $0 as? TitlebarBackgroundView }).first {
+            background.refreshAppearance(using: window.effectiveAppearance)
+            return
+        }
+
+        let background = TitlebarBackgroundView(frame: titlebarContainer.bounds)
+        background.autoresizingMask = [.width, .height]
+        background.identifier = TitlebarBackgroundView.viewIdentifier
+
+        if let frontView = titlebarContainer.subviews.first {
+            titlebarContainer.addSubview(background, positioned: .below, relativeTo: frontView)
+        } else {
+            titlebarContainer.addSubview(background)
+        }
+
+        background.refreshAppearance(using: window.effectiveAppearance)
     }
 }
 
@@ -200,6 +222,44 @@ private final class AppTitleAccessoryViewController: NSTitlebarAccessoryViewCont
         titleLabel.stringValue = "SQL Maestro"
         titleLabel.isHidden = false
         titleLabel.alphaValue = 1.0
+    }
+}
+
+private final class TitlebarBackgroundView: NSView {
+    static let viewIdentifier = NSUserInterfaceItemIdentifier("SQLMaestroTitlebarBackground")
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        commonInit()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        commonInit()
+    }
+
+    private func commonInit() {
+        wantsLayer = true
+        layerContentsRedrawPolicy = .onSetNeedsDisplay
+        refreshAppearance(using: effectiveAppearance)
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        refreshAppearance(using: effectiveAppearance)
+    }
+
+    func refreshAppearance(using appearance: NSAppearance?) {
+        let applyColor = {
+            let base = self.window?.backgroundColor ?? NSColor.windowBackgroundColor
+            self.layer?.backgroundColor = base.cgColor
+        }
+
+        if let appearance {
+            appearance.performAsCurrentDrawingAppearance(applyColor)
+        } else {
+            applyColor()
+        }
     }
 }
 #endif
