@@ -2435,6 +2435,11 @@ struct ContentView: View {
                 saveSavedFile(for: session, fileId: previous, reason: "selection-change")
             }
             selectedSavedFile[session] = id
+            LOG("Saved file selection", ctx: [
+                "session": "\(session.rawValue)",
+                "previous": previous?.uuidString ?? "nil",
+                "current": id?.uuidString ?? "nil"
+            ])
         }
 
         private func savedFileDraft(for session: TicketSession, fileId: UUID) -> String {
@@ -2576,36 +2581,57 @@ struct ContentView: View {
                                        for fileId: UUID,
                                        session: TicketSession,
                                        source: String) {
+            let currentSelection = currentSavedFileSelection(for: session)
+            var targetId = fileId
+            var rerouted = false
+            if source == "savedFile.inline",
+               let selected = currentSelection,
+               selected != fileId {
+                targetId = selected
+                rerouted = true
+                WARN("Saved file draft rerouted", ctx: [
+                    "session": "\(session.rawValue)",
+                    "incoming": fileId.uuidString,
+                    "selected": selected.uuidString
+                ])
+            }
+
             var drafts = savedFileDrafts[session] ?? [:]
-            let previous = drafts[fileId] ?? savedFiles(for: session).first(where: { $0.id == fileId })?.content ?? ""
+            let previous = drafts[targetId] ?? savedFiles(for: session).first(where: { $0.id == targetId })?.content ?? ""
             if previous == value {
                 var validations = savedFileValidation[session] ?? [:]
-                validations[fileId] = validateJSON(value)
+                validations[targetId] = validateJSON(value)
                 savedFileValidation[session] = validations
                 return
             }
-            drafts[fileId] = value
+            drafts[targetId] = value
             savedFileDrafts[session] = drafts
 
             var validations = savedFileValidation[session] ?? [:]
             let validation = validateJSON(value)
-            validations[fileId] = validation
+            validations[targetId] = validation
             savedFileValidation[session] = validations
 
-            let synced = sessions.syncSavedFileDraft(value, for: fileId, in: session)
+            let synced = sessions.syncSavedFileDraft(value, for: targetId, in: session)
             let delta = value.count - previous.count
             LOG("Saved file draft updated", ctx: [
                 "session": "\(session.rawValue)",
                 "fileId": fileId.uuidString,
+                "targetId": targetId.uuidString,
                 "chars": "\(value.count)",
                 "delta": "\(delta)",
                 "drafts": "\(drafts.count)",
                 "valid": validation.isValid ? "true" : "false",
+                "selected": currentSelection?.uuidString ?? "nil",
+                "rerouted": rerouted ? "true" : "false",
                 "synced": synced ? "true" : "false",
                 "source": source
             ])
 
-            scheduleSavedFileAutosave(for: session, fileId: fileId)
+            if rerouted {
+                savedFileAutosave.cancel(session: session, fileId: fileId)
+            }
+            scheduleSavedFileAutosave(for: session, fileId: targetId)
         }
 
         private func scheduleSavedFileAutosave(for session: TicketSession, fileId: UUID) {
@@ -2624,6 +2650,7 @@ struct ContentView: View {
                 "session": "\(session.rawValue)",
                 "file": current.displayName,
                 "chars": "\(draft.count)",
+                "fileId": fileId.uuidString,
                 "reason": reason
             ])
         }
@@ -7893,14 +7920,12 @@ struct ContentView: View {
                 let baseWidth: CGFloat = 480
                 let baseHeight: CGFloat = 360
                 let widthRange: CGFloat = 936
-                let heightRange: CGFloat = 702
                 let chromeHeight: CGFloat = 220
 
                 let resolvedWidth = baseWidth + CGFloat(sliderValue) * widthRange
-                let maxHeightForSlider = baseHeight + CGFloat(sliderValue) * heightRange
                 let aspectRatio = (displayedImage?.size.width ?? 0) > 0 ? (displayedImage!.size.height / displayedImage!.size.width) : 0.75
                 let imageHeightForWidth = resolvedWidth * aspectRatio
-                let resolvedHeight = max(baseHeight, min(maxHeightForSlider, imageHeightForWidth + chromeHeight))
+                let resolvedHeight = max(baseHeight, imageHeightForWidth + chromeHeight)
 
                 return VStack(alignment: .leading, spacing: 16) {
                     Text(sessionImage.displayName)
@@ -8021,14 +8046,12 @@ struct ContentView: View {
                 let baseWidth: CGFloat = 480
                 let baseHeight: CGFloat = 360
                 let widthRange: CGFloat = 936
-                let heightRange: CGFloat = 702
                 let chromeHeight: CGFloat = 220
 
                 let resolvedWidth = baseWidth + CGFloat(sliderValue) * widthRange
-                let maxHeightForSlider = baseHeight + CGFloat(sliderValue) * heightRange
                 let aspectRatio = (displayedImage?.size.width ?? 0) > 0 ? (displayedImage!.size.height / displayedImage!.size.width) : 0.75
                 let imageHeightForWidth = resolvedWidth * aspectRatio
-                let resolvedHeight = max(baseHeight, min(maxHeightForSlider, imageHeightForWidth + chromeHeight))
+                let resolvedHeight = max(baseHeight, imageHeightForWidth + chromeHeight)
 
                 return VStack(alignment: .leading, spacing: 16) {
                     Text(guideImage.displayName)

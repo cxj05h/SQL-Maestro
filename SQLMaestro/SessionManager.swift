@@ -264,6 +264,21 @@ final class SessionManager: ObservableObject {
         if files[index].content == content { return false }
         files[index].content = content
         sessionSavedFiles[session] = files
+        let snapshot = files
+            .map { file in
+                let sample = file.content.replacingOccurrences(of: "\n", with: "⏎")
+                    .prefix(40)
+                return "\(file.displayName)=\(sample)"
+            }
+            .joined(separator: " | ")
+        LOG("Saved file draft synced", ctx: [
+            "session": "\(session.rawValue)",
+            "fileId": fileId.uuidString,
+            "display": files[index].displayName,
+            "chars": "\(content.count)",
+            "index": "\(index)",
+            "snapshot": snapshot
+        ])
         return true
     }
 
