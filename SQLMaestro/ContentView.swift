@@ -4730,7 +4730,17 @@ struct ContentView: View {
         private func bottomPaneHeader(for pane: BottomPaneContent, guideDirty: Bool, activeSession: TicketSession) -> some View {
             HStack(alignment: .center, spacing: 12) {
                 paneTitle(for: pane)
+
+                Button("Pop Out") {
+                    triggerPopOut(for: activeSession)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(Theme.accent)
+                .font(.system(size: fontSize - 1))
+                .disabled(pane == .guideNotes && selectedTemplate == nil)
+
                 Spacer(minLength: 12)
+
                 switch pane {
                 case .guideNotes:
                     MarkdownToolbar(iconSize: fontSize + 2, isEnabled: !isPreviewMode, controller: guideNotesEditor)
@@ -4792,16 +4802,6 @@ struct ContentView: View {
                         onPopOut: nil
                     )
                 }
-
-                Spacer(minLength: 8)
-
-                Button("Pop Out") {
-                    triggerPopOut(for: activeSession)
-                }
-                .buttonStyle(.borderedProminent)
-                .tint(Theme.accent)
-                .font(.system(size: fontSize - 1))
-                .disabled(pane == .guideNotes && selectedTemplate == nil)
             }
         }
 
