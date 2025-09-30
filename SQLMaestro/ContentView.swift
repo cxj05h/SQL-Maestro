@@ -1122,7 +1122,7 @@ struct ContentView: View {
     private let paneRegionMinHeight: CGFloat = 420
     private let outputRegionHeight: CGFloat = 236
     private let outputRegionSpacing: CGFloat = 12
-    private let mainContentTopPadding: CGFloat = 145
+    private let mainContentTopPadding: CGFloat = 140
 
     
     @FocusState private var isSearchFocused: Bool

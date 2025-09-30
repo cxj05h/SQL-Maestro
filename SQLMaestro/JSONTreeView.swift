@@ -313,33 +313,24 @@ struct JSONTreePreview: View {
         }
     }
 
-    private func scrollToHighlightedNode() {
+    private func scrollToHighlightedNode(animated: Bool = true) {
         guard let scrollView = treeScrollView,
               let id = highlightedNodeID,
               let point = layout.position(for: id) else { return }
 
-        ensureSearchZoomIfNeeded(target: point, in: scrollView)
+        let initialDocPoint = documentPoint(fromLayoutPoint: point, in: scrollView)
+        ensureSearchZoomIfNeeded(targetDocPoint: initialDocPoint, in: scrollView, animated: animated)
 
-        let docPoint = documentPoint(fromLayoutPoint: point, in: scrollView)
-        let focusRadius = max(260.0 / max(scrollView.magnification, 0.001), 180)
-        let rect = NSRect(x: docPoint.x - focusRadius,
-                          y: docPoint.y - focusRadius,
-                          width: focusRadius * 2,
-                          height: focusRadius * 2)
-        if let docView = scrollView.documentView {
-            docView.scrollToVisible(rect)
-            scrollView.reflectScrolledClipView(scrollView.contentView)
-        }
+        let refreshedDocPoint = documentPoint(fromLayoutPoint: point, in: scrollView)
+        centerDocument(on: refreshedDocPoint, in: scrollView, animated: animated)
     }
 
-    private func ensureSearchZoomIfNeeded(target point: CGPoint, in scrollView: NSScrollView) {
+    private func ensureSearchZoomIfNeeded(targetDocPoint point: NSPoint, in scrollView: NSScrollView, animated: Bool) {
         guard !searchMatches.isEmpty else { return }
         let current = scrollView.magnification
         let desired = max(current, searchFocusZoom)
         guard abs(desired - current) > 0.0001 else { return }
-        let docPoint = documentPoint(fromLayoutPoint: point, in: scrollView)
-        scrollView.setMagnification(desired, centeredAt: docPoint)
-        zoomScale = desired
+        updateZoom(to: desired, centeredAt: point, in: scrollView, animated: animated)
     }
 
     private func installScrollMonitor() {
@@ -350,28 +341,24 @@ struct JSONTreePreview: View {
 
             switch event.type {
             case .magnify:
-                let factor = 1.0 + event.magnification
-                guard abs(factor - 1.0) > 0.0001 else { return nil }
+                let increment = event.magnification
+                guard abs(increment) > 0.0001 else { return nil }
+                let factor = 1.0 + increment
                 let center = self.documentPoint(fromWindowLocation: event.locationInWindow, in: scrollView)
                 let proposed = scrollView.magnification * factor
-                let clamped = clampZoom(proposed)
-                guard abs(clamped - scrollView.magnification) > 0.0001 else { return nil }
-                scrollView.setMagnification(clamped, centeredAt: center)
-                zoomScale = clamped
+                self.updateZoom(to: proposed, centeredAt: center, in: scrollView, animated: false)
                 dispatchScrollToHighlight()
                 return nil
 
             case .scrollWheel:
-                let modifiers = event.modifierFlags.intersection([.command, .shift])
-                guard !modifiers.isEmpty else { return event }
+                guard event.modifierFlags.contains(.command) else { return event }
                 let center = self.documentPoint(fromWindowLocation: event.locationInWindow, in: scrollView)
-                let delta = event.scrollingDeltaY
-                let multiplier: CGFloat = event.hasPreciseScrollingDeltas ? 0.02 : 0.1
-                let proposed = scrollView.magnification - delta * multiplier
-                let clamped = clampZoom(proposed)
-                guard abs(clamped - scrollView.magnification) > 0.0001 else { return nil }
-                scrollView.setMagnification(clamped, centeredAt: center)
-                zoomScale = clamped
+                let deltaY = event.scrollingDeltaY
+                guard abs(deltaY) > 0.0001 else { return nil }
+                let direction: CGFloat = event.isDirectionInvertedFromDevice ? -1 : 1
+                let multiplier: CGFloat = event.hasPreciseScrollingDeltas ? 0.04 : 0.18
+                let proposed = scrollView.magnification - (deltaY * direction * multiplier)
+                self.updateZoom(to: proposed, centeredAt: center, in: scrollView, animated: false)
                 dispatchScrollToHighlight()
                 return nil
 
@@ -390,6 +377,59 @@ struct JSONTreePreview: View {
 
     private func clampZoom(_ value: CGFloat) -> CGFloat {
         min(max(value, zoomRange.lowerBound), zoomRange.upperBound)
+    }
+
+    private func updateZoom(to newValue: CGFloat, centeredAt docPoint: NSPoint, in scrollView: NSScrollView, animated: Bool) {
+        let clamped = clampZoom(newValue)
+        guard abs(clamped - scrollView.magnification) > 0.0001 else { return }
+        let focusPoint = sanitizedDocumentPoint(docPoint, in: scrollView)
+        if animated {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.22
+                scrollView.animator().setMagnification(clamped, centeredAt: focusPoint)
+            }
+        } else {
+            scrollView.setMagnification(clamped, centeredAt: focusPoint)
+        }
+        zoomScale = clamped
+    }
+
+    private func centerDocument(on docPoint: NSPoint, in scrollView: NSScrollView, animated: Bool) {
+        guard let docView = scrollView.documentView else { return }
+        let clipView = scrollView.contentView
+        let clipSize = clipView.bounds.size
+        guard clipSize.width > 0, clipSize.height > 0 else { return }
+
+        let focusPoint = sanitizedDocumentPoint(docPoint, in: scrollView)
+
+        var targetOrigin = NSPoint(
+            x: focusPoint.x - clipSize.width / 2,
+            y: focusPoint.y - clipSize.height / 2
+        )
+
+        let maxX = max(docView.bounds.width - clipSize.width, 0)
+        let maxY = max(docView.bounds.height - clipSize.height, 0)
+        targetOrigin.x = min(max(targetOrigin.x, 0), maxX)
+        targetOrigin.y = min(max(targetOrigin.y, 0), maxY)
+
+        if animated {
+            NSAnimationContext.runAnimationGroup { context in
+                context.duration = 0.28
+                clipView.animator().setBoundsOrigin(targetOrigin)
+            } completionHandler: {
+                scrollView.reflectScrolledClipView(clipView)
+            }
+        } else {
+            clipView.scroll(to: targetOrigin)
+            scrollView.reflectScrolledClipView(clipView)
+        }
+    }
+
+    private func sanitizedDocumentPoint(_ point: NSPoint, in scrollView: NSScrollView) -> NSPoint {
+        guard let docView = scrollView.documentView else { return point }
+        let x = min(max(point.x, 0), docView.bounds.width)
+        let y = min(max(point.y, 0), docView.bounds.height)
+        return NSPoint(x: x, y: y)
     }
 
     private func documentPoint(fromWindowLocation location: CGPoint, in scrollView: NSScrollView) -> NSPoint {
