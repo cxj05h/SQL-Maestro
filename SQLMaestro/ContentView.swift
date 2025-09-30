@@ -8013,6 +8013,8 @@ struct ContentView: View {
                        height: resolvedHeight,
                        alignment: .topLeading)
 #if canImport(AppKit)
+                .background(WindowSizeUpdater(size: CGSize(width: resolvedWidth,
+                                                          height: resolvedHeight)))
                 .background(FloatingWindowConfigurator(level: .floating))
 #endif
             }
@@ -8137,6 +8139,8 @@ struct ContentView: View {
                        height: resolvedHeight,
                        alignment: .topLeading)
 #if canImport(AppKit)
+                .background(WindowSizeUpdater(size: CGSize(width: resolvedWidth,
+                                                          height: resolvedHeight)))
                 .background(FloatingWindowConfigurator(level: .floating))
 #endif
             }
@@ -9169,6 +9173,36 @@ struct ContentView: View {
         }
     }
 
+    private struct WindowSizeUpdater: NSViewRepresentable {
+        let size: CGSize
+
+        func makeNSView(context: Context) -> NSView {
+            let view = NSView(frame: .zero)
+            DispatchQueue.main.async {
+                applySize(using: view)
+            }
+            return view
+        }
+
+        func updateNSView(_ nsView: NSView, context: Context) {
+            DispatchQueue.main.async {
+                applySize(using: nsView)
+            }
+        }
+
+        private func applySize(using view: NSView) {
+            guard let window = view.window else { return }
+            let targetWidth = max(size.width, window.minSize.width)
+            let targetHeight = max(size.height, window.minSize.height)
+            let currentSize = window.contentView?.frame.size ?? .zero
+
+            if abs(currentSize.width - targetWidth) > 0.5 ||
+                abs(currentSize.height - targetHeight) > 0.5 {
+                window.setContentSize(CGSize(width: targetWidth, height: targetHeight))
+            }
+        }
+    }
+
     private struct KeyboardShortcutOverlay: View {
         let onTrigger: () -> Void
 
@@ -9194,6 +9228,12 @@ struct ContentView: View {
 
     private struct FloatingWindowConfigurator: View {
         let level: Int
+
+        var body: some View { EmptyView() }
+    }
+
+    private struct WindowSizeUpdater: View {
+        let size: CGSize
 
         var body: some View { EmptyView() }
     }
