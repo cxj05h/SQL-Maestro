@@ -121,8 +121,10 @@ private final class MainWindowConfigurator {
         observe(NSWindow.didBecomeKeyNotification)
         observe(NSApplication.didBecomeActiveNotification)
         observe(NSApplication.didUpdateNotification)
+        observe(NSWindow.didResignMainNotification)
+        observe(NSWindow.didResignKeyNotification)
 
-        DispatchQueue.main.async { [weak self] in
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
             self?.applyToAllWindows()
         }
     }
@@ -142,6 +144,7 @@ private final class MainWindowConfigurator {
     }
 
     private func apply(to window: NSWindow) {
+        guard window.isVisible else { return }
         window.styleMask.insert([.titled, .resizable, .fullSizeContentView])
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
@@ -152,7 +155,9 @@ private final class MainWindowConfigurator {
         if let accessory = window.titlebarAccessoryViewControllers.first(where: { $0 is AppTitleAccessoryViewController }) as? AppTitleAccessoryViewController {
             accessory.refresh()
         } else {
-            window.addTitlebarAccessoryViewController(AppTitleAccessoryViewController())
+            let accessory = AppTitleAccessoryViewController()
+            window.addTitlebarAccessoryViewController(accessory)
+            accessory.refresh()
         }
     }
 }

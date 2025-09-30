@@ -1113,7 +1113,7 @@ struct ContentView: View {
     @State private var beginAcctDraft: String = ""
     @State private var beginExtraDrafts: [BeginCaptureEntry] = []
 
-    private let hardStopRowHeight: CGFloat = 3
+    private let hardStopRowHeight: CGFloat = 0
     private let paneRegionMinHeight: CGFloat = 420
 
     
@@ -1281,7 +1281,7 @@ struct ContentView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .padding(.top, hardStopRowHeight + 12)
+        .padding(.top, 4)
     }
 
     private var mainDetailContent: some View {
@@ -8417,7 +8417,9 @@ struct ContentView: View {
             Group {
                 if showsOuterBackground {
                     contentStack
-                        .padding(18)
+                        .padding(.horizontal, 18)
+                        .padding(.top, 18)
+                        .padding(.bottom, 26)
                         .background(
                             RoundedRectangle(cornerRadius: 14)
                                 .fill(Theme.grayBG.opacity(0.22))
@@ -8481,7 +8483,7 @@ struct ContentView: View {
                     onFocusChange: onSavedFileFocusChanged,
                     onOpenTree: onSavedFileOpenTree
                 )
-                .padding(.top, 18)
+                .padding(.top, 2)
             }
         }
 
@@ -8728,7 +8730,7 @@ struct ContentView: View {
                             emptyState
                     }
                 }
-                .padding(.top, 12)
+                .padding(.top, 4)
                 .onChange(of: selectedID) { _, newValue in
                     searchStatus = .idle
                     searchQuery = ""
