@@ -100,29 +100,44 @@ private extension String {
 private final class MainWindowConfigurator {
     static let shared = MainWindowConfigurator()
 
-    private var observer: NSObjectProtocol?
+    private var observers: [NSObjectProtocol] = []
 
     func activate() {
-        guard observer == nil else { return }
+        guard observers.isEmpty else { return }
 
-        observer = NotificationCenter.default.addObserver(forName: NSWindow.didBecomeMainNotification,
-                                                          object: nil,
-                                                          queue: .main) { [weak self] note in
-            guard let window = note.object as? NSWindow else { return }
-            self?.apply(to: window)
+        let center = NotificationCenter.default
+        func observe(_ name: Notification.Name) {
+            let token = center.addObserver(forName: name, object: nil, queue: .main) { [weak self] note in
+                if let window = note.object as? NSWindow {
+                    self?.apply(to: window)
+                } else {
+                    self?.applyToAllWindows()
+                }
+            }
+            observers.append(token)
         }
 
+        observe(NSWindow.didBecomeMainNotification)
+        observe(NSWindow.didBecomeKeyNotification)
+        observe(NSApplication.didBecomeActiveNotification)
+        observe(NSApplication.didUpdateNotification)
+
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            for window in NSApplication.shared.windows {
-                self.apply(to: window)
-            }
+            self?.applyToAllWindows()
         }
     }
 
     deinit {
-        if let observer {
-            NotificationCenter.default.removeObserver(observer)
+        let center = NotificationCenter.default
+        for token in observers {
+            center.removeObserver(token)
+        }
+        observers.removeAll()
+    }
+
+    private func applyToAllWindows() {
+        for window in NSApplication.shared.windows {
+            apply(to: window)
         }
     }
 
@@ -134,17 +149,19 @@ private final class MainWindowConfigurator {
         window.isMovableByWindowBackground = true
         window.titlebarSeparatorStyle = .line
 
-        let hasAccessory = window.titlebarAccessoryViewControllers.contains { controller in
-            controller is AppTitleAccessoryViewController
-        }
-        if !hasAccessory {
+        if let accessory = window.titlebarAccessoryViewControllers.first(where: { $0 is AppTitleAccessoryViewController }) as? AppTitleAccessoryViewController {
+            accessory.refresh()
+        } else {
             window.addTitlebarAccessoryViewController(AppTitleAccessoryViewController())
         }
     }
 }
 
 private final class AppTitleAccessoryViewController: NSTitlebarAccessoryViewController {
+    private let titleLabel: NSTextField
+
     override init(nibName nibNameOrNil: NSNib.Name?, bundle nibBundleOrNil: Bundle?) {
+        titleLabel = NSTextField(labelWithString: "SQL Maestro")
         super.init(nibName: nibNameOrNil, bundle: nibBundleOrNil)
         layoutAttribute = .leading
     }
@@ -154,25 +171,30 @@ private final class AppTitleAccessoryViewController: NSTitlebarAccessoryViewCont
     }
 
     override func loadView() {
-        let label = NSTextField(labelWithString: "SQL Maestro")
-        label.font = NSFont.systemFont(ofSize: 14, weight: .medium)
-        label.textColor = NSColor.labelColor
-        label.alignment = .left
-        label.translatesAutoresizingMaskIntoConstraints = false
+        titleLabel.font = NSFont.systemFont(ofSize: 14, weight: .medium)
+        titleLabel.textColor = NSColor.labelColor
+        titleLabel.alignment = .left
+        titleLabel.translatesAutoresizingMaskIntoConstraints = false
 
         let container = NSView(frame: NSRect(x: 0, y: 0, width: 160, height: 28))
         container.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(label)
+        container.addSubview(titleLabel)
 
         NSLayoutConstraint.activate([
             container.widthAnchor.constraint(greaterThanOrEqualToConstant: 100),
             container.heightAnchor.constraint(equalToConstant: 28),
-            label.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 6),
-            label.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -6),
-            label.centerYAnchor.constraint(equalTo: container.centerYAnchor)
+            titleLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 6),
+            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -6),
+            titleLabel.centerYAnchor.constraint(equalTo: container.centerYAnchor)
         ])
 
         view = container
+    }
+
+    func refresh() {
+        titleLabel.stringValue = "SQL Maestro"
+        titleLabel.isHidden = false
+        titleLabel.alphaValue = 1.0
     }
 }
 #endif
@@ -180,7 +202,6 @@ private final class AppTitleAccessoryViewController: NSTitlebarAccessoryViewCont
 struct SQLMaestroApp: App {
     @StateObject private var templates = TemplateManager()
     @StateObject private var sessions = SessionManager()
-    @StateObject private var layoutOverrides = LayoutOverrideManager()
     init() {
         AppPaths.ensureAll()
             AppPaths.copyBundledAssets() // Add this line
@@ -199,7 +220,6 @@ struct SQLMaestroApp: App {
             ContentView()
                 .environmentObject(templates)
                 .environmentObject(sessions)
-                .environmentObject(layoutOverrides)
         }
         .commands {
             CommandGroup(replacing: .appInfo) {
@@ -207,7 +227,7 @@ struct SQLMaestroApp: App {
                     AboutWindowController.shared.show()
                 }
             }
-            AppMenuCommands(tmpl: templates, sessions: sessions, layout: layoutOverrides)
+            AppMenuCommands(tmpl: templates, sessions: sessions)
             CommandGroup(after: .help) {
                 Button("Keyboard Shortcuts…") {
                     NotificationCenter.default.post(name: .showKeyboardShortcuts, object: nil)

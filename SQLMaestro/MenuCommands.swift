@@ -1,10 +1,10 @@
 import SwiftUI
+import AppKit
 
 struct AppMenuCommands: Commands {
     @Environment(\.openURL) private var openURL
     @ObservedObject var tmpl: TemplateManager
     @ObservedObject var sessions: SessionManager
-    @ObservedObject var layout: LayoutOverrideManager
 
     @State private var fontScale: Double = 1.0
 
@@ -21,25 +21,6 @@ struct AppMenuCommands: Commands {
         }
 
         CommandMenu("Debug") {
-            if layout.isEditing {
-                Button("Finish Layout Edit Mode") {
-                    layout.endEditing(save: true)
-                }
-                Button("Cancel Layout Edit Mode") {
-                    layout.endEditing(save: false)
-                }
-            } else {
-                Button("Enter Layout Edit Mode") {
-                    layout.beginEditing()
-                }
-            }
-
-            Button("Reset Layout Overrides") {
-                layout.resetOverrides()
-            }
-
-            Divider()
-
             Button("View Logs") {
                 NSWorkspace.shared.open(AppLogger.logFileURLForToday())
             }

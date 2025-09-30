@@ -116,16 +116,6 @@ enum BottomPaneContent: Hashable {
     case savedFiles
 }
 
-private extension BottomPaneContent {
-    var layoutKey: String {
-        switch self {
-        case .guideNotes: return "guide"
-        case .sessionNotes: return "session"
-        case .savedFiles: return "saved"
-        }
-    }
-}
-
 enum PopoutPaneContext: Identifiable {
     case guide
     case session(TicketSession)
@@ -1050,7 +1040,6 @@ struct ContentView: View {
     @StateObject private var userConfig = UserConfigStore()
     @State private var selectedSessionTemplateTab: SessionTemplateTab = .templateLinks
     @EnvironmentObject var sessions: SessionManager
-    @EnvironmentObject private var layoutOverrides: LayoutOverrideManager
     @ObservedObject private var dbTablesStore = DBTablesStore.shared
     @ObservedObject private var dbTablesCatalog = DBTablesCatalog.shared
     @ObservedObject private var templateLinksStore = TemplateLinksStore.shared
@@ -1124,9 +1113,10 @@ struct ContentView: View {
     @State private var beginAcctDraft: String = ""
     @State private var beginExtraDrafts: [BeginCaptureEntry] = []
 
-    private let hardStopRowHeight: CGFloat = 28
+    private let hardStopRowHeight: CGFloat = 3
     private let paneRegionMinHeight: CGFloat = 420
 
+    
     @FocusState private var isSearchFocused: Bool
     @FocusState private var isListFocused: Bool
     @FocusState private var focusedDBTableRow: Int?
@@ -1164,13 +1154,15 @@ struct ContentView: View {
     
     
     
-    var body: some View {
+        var body: some View {
         NavigationSplitView {
             templatesPane
         } detail: {
             detailContent
         }
     }
+
+
     // MARK: - Detail Layout
 
     @ViewBuilder
@@ -1234,15 +1226,9 @@ struct ContentView: View {
     }
 
     private var hardStopTitleRow: some View {
-        HStack(spacing: 8) {
-            Text("SQL Maestro")
-                .font(.system(size: 14, weight: .medium))
-                .foregroundStyle(.primary)
-            Spacer()
-        }
-        .padding(.horizontal, 16)
-        .frame(height: hardStopRowHeight)
-        .background(Theme.grayBG.opacity(0.98))
+        Color.clear
+            .frame(height: hardStopRowHeight)
+            .background(Theme.grayBG.opacity(0.98))
     }
 
     private var hardStopDivider: some View {
@@ -1337,11 +1323,17 @@ struct ContentView: View {
                         Text("Active Template")
                             .font(.system(size: fontSize - 2))
                             .foregroundStyle(.secondary)
-                        Text(selectedTemplate?.name ?? "No template loaded")
-                            .font(.system(size: fontSize + 3, weight: .medium))
-                            .foregroundStyle(Theme.gold)
                         if let template = selectedTemplate {
+                            if let displayName = activeTemplateDisplayName(for: template) {
+                                Text(displayName)
+                                    .font(.system(size: fontSize + 3, weight: .medium))
+                                    .foregroundStyle(Theme.gold)
+                            }
                             activeTemplateTags(for: template)
+                        } else {
+                            Text("No template loaded")
+                                .font(.system(size: fontSize + 3, weight: .medium))
+                                .foregroundStyle(Theme.gold)
                         }
                     }
                 }
@@ -1436,7 +1428,16 @@ struct ContentView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
+    private func activeTemplateDisplayName(for template: TemplateItem) -> String? {
+        let trimmed = template.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let normalized = trimmed.replacingOccurrences(of: #"\s+"#, with: "", options: .regularExpression).lowercased()
+        if normalized == "sqlmaestro" { return nil }
+        return trimmed
+    }
+
     // MARK: – Templates Pane (split to help the type checker)
+    @ViewBuilder
     private var templatesPane: some View {
         TemplatesSidebar {
             templatesHeader
@@ -3715,7 +3716,10 @@ struct ContentView: View {
         
         // MARK: — Session & Template Tabbed Pane
         private var sessionAndTemplatePane: some View {
-            VStack(alignment: .leading, spacing: 6) {
+            let minPaneHeight = max(160, fontSize * 8)
+            let maxPaneHeight = max(220, fontSize * 11)
+
+            return VStack(alignment: .leading, spacing: 6) {
                 Text("Session & Template")
                     .font(.system(size: fontSize + 1, weight: .semibold))
                     .foregroundStyle(Theme.purple)
@@ -3739,7 +3743,7 @@ struct ContentView: View {
                         buildTemplateLinksView()
                     }
                 }
-                .frame(minHeight: 200, maxHeight: 300)
+                .frame(minHeight: minPaneHeight, maxHeight: maxPaneHeight, alignment: .top)
             }
         }
         //    // MARK: — Alternate Fields pane (per-session)
@@ -4282,6 +4286,7 @@ struct ContentView: View {
                 if isOutputVisible {
                     outputSQLSection
                 }
+
                 ZStack(alignment: .topLeading) {
                     Color.clear
                     if let pane = activeBottomPane {
@@ -4291,11 +4296,6 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity)
                 .frame(minHeight: paneRegionMinHeight, alignment: .top)
             }
-            .layoutEditable(LayoutIDs.Output.container, name: "Output Workspace")
-        }
-
-        private func paneElementID(_ pane: BottomPaneContent, suffix: String) -> String {
-            "layout.bottomPane.\(pane.layoutKey).\(suffix)"
         }
 
         private var outputSQLSection: some View {
@@ -4304,7 +4304,6 @@ struct ContentView: View {
                     Text("Output SQL")
                         .font(.system(size: fontSize + 4, weight: .semibold))
                         .foregroundStyle(Theme.aqua)
-                        .layoutEditable(LayoutIDs.Output.title, name: "Output SQL Title")
                     Spacer(minLength: 16)
 
                     Button("Hide Output") {
@@ -4313,9 +4312,7 @@ struct ContentView: View {
                     .buttonStyle(.plain)
                     .font(.system(size: fontSize - 2, weight: .semibold))
                     .foregroundStyle(.secondary)
-                    .layoutEditable(LayoutIDs.Output.hideButton, name: "Hide Output Button")
                 }
-                .layoutEditable(LayoutIDs.Output.header, name: "Output Header Row")
 
                 TextEditor(text: $populatedSQL)
                     .font(.system(size: fontSize, weight: .regular, design: .monospaced))
@@ -4330,7 +4327,6 @@ struct ContentView: View {
                             textView.isAutomaticTextReplacementEnabled = false
                         }
                     }
-                    .layoutEditable(LayoutIDs.Output.editor, name: "Output SQL Editor")
             }
             .padding(16)
             .background(
@@ -4342,7 +4338,6 @@ struct ContentView: View {
                     )
             )
             .padding(.bottom, 4)
-            .layoutEditable(LayoutIDs.Output.section, name: "Output SQL Section")
         }
 
         private func bottomPaneContainer(pane: BottomPaneContent, guideDirty: Bool, activeSession: TicketSession) -> some View {
@@ -4368,23 +4363,19 @@ struct ContentView: View {
                     )
             )
             .padding(.horizontal, 4)
-            .layoutEditable(LayoutIDs.BottomPane.container, name: "Bottom Pane Container")
         }
 
         private func bottomPaneHeader(for pane: BottomPaneContent, guideDirty: Bool, activeSession: TicketSession) -> some View {
             HStack(alignment: .center, spacing: 12) {
                 paneTitle(for: pane)
-                    .layoutEditable(paneElementID(pane, suffix: "title"), name: "Pane Title: \(pane.layoutKey)")
                 Spacer(minLength: 12)
                 switch pane {
                 case .guideNotes:
                     MarkdownToolbar(iconSize: fontSize + 2, isEnabled: !isPreviewMode, controller: guideNotesEditor)
-                        .layoutEditable(paneElementID(pane, suffix: "toolbar.markdown"), name: "Guide Toolbar")
                     PreviewModeToggle(isPreview: Binding(
                         get: { isPreviewMode },
                         set: { setPreviewMode($0) }
                     ))
-                    .layoutEditable(paneElementID(pane, suffix: "toolbar.preview"), name: "Guide Preview Toggle")
                     if guideDirty {
                         Button("Save Guide") {
                             guard let template = selectedTemplate else { return }
@@ -4396,7 +4387,6 @@ struct ContentView: View {
                         .buttonStyle(.borderedProminent)
                         .tint(Theme.purple)
                         .font(.system(size: fontSize - 1))
-                        .layoutEditable(paneElementID(pane, suffix: "toolbar.save"), name: "Guide Save Button")
 
                         Button("Revert") {
                             guard let template = selectedTemplate else { return }
@@ -4405,16 +4395,13 @@ struct ContentView: View {
                         .buttonStyle(.bordered)
                         .tint(Theme.pink)
                         .font(.system(size: fontSize - 1))
-                        .layoutEditable(paneElementID(pane, suffix: "toolbar.revert"), name: "Guide Revert Button")
                     }
                 case .sessionNotes:
                     MarkdownToolbar(iconSize: fontSize + 2, isEnabled: !isPreviewMode, controller: sessionNotesEditor)
-                        .layoutEditable(paneElementID(pane, suffix: "toolbar.markdown"), name: "Session Toolbar")
                     PreviewModeToggle(isPreview: Binding(
                         get: { isPreviewMode },
                         set: { setPreviewMode($0) }
                     ))
-                    .layoutEditable(paneElementID(pane, suffix: "toolbar.preview"), name: "Session Preview Toggle")
                     if (sessionNotesDrafts[activeSession] ?? "") != (sessions.sessionNotes[activeSession] ?? "") {
                         Button("Save Notes") {
                             saveSessionNotes()
@@ -4422,7 +4409,6 @@ struct ContentView: View {
                         .buttonStyle(.borderedProminent)
                         .tint(Theme.purple)
                         .font(.system(size: fontSize - 1))
-                        .layoutEditable(paneElementID(pane, suffix: "toolbar.save"), name: "Session Save Button")
 
                         Button("Revert") {
                             revertSessionNotes()
@@ -4430,7 +4416,6 @@ struct ContentView: View {
                         .buttonStyle(.bordered)
                         .tint(Theme.pink)
                         .font(.system(size: fontSize - 1))
-                        .layoutEditable(paneElementID(pane, suffix: "toolbar.revert"), name: "Session Revert Button")
                     }
                 case .savedFiles:
                     SessionNotesInline.SavedFilesWorkspace.Toolbar(
@@ -4444,7 +4429,6 @@ struct ContentView: View {
                         onDelete: { removeSavedFile($0, in: activeSession) },
                         onPopOut: { triggerPopOut(for: activeSession) }
                     )
-                    .layoutEditable(paneElementID(pane, suffix: "toolbar.savedFiles"), name: "Saved Files Toolbar")
                 }
 
                 Spacer(minLength: 8)
@@ -4456,9 +4440,7 @@ struct ContentView: View {
                 .tint(Theme.accent)
                 .font(.system(size: fontSize - 1))
                 .disabled(pane == .guideNotes && selectedTemplate == nil)
-                .layoutEditable(paneElementID(pane, suffix: "toolbar.popout"), name: "Pop Out Button")
             }
-            .layoutEditable(LayoutIDs.BottomPane.header, name: "Bottom Pane Header")
         }
 
         private func paneTitle(for pane: BottomPaneContent) -> some View {
@@ -4664,7 +4646,6 @@ struct ContentView: View {
                 }
             }
             .frame(minHeight: 220)
-            .layoutEditable(paneElementID(pane, suffix: "body"), name: "Pane Body: \(pane.layoutKey)")
         }
 
         @ViewBuilder
@@ -4679,7 +4660,6 @@ struct ContentView: View {
                                 openLink(url, modifiers: modifiers)
                             }
                         )
-                        .layoutEditable(paneElementID(.guideNotes, suffix: "preview"), name: "Guide Preview")
                     } else {
                         MarkdownEditor(
                             text: $guideNotesDraft,
@@ -4690,7 +4670,6 @@ struct ContentView: View {
                                 handleGuideEditorImageAttachment(info)
                             }
                         )
-                        .layoutEditable(paneElementID(.guideNotes, suffix: "editor"), name: "Guide Editor")
                     }
                 }
                 .background(
@@ -4701,7 +4680,6 @@ struct ContentView: View {
                                 .stroke(Theme.purple.opacity(0.18), lineWidth: 1)
                         )
                 )
-                .layoutEditable(paneElementID(.guideNotes, suffix: "content"), name: "Guide Notes Content")
             } else {
                 VStack(alignment: .leading, spacing: 8) {
                     Text("Select a template to view its troubleshooting guide")
@@ -4718,7 +4696,6 @@ struct ContentView: View {
                                 .stroke(Theme.purple.opacity(0.15), lineWidth: 1)
                         )
                 )
-                .layoutEditable(paneElementID(.guideNotes, suffix: "empty"), name: "Guide Empty State")
             }
         }
 
@@ -4883,7 +4860,6 @@ struct ContentView: View {
                     }
                 }
             }
-            .layoutEditable(LayoutIDs.SessionToolbar.container, name: "Session Toolbar")
         }
 
         private var sessionActionButtons: some View {
@@ -4894,7 +4870,6 @@ struct ContentView: View {
                     .keyboardShortcut(.return, modifiers: [.command])
                     .font(.system(size: fontSize))
                     .registerShortcut(name: "Populate Query", key: .return, modifiers: [.command], scope: "Global")
-                    .layoutEditable(LayoutIDs.SessionToolbar.populateButton, name: "Populate Query Button")
 
                 Button("Clear Session #\(sessions.current.rawValue)") {
                     attemptClearCurrentSession()
@@ -4904,9 +4879,7 @@ struct ContentView: View {
                 .keyboardShortcut("k", modifiers: [.command, .shift])
                 .font(.system(size: fontSize))
                 .registerShortcut(name: "Clear Session", keyLabel: "K", modifiers: [.command, .shift], scope: "Global")
-                .layoutEditable(LayoutIDs.SessionToolbar.clearButton, name: "Clear Session Button")
             }
-            .layoutEditable(LayoutIDs.SessionToolbar.actionStack, name: "Session Action Stack")
         }
 
         // Session buttons with proper functionality
@@ -4920,7 +4893,6 @@ struct ContentView: View {
                     .allowsTightening(true)
                     .frame(minWidth: 70, alignment: .leading)
                     .layoutPriority(1)
-                    .layoutEditable(LayoutIDs.SessionToolbar.label, name: "Session Label")
                 if let link = sessions.sessionLinks[sessions.current], !link.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                     Button {
                         openCurrentSessionLink()
@@ -4931,7 +4903,6 @@ struct ContentView: View {
                     .buttonStyle(.plain)
                     .foregroundStyle(Theme.aqua)
                     .help("Open linked ticket: \(link)")
-                    .layoutEditable(LayoutIDs.SessionToolbar.linkButton, name: "Session Link Button")
                 }
                 ForEach(TicketSession.allCases, id: \.self) { s in
                     Button(action: {
@@ -4964,7 +4935,6 @@ struct ContentView: View {
                             }
                         }
                     }
-                    .layoutEditable(LayoutIDs.SessionToolbar.sessionButton(s.rawValue), name: "Session Button #\(s.rawValue)")
                 }
                 // Invisible bridge view to receive menu notifications and register KB shortcuts for Help sheet
                 Color.clear.frame(width: 0, height: 0)
@@ -4983,7 +4953,6 @@ struct ContentView: View {
                         }
                     )
             }
-            .layoutEditable(LayoutIDs.SessionToolbar.secondaryStack, name: "Session Button Stack")
         }
         
         // Helper to copy all static, template, and alternate field values as a single block to clipboard
@@ -8444,10 +8413,6 @@ struct ContentView: View {
 
         private var isDirty: Bool { draft != savedValue }
 
-        private func layoutID(_ suffix: String) -> String {
-            "layout.sessionNotes.\(suffix)"
-        }
-
         var body: some View {
             Group {
                 if showsOuterBackground {
@@ -8468,7 +8433,6 @@ struct ContentView: View {
                 }
             }
             .frame(maxWidth: .infinity)
-            .layoutEditable(layoutID("container"), name: "Session Notes Container")
         }
 
         @ViewBuilder
@@ -8481,12 +8445,10 @@ struct ContentView: View {
                     }
                     .pickerStyle(.segmented)
                     .labelsHidden()
-                    .layoutEditable(layoutID("modePicker"), name: "Session Mode Picker")
                 }
 
                 if showsModeToolbar {
                     modeToolbar
-                        .layoutEditable(layoutID("modeToolbar"), name: "Session Mode Toolbar")
                 }
 
                 contentBody
@@ -8497,7 +8459,6 @@ struct ContentView: View {
                     onSavedFilesModeExit()
                 }
             }
-            .layoutEditable(layoutID("stack"), name: "Session Notes Stack")
         }
 
         @ViewBuilder
@@ -8505,7 +8466,6 @@ struct ContentView: View {
             if mode == .notes {
                 notesPane
                     .padding(.top, showsContentBackground ? 4 : 12)
-                    .layoutEditable(layoutID("notesPane"), name: "Session Notes Pane")
             } else {
                 SavedFilesWorkspace(
                     fontSize: fontSize,
@@ -8522,7 +8482,6 @@ struct ContentView: View {
                     onOpenTree: onSavedFileOpenTree
                 )
                 .padding(.top, 18)
-                .layoutEditable(layoutID("savedFiles"), name: "Saved Files Workspace")
             }
         }
 
@@ -8542,24 +8501,19 @@ struct ContentView: View {
         private var notesToolbar: some View {
             HStack(spacing: 12) {
                 MarkdownToolbar(iconSize: fontSize + 2, isEnabled: !isPreview, controller: controller)
-                    .layoutEditable(layoutID("notes.toolbar.markdown"), name: "Notes Markdown Toolbar")
                 PreviewModeToggle(isPreview: $isPreview)
-                    .layoutEditable(layoutID("notes.toolbar.preview"), name: "Notes Preview Toggle")
                 Spacer()
                 if isDirty {
                     Button("Save Notes") { onSave() }
                         .buttonStyle(.borderedProminent)
                         .tint(Theme.purple)
                         .font(.system(size: fontSize - 2))
-                        .layoutEditable(layoutID("notes.toolbar.save"), name: "Notes Save Button")
                     Button("Revert") { onRevert() }
                         .buttonStyle(.bordered)
                         .tint(Theme.pink)
                         .font(.system(size: fontSize - 2))
-                        .layoutEditable(layoutID("notes.toolbar.revert"), name: "Notes Revert Button")
                 }
             }
-            .layoutEditable(layoutID("notes.toolbar"), name: "Notes Toolbar Row")
         }
 
         private var savedFilesToolbar: some View {
@@ -8574,7 +8528,6 @@ struct ContentView: View {
                 onDelete: onSavedFileDelete,
                 onPopOut: onSavedFilesPopout
             )
-            .layoutEditable(layoutID("savedFiles.toolbar"), name: "Saved Files Toolbar Inline")
         }
 
         @ViewBuilder
@@ -8586,7 +8539,6 @@ struct ContentView: View {
                         fontSize: fontSize * 1.5,
                         onLinkOpen: onLinkOpen
                     )
-                    .layoutEditable(layoutID("notes.preview"), name: "Notes Preview")
                 } else {
                     MarkdownEditor(
                         text: $draft,
@@ -8597,11 +8549,9 @@ struct ContentView: View {
                             onImageAttachment(info)
                         }
                     )
-                    .layoutEditable(layoutID("notes.editor"), name: "Notes Editor")
                 }
             }
             .frame(maxWidth: .infinity, minHeight: 220)
-            .layoutEditable(layoutID("notes.stack"), name: "Notes Content Stack")
 
             if showsContentBackground {
                 base
@@ -8613,10 +8563,8 @@ struct ContentView: View {
                                     .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
                             )
                     )
-                    .layoutEditable(layoutID("notes.background"), name: "Notes Background")
             } else {
                 base
-                    .layoutEditable(layoutID("notes.base"), name: "Notes Base")
             }
         }
 
@@ -8651,10 +8599,6 @@ struct ContentView: View {
                 var onDelete: (UUID) -> Void
                 var onPopOut: (() -> Void)?
 
-                private func layoutID(_ suffix: String) -> String {
-                    "layout.savedFiles.toolbar.\(suffix)"
-                }
-
                 var body: some View {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(alignment: .center, spacing: 8) {
@@ -8680,11 +8624,9 @@ struct ContentView: View {
                                                 Button("Delete", role: .destructive) { onDelete(file.id) }
                                             }
                                             .id(file.id)
-                                            .layoutEditable(layoutID("fileTab.\(file.id.uuidString)"), name: "Saved File Tab: \(file.displayName)")
                                         }
                                     }
                                     .padding(.vertical, 4)
-                                    .layoutEditable(layoutID("fileTabs"), name: "Saved File Tabs")
                                 }
                                 .onChange(of: selectedID) { _, newValue in
                                     guard let newValue else { return }
@@ -8702,7 +8644,6 @@ struct ContentView: View {
                             }
                             .buttonStyle(.bordered)
                             .tint(Theme.aqua)
-                            .layoutEditable(layoutID("add"), name: "Add Saved File Button")
 
                             Button {
                                 if let id = selectedID {
@@ -8715,7 +8656,6 @@ struct ContentView: View {
                             .buttonStyle(.bordered)
                             .tint(Theme.gold)
                             .disabled(selectedID == nil)
-                            .layoutEditable(layoutID("structure"), name: "Structure Button")
 
                             if let onPopOut {
                                 Button {
@@ -8726,11 +8666,9 @@ struct ContentView: View {
                                 }
                                 .buttonStyle(.bordered)
                                 .tint(Theme.accent)
-                                .layoutEditable(layoutID("popout"), name: "Saved Files Pop Out Button")
                             }
                         }
                     }
-                    .layoutEditable(layoutID("container"), name: "Saved Files Toolbar")
                 }
             }
 
@@ -8752,14 +8690,9 @@ struct ContentView: View {
             @State private var searchStatus: SearchStatus = .idle
             @FocusState private var isSearchFieldFocused: Bool
 
-            private func layoutID(_ suffix: String) -> String {
-                "layout.savedFiles.\(suffix)"
-            }
-
             var body: some View {
                 VStack(alignment: .leading, spacing: 12) {
                     searchControls
-                        .layoutEditable(layoutID("search"), name: "Saved Files Search Row")
 
                     if let selectedID, files.contains(where: { $0.id == selectedID }) {
                         let binding = Binding<String>(
@@ -8788,14 +8721,11 @@ struct ContentView: View {
                                         .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
                                 )
                         )
-                        .layoutEditable(layoutID("editor"), name: "Saved Files Editor")
 
                         validationView(for: validationProvider(selectedID))
                             .padding(.top, 4)
-                            .layoutEditable(layoutID("validation"), name: "Saved Files Validation")
                     } else {
-                        emptyState
-                            .layoutEditable(layoutID("emptyState"), name: "Saved Files Empty State")
+                            emptyState
                     }
                 }
                 .padding(.top, 12)
@@ -8809,7 +8739,6 @@ struct ContentView: View {
                     }
                     isSearchFieldFocused = false
                 }
-                .layoutEditable(layoutID("body"), name: "Saved Files Body")
             }
 
             private var searchControls: some View {
@@ -8835,7 +8764,6 @@ struct ContentView: View {
                             }
                             .buttonStyle(.plain)
                             .disabled(selectedID == nil)
-                            .layoutEditable(layoutID("search.clear"), name: "Search Clear Button")
                         }
                     }
                     .padding(.horizontal, 12)
@@ -8849,7 +8777,6 @@ struct ContentView: View {
                             .stroke(Theme.purple.opacity(0.3), lineWidth: 1)
                     )
                     .frame(maxWidth: 260)
-                    .layoutEditable(layoutID("search.field"), name: "Search Field Capsule")
 
                     Button {
                         performSearch(.backward)
@@ -8859,7 +8786,6 @@ struct ContentView: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                     .disabled(selectedID == nil || searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .layoutEditable(layoutID("search.prev"), name: "Search Previous Button")
 
                     Button {
                         performSearch(.forward)
@@ -8870,19 +8796,16 @@ struct ContentView: View {
                     .controlSize(.small)
                     .tint(Theme.purple)
                     .disabled(selectedID == nil || searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                    .layoutEditable(layoutID("search.next"), name: "Search Next Button")
 
                     if let message = searchStatus.message {
                         Text(message)
                             .font(.system(size: fontSize - 4, weight: .medium))
                             .foregroundStyle(searchStatus.color)
                             .transition(.opacity)
-                            .layoutEditable(layoutID("search.status"), name: "Search Status Label")
                     }
 
                     Spacer()
                 }
-                .layoutEditable(layoutID("search.row"), name: "Search Controls Row")
             }
 
             private func performSearch(_ direction: JSONEditor.SearchDirection) {
@@ -8904,7 +8827,6 @@ struct ContentView: View {
                     Label("Valid JSON", systemImage: "checkmark.circle.fill")
                         .font(.system(size: fontSize - 2))
                         .foregroundStyle(Theme.accent)
-                        .layoutEditable(layoutID("validation.valid"), name: "Validation Valid Badge")
                 case .invalid(let message):
                     VStack(alignment: .leading, spacing: 6) {
                         Label("Invalid JSON", systemImage: "exclamationmark.triangle.fill")
@@ -8915,7 +8837,6 @@ struct ContentView: View {
                             .foregroundStyle(.secondary)
                             .lineLimit(2)
                     }
-                    .layoutEditable(layoutID("validation.invalid"), name: "Validation Error Stack")
                 }
             }
 
@@ -9140,9 +9061,7 @@ struct ContentView: View {
         var body: some View {
             VStack(alignment: .leading, spacing: 18) {
                 header
-                LayoutWorkspace(isPrimary: false) {
-                    content
-                }
+                content
             }
             .padding(20)
             .frame(minWidth: preferredSize.width, minHeight: preferredSize.height)
@@ -9313,7 +9232,6 @@ struct ContentView: View {
                                 fontSize: fontSize * 1.5,
                                 onLinkOpen: onGuideLinkOpen
                             )
-                            .layoutEditable(guidePaneID("preview"), name: "Guide Preview Popout")
                         } else {
                             MarkdownEditor(
                                 text: $guideText,
@@ -9327,7 +9245,6 @@ struct ContentView: View {
                             .onChange(of: guideText) { _, newValue in
                                 onGuideTextChanged(newValue)
                             }
-                            .layoutEditable(guidePaneID("editor"), name: "Guide Editor Popout")
                         }
                     }
                     .frame(minHeight: 320)
@@ -9339,7 +9256,6 @@ struct ContentView: View {
                                     .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
                             )
                     )
-                    .layoutEditable(guidePaneID("content"), name: "Guide Content Popout")
                 } else {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Select a template to view its troubleshooting guide")
@@ -9352,7 +9268,6 @@ struct ContentView: View {
                         RoundedRectangle(cornerRadius: 10)
                             .fill(Theme.grayBG.opacity(0.2))
                     )
-                    .layoutEditable(guidePaneID("empty"), name: "Guide Empty Popout")
                 }
             }
             .overlay(
@@ -9380,10 +9295,6 @@ struct ContentView: View {
             case .saved:
                 return "SavedFilesPanePopoutSize"
             }
-        }
-
-        private func guidePaneID(_ suffix: String) -> String {
-            "layout.bottomPane.\(BottomPaneContent.guideNotes.layoutKey).\(suffix)"
         }
     }
 
