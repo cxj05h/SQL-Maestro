@@ -1164,7 +1164,8 @@ struct ContentView: View {
     private let outputRegionHeight: CGFloat = 236
     private let bottomPaneEditorMinHeight: CGFloat = 236
     private let outputRegionSpacing: CGFloat = 12
-    private let mainContentTopPadding: CGFloat = 130
+    private let mainContentTopPadding: CGFloat = 0
+    private let compactMainContentTopPadding: CGFloat = 0
 
     
     @FocusState private var isSearchFocused: Bool
@@ -1220,7 +1221,13 @@ struct ContentView: View {
         VStack(spacing: 0) {
             hardStopTitleRow
             hardStopDivider
-            mainDetailContent
+            GeometryReader { geometry in
+                ScrollView {
+                    mainDetailContent(topPadding: resolvedMainContentTopPadding(for: geometry.size.height))
+                        .frame(maxWidth: .infinity, alignment: .top)
+                }
+                .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
+            }
         }
         .background(Theme.grayBG)
         .frame(minWidth: 980, minHeight: 640)
@@ -1528,7 +1535,7 @@ struct ContentView: View {
         .padding(.top, 4)
     }
 
-    private var mainDetailContent: some View {
+    private func mainDetailContent(topPadding: CGFloat) -> some View {
         VStack(spacing: 12) {
             VStack(spacing: 8) {
                 HStack {
@@ -1673,8 +1680,24 @@ struct ContentView: View {
             .frame(width: 0, height: 0)
             .hidden()
         }
-        .padding(EdgeInsets(top: mainContentTopPadding, leading: 16, bottom: 16, trailing: 16))
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .padding(EdgeInsets(top: topPadding, leading: 16, bottom: 16, trailing: 16))
+        .frame(maxWidth: .infinity, alignment: .top)
+    }
+
+    private func resolvedMainContentTopPadding(for availableHeight: CGFloat) -> CGFloat {
+        let upperThreshold: CGFloat = 900
+        let lowerThreshold: CGFloat = 650
+
+        guard availableHeight < upperThreshold else {
+            return mainContentTopPadding
+        }
+
+        if availableHeight <= lowerThreshold {
+            return compactMainContentTopPadding
+        }
+
+        let progress = (availableHeight - lowerThreshold) / (upperThreshold - lowerThreshold)
+        return compactMainContentTopPadding + ((mainContentTopPadding - compactMainContentTopPadding) * progress)
     }
 
     private func activeTemplateDisplayName(for template: TemplateItem) -> String? {

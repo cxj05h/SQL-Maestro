@@ -19,11 +19,12 @@ struct JSONTreePreview: View {
     @State private var lastSubmittedQuery: String = ""
     @State private var shouldCenterTree: Bool = true
     @State private var panStartOffset: CGSize = .zero
-
-    private let zoomRange: ClosedRange<CGFloat> = 0.2...3.0
+    private let maximumZoomScale: CGFloat = 3.0
+    private let minimumZoomScale: CGFloat = 0.0001
     private let searchFocusZoom: CGFloat = 1.2
     private let canvasInnerPadding: CGFloat = 60
     private let canvasOuterPadding: CGFloat = 28
+    private let contentSpacing: CGFloat = 12
     private var canvasContentInset: CGFloat { canvasInnerPadding + canvasOuterPadding }
     private var canvasSize: CGSize {
         CGSize(width: layout.size.width + canvasContentInset * 2,
@@ -31,7 +32,7 @@ struct JSONTreePreview: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: contentSpacing) {
             headerView
 
             if let error = parseError {
@@ -61,20 +62,14 @@ struct JSONTreePreview: View {
     }
 
     private var headerView: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .center, spacing: 12) {
-                Text(fileName)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(Theme.purple)
-                Spacer()
-                Text("\(Int(zoomScale * 100))%")
-                    .font(.system(size: 13, weight: .medium, design: .monospaced))
-                    .foregroundStyle(.secondary)
-            }
-
-            if treeRoot != nil {
-                searchControls
-            }
+        HStack(alignment: .center, spacing: 12) {
+            Text(fileName)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(Theme.purple)
+            Spacer()
+            Text("\(Int(zoomScale * 100))%")
+                .font(.system(size: 13, weight: .medium, design: .monospaced))
+                .foregroundStyle(.secondary)
         }
     }
 
@@ -138,8 +133,6 @@ struct JSONTreePreview: View {
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(Color.red)
             }
-
-            Spacer()
         }
     }
 
@@ -150,7 +143,7 @@ struct JSONTreePreview: View {
         GeometryReader { proxy in
             let viewport = proxy.size
 
-            ZStack {
+            ZStack(alignment: .topLeading) {
                 LinearGradient(
                     colors: [
                         Color(red: 0.07, green: 0.08, blue: 0.16),
@@ -192,6 +185,7 @@ struct JSONTreePreview: View {
                 .animation(nil, value: contentOffset)
 
                 ZoomEventCatcher(
+                    topHitTestInset: 0,
                     onCommandScroll: { payload in
                         handleCommandScroll(deltaY: payload.deltaY,
                                             precise: payload.precise,
@@ -214,6 +208,12 @@ struct JSONTreePreview: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .allowsHitTesting(true)
                 .accessibilityHidden(true)
+
+                searchControls
+                    .padding(.top, 18)
+                    .padding(.leading, 18)
+                    .padding(.trailing, 18)
+                    .allowsHitTesting(true)
             }
             .clipShape(RoundedRectangle(cornerRadius: 26))
             .overlay(
@@ -371,7 +371,7 @@ struct JSONTreePreview: View {
     private func handleCommandScroll(deltaY: CGFloat, precise: Bool, inverted: Bool, location: CGPoint) {
         guard abs(deltaY) > 0.0001 else { return }
         let direction: CGFloat = inverted ? -1 : 1
-        let multiplier: CGFloat = precise ? 0.04 : 0.18
+        let multiplier: CGFloat = precise ? 0.015 : 0.08
         let delta = -(deltaY * direction) * multiplier
         let proposed = zoomScale + delta
         let contentPoint = contentPoint(at: location)
@@ -473,7 +473,7 @@ struct JSONTreePreview: View {
         guard viewportSize.width > 0 else {
             return CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
         }
-        let safeScale = max(zoomScale, 0.0001)
+        let safeScale = max(zoomScale, minimumZoomScale)
         let rawX = (screenPoint.x - contentOffset.width) / safeScale
         let rawY = (screenPoint.y - contentOffset.height) / safeScale
         let x = min(max(rawX, 0), canvasSize.width)
@@ -487,7 +487,8 @@ struct JSONTreePreview: View {
     }
 
     private func clampZoom(_ value: CGFloat) -> CGFloat {
-        min(max(value, zoomRange.lowerBound), zoomRange.upperBound)
+        let upperBounded = min(value, maximumZoomScale)
+        return max(upperBounded, minimumZoomScale)
     }
 }
 
@@ -593,6 +594,7 @@ private struct ZoomEventCatcher: NSViewRepresentable {
         let location: CGPoint
     }
 
+    let topHitTestInset: CGFloat
     let onCommandScroll: (ScrollPayload) -> Void
     let onMagnify: (MagnifyPayload) -> Void
     let onPanBegan: (CGPoint) -> Void
@@ -601,6 +603,7 @@ private struct ZoomEventCatcher: NSViewRepresentable {
 
     func makeNSView(context: Context) -> ZoomEventView {
         let view = ZoomEventView()
+        view.topHitTestInset = topHitTestInset
         view.onCommandScroll = onCommandScroll
         view.onMagnify = onMagnify
         view.onPanBegan = onPanBegan
@@ -610,6 +613,7 @@ private struct ZoomEventCatcher: NSViewRepresentable {
     }
 
     func updateNSView(_ nsView: ZoomEventView, context: Context) {
+        nsView.topHitTestInset = topHitTestInset
         nsView.onCommandScroll = onCommandScroll
         nsView.onMagnify = onMagnify
         nsView.onPanBegan = onPanBegan
@@ -618,6 +622,7 @@ private struct ZoomEventCatcher: NSViewRepresentable {
     }
 
     final class ZoomEventView: NSView {
+        var topHitTestInset: CGFloat = 0
         var onCommandScroll: ((ScrollPayload) -> Void)?
         var onMagnify: ((MagnifyPayload) -> Void)?
         var onPanBegan: ((CGPoint) -> Void)?
@@ -631,6 +636,22 @@ private struct ZoomEventCatcher: NSViewRepresentable {
 
         override init(frame frameRect: NSRect) {
             super.init(frame: frameRect)
+        }
+
+        override func hitTest(_ point: NSPoint) -> NSView? {
+            let local: NSPoint
+            if let superview = superview {
+                local = convert(point, from: superview)
+            } else {
+                local = point
+            }
+
+            guard bounds.contains(local) else { return nil }
+            let effectiveInset = min(max(0, topHitTestInset), bounds.height)
+            if effectiveInset > 0, local.y < effectiveInset {
+                return nil
+            }
+            return self
         }
 
         override func scrollWheel(with event: NSEvent) {
