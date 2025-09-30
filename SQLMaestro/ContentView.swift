@@ -1164,8 +1164,7 @@ struct ContentView: View {
     private let outputRegionHeight: CGFloat = 236
     private let bottomPaneEditorMinHeight: CGFloat = 236
     private let outputRegionSpacing: CGFloat = 12
-    private let mainContentTopPadding: CGFloat = 0
-    private let compactMainContentTopPadding: CGFloat = 0
+    private let mainContentTopPadding: CGFloat = 130
 
     
     @FocusState private var isSearchFocused: Bool
@@ -1221,13 +1220,7 @@ struct ContentView: View {
         VStack(spacing: 0) {
             hardStopTitleRow
             hardStopDivider
-            GeometryReader { geometry in
-                ScrollView {
-                    mainDetailContent(topPadding: resolvedMainContentTopPadding(for: geometry.size.height))
-                        .frame(maxWidth: .infinity, alignment: .top)
-                }
-                .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
-            }
+            mainDetailContent
         }
         .background(Theme.grayBG)
         .frame(minWidth: 980, minHeight: 640)
@@ -1389,6 +1382,7 @@ struct ContentView: View {
         return PanePopoutSheet(
             pane: pane,
             fontSize: fontSize,
+            editorMinHeight: bottomPaneEditorMinHeight,
             selectedTemplate: selectedTemplate,
             guideText: $guideNotesDraft,
             guideDirty: templateGuideStore.isNotesDirty(for: selectedTemplate),
@@ -1534,7 +1528,7 @@ struct ContentView: View {
         .padding(.top, 4)
     }
 
-    private func mainDetailContent(topPadding: CGFloat) -> some View {
+    private var mainDetailContent: some View {
         VStack(spacing: 12) {
             VStack(spacing: 8) {
                 HStack {
@@ -1679,24 +1673,8 @@ struct ContentView: View {
             .frame(width: 0, height: 0)
             .hidden()
         }
-        .padding(EdgeInsets(top: topPadding, leading: 16, bottom: 16, trailing: 16))
-        .frame(maxWidth: .infinity, alignment: .top)
-    }
-
-    private func resolvedMainContentTopPadding(for availableHeight: CGFloat) -> CGFloat {
-        let upperThreshold: CGFloat = 900
-        let lowerThreshold: CGFloat = 650
-
-        guard availableHeight < upperThreshold else {
-            return mainContentTopPadding
-        }
-
-        if availableHeight <= lowerThreshold {
-            return compactMainContentTopPadding
-        }
-
-        let progress = (availableHeight - lowerThreshold) / (upperThreshold - lowerThreshold)
-        return compactMainContentTopPadding + ((mainContentTopPadding - compactMainContentTopPadding) * progress)
+        .padding(EdgeInsets(top: mainContentTopPadding, leading: 16, bottom: 16, trailing: 16))
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     private func activeTemplateDisplayName(for template: TemplateItem) -> String? {
@@ -4670,11 +4648,13 @@ struct ContentView: View {
                     }
                     if let pane = activeBottomPane {
                         bottomPaneContainer(pane: pane, guideDirty: guideDirty, activeSession: activeSession)
-                            .frame(maxHeight: paneRegionMinHeight, alignment: .top)
+                            .frame(minHeight: paneRegionMinHeight, alignment: .top)
                     } else {
-                        Color.clear.frame(height: paneRegionMinHeight)
+                        Color.clear
+                            .frame(minHeight: paneRegionMinHeight, alignment: .top)
                     }
                 }
+                .padding(.bottom, 30)
             }
             .animation(.easeInOut(duration: 0.22), value: isOutputVisible)
         }
@@ -4698,7 +4678,7 @@ struct ContentView: View {
 
                 TextEditor(text: $populatedSQL)
                     .font(.system(size: fontSize, weight: .regular, design: .monospaced))
-                    .frame(minHeight: 180)
+                    .frame(minHeight: bottomPaneEditorMinHeight)
                     .overlay(RoundedRectangle(cornerRadius: 8).stroke(Theme.aqua.opacity(0.3)))
                     .disableAutocorrection(true)
                     .autocorrectionDisabled(true)
@@ -4738,7 +4718,7 @@ struct ContentView: View {
                     .frame(maxHeight: .infinity, alignment: .top)
                     .layoutPriority(1)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .frame(maxWidth: .infinity, alignment: .top)
             .background(
                 RoundedRectangle(cornerRadius: 18)
                     .fill(Theme.grayBG.opacity(0.28))
@@ -4748,7 +4728,7 @@ struct ContentView: View {
                     )
             )
             .padding(.horizontal, 4)
-            .frame(height: paneRegionMinHeight, alignment: .top)
+            .frame(minHeight: paneRegionMinHeight, alignment: .top)
         }
 
         private func bottomPaneHeader(for pane: BottomPaneContent, guideDirty: Bool, activeSession: TicketSession) -> some View {
@@ -5041,77 +5021,91 @@ struct ContentView: View {
         @ViewBuilder
         private var guideNotesPane: some View {
             GeometryReader { proxy in
-                let targetHeight = max(proxy.size.height, bottomPaneEditorMinHeight)
-                Group {
-                    if selectedTemplate != nil {
-                        Group {
-                            if isPreviewMode {
-                                MarkdownPreviewView(
-                                    text: guideNotesDraft,
-                                    fontSize: fontSize * 1.5,
-                                    onLinkOpen: { url, modifiers in
-                                        openLink(url, modifiers: modifiers)
-                                    }
-                                )
-                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                            } else {
-                                MarkdownEditor(
-                                    text: Binding(
-                                        get: { guideNotesDraft },
-                                        set: { newValue in
-                                            guideNotesDraft = newValue
-                                            guard let template = selectedTemplate else { return }
-                                            handleGuideNotesChange(newValue,
-                                                                   for: template,
-                                                                   source: "inline-editor")
-                                        }
-                                    ),
-                                    fontSize: fontSize * 1.5,
-                                    controller: guideNotesEditor,
-                                    onLinkRequested: handleTroubleshootingLink(selectedText:source:completion:),
-                                    onImageAttachment: { info in
-                                        handleGuideEditorImageAttachment(info)
-                                    }
-                                )
-                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                            }
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                        .layoutPriority(1)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(Theme.grayBG.opacity(0.22))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .stroke(Theme.purple.opacity(0.18), lineWidth: 1)
-                                )
-                        )
-                    } else {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Text("Select a template to view its troubleshooting guide")
-                                .font(.system(size: fontSize - 1))
-                                .foregroundStyle(.secondary)
-                            Spacer()
-                        }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                        .layoutPriority(1)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(Theme.grayBG.opacity(0.18))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 12)
-                                        .stroke(Theme.purple.opacity(0.15), lineWidth: 1)
-                                )
-                        )
-                    }
-                }
-                .frame(width: proxy.size.width, height: targetHeight, alignment: .top)
+                guideNotesContent
+                    .frame(width: proxy.size.width, alignment: .top)
+                    .frame(minHeight: bottomPaneEditorMinHeight,
+                           maxHeight: .infinity,
+                           alignment: .top)
             }
+        }
+
+        @ViewBuilder
+        private var guideNotesContent: some View {
+            if selectedTemplate != nil {
+                guideNotesEditorContent
+            } else {
+                guideNotesPlaceholder
+            }
+        }
+
+        private var guideNotesEditorContent: some View {
+            Group {
+                if isPreviewMode {
+                    MarkdownPreviewView(
+                        text: guideNotesDraft,
+                        fontSize: fontSize * 1.5,
+                        onLinkOpen: { url, modifiers in
+                            openLink(url, modifiers: modifiers)
+                        }
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                } else {
+                    MarkdownEditor(
+                        text: Binding(
+                            get: { guideNotesDraft },
+                            set: { newValue in
+                                guideNotesDraft = newValue
+                                guard let template = selectedTemplate else { return }
+                                handleGuideNotesChange(newValue,
+                                                       for: template,
+                                                       source: "inline-editor")
+                            }
+                        ),
+                        fontSize: fontSize * 1.5,
+                        controller: guideNotesEditor,
+                        onLinkRequested: handleTroubleshootingLink(selectedText:source:completion:),
+                        onImageAttachment: { info in
+                            handleGuideEditorImageAttachment(info)
+                        }
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .layoutPriority(1)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Theme.grayBG.opacity(0.22))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Theme.purple.opacity(0.18), lineWidth: 1)
+                    )
+            )
+        }
+
+        private var guideNotesPlaceholder: some View {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Select a template to view its troubleshooting guide")
+                    .font(.system(size: fontSize - 1))
+                    .foregroundStyle(.secondary)
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .layoutPriority(1)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Theme.grayBG.opacity(0.18))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Theme.purple.opacity(0.15), lineWidth: 1)
+                    )
+            )
         }
 
         private func sessionNotesPane(for activeSession: TicketSession) -> some View {
             SessionNotesInline(
                 fontSize: fontSize,
+                editorMinHeight: bottomPaneEditorMinHeight,
                 session: activeSession,
                 draft: Binding(
                     get: { sessionNotesDrafts[activeSession] ?? "" },
@@ -5175,6 +5169,7 @@ struct ContentView: View {
         private func savedFilesPane(for activeSession: TicketSession) -> some View {
             SessionNotesInline(
                 fontSize: fontSize,
+                editorMinHeight: bottomPaneEditorMinHeight,
                 session: activeSession,
                 draft: Binding(
                     get: { sessionNotesDrafts[activeSession] ?? "" },
@@ -8800,6 +8795,7 @@ struct ContentView: View {
 
     struct SessionNotesInline: View {
         var fontSize: CGFloat
+        var editorMinHeight: CGFloat
         var session: TicketSession
         @Binding var draft: String
         var savedValue: String
@@ -8891,10 +8887,15 @@ struct ContentView: View {
         private func contentBody(height: CGFloat) -> some View {
             if mode == .notes {
                 let topPadding = showsContentBackground ? 4.0 : 12.0
-                notesPane(height: max(height - topPadding, 0))
+                let contentHeight = max(height - topPadding, 0)
+                notesPane(height: contentHeight)
                     .padding(.top, topPadding)
+                    .frame(minHeight: max(editorMinHeight, contentHeight),
+                           maxHeight: .infinity,
+                           alignment: .top)
             } else {
                 let topPadding: CGFloat = 2.0
+                let contentHeight = max(height - topPadding, 0)
                 SavedFilesWorkspace(
                     fontSize: fontSize,
                     files: savedFiles,
@@ -8907,10 +8908,13 @@ struct ContentView: View {
                     onRename: onSavedFileRename,
                     onContentChange: onSavedFileContentChange,
                     onFocusChange: onSavedFileFocusChanged,
-                    onOpenTree: onSavedFileOpenTree
+                    onOpenTree: onSavedFileOpenTree,
+                    editorMinHeight: editorMinHeight
                 )
                 .padding(.top, topPadding)
-                .frame(height: max(height - topPadding, 0), alignment: .top)
+                .frame(minHeight: max(editorMinHeight, contentHeight),
+                       maxHeight: .infinity,
+                       alignment: .top)
             }
         }
 
@@ -8961,7 +8965,6 @@ struct ContentView: View {
 
         @ViewBuilder
         private func notesPane(height: CGFloat) -> some View {
-            let targetHeight = max(height, 220)
             let base = Group {
                 if isPreview {
                     MarkdownPreviewView(
@@ -8996,10 +8999,14 @@ struct ContentView: View {
                                     .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
                             )
                     )
-                    .frame(height: targetHeight, alignment: .top)
+                    .frame(minHeight: editorMinHeight,
+                           maxHeight: .infinity,
+                           alignment: .top)
             } else {
                 base
-                    .frame(height: targetHeight, alignment: .top)
+                    .frame(minHeight: editorMinHeight,
+                           maxHeight: .infinity,
+                           alignment: .top)
             }
         }
 
@@ -9122,6 +9129,7 @@ struct ContentView: View {
             var onContentChange: (UUID, String) -> Void
             var onFocusChange: (Bool) -> Void
             var onOpenTree: (UUID) -> Void
+            var editorMinHeight: CGFloat
 
             @StateObject private var editorController = JSONEditorController()
             @State private var searchQuery: String = ""
@@ -9150,7 +9158,7 @@ struct ContentView: View {
                                 }
                             }
                         )
-                        .frame(maxWidth: .infinity, minHeight: 240, maxHeight: .infinity, alignment: .top)
+                        .frame(maxWidth: .infinity, minHeight: editorMinHeight, maxHeight: .infinity, alignment: .top)
                         .layoutPriority(1)
                         .background(
                             RoundedRectangle(cornerRadius: 10)
@@ -9295,7 +9303,9 @@ struct ContentView: View {
                     .buttonStyle(.borderedProminent)
                     .tint(Theme.purple)
                 }
-                .frame(maxWidth: .infinity, minHeight: 240)
+                .frame(maxWidth: .infinity,
+                       minHeight: editorMinHeight,
+                       maxHeight: .infinity)
                 .background(
                     RoundedRectangle(cornerRadius: 10)
                         .fill(Theme.grayBG.opacity(0.2))
@@ -9304,6 +9314,7 @@ struct ContentView: View {
                                 .stroke(Theme.purple.opacity(0.15), lineWidth: 1)
                         )
                 )
+                .layoutPriority(1)
             }
         }
     }
@@ -9499,6 +9510,7 @@ struct ContentView: View {
     struct PanePopoutSheet: View {
         let pane: PopoutPaneContext
         var fontSize: CGFloat
+        var editorMinHeight: CGFloat
         var selectedTemplate: TemplateItem?
         @Binding var guideText: String
         var guideDirty: Bool
@@ -9629,6 +9641,7 @@ struct ContentView: View {
             case .session:
                 SessionNotesInline(
                     fontSize: fontSize,
+                    editorMinHeight: editorMinHeight,
                     session: session,
                     draft: $sessionDraft,
                     savedValue: sessionSavedValue,
@@ -9664,6 +9677,7 @@ struct ContentView: View {
             case .saved:
                 SessionNotesInline(
                     fontSize: fontSize,
+                    editorMinHeight: editorMinHeight,
                     session: session,
                     draft: $sessionDraft,
                     savedValue: sessionSavedValue,

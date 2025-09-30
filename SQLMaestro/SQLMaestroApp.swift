@@ -145,121 +145,13 @@ private final class MainWindowConfigurator {
 
     private func apply(to window: NSWindow) {
         guard window.isVisible else { return }
-        window.styleMask.insert([.titled, .resizable, .fullSizeContentView])
-        window.titleVisibility = .hidden
+        window.styleMask.insert([.titled, .resizable])
+        window.styleMask.remove(.fullSizeContentView)
+        window.titleVisibility = .visible
         window.titlebarAppearsTransparent = false
-        window.title = ""
+        window.title = "SQL Maestro"
         window.isMovableByWindowBackground = true
         window.titlebarSeparatorStyle = .line
-        installTitlebarBackground(for: window)
-
-        if let accessory = window.titlebarAccessoryViewControllers.first(where: { $0 is AppTitleAccessoryViewController }) as? AppTitleAccessoryViewController {
-            accessory.refresh()
-        } else {
-            let accessory = AppTitleAccessoryViewController()
-            window.addTitlebarAccessoryViewController(accessory)
-            accessory.refresh()
-        }
-    }
-
-    private func installTitlebarBackground(for window: NSWindow) {
-        guard let titlebarContainer = window.standardWindowButton(.closeButton)?.superview else { return }
-
-        if let background = titlebarContainer.subviews.compactMap({ $0 as? TitlebarBackgroundView }).first {
-            background.refreshAppearance(using: window.effectiveAppearance)
-            return
-        }
-
-        let background = TitlebarBackgroundView(frame: titlebarContainer.bounds)
-        background.autoresizingMask = [.width, .height]
-        background.identifier = TitlebarBackgroundView.viewIdentifier
-
-        if let frontView = titlebarContainer.subviews.first {
-            titlebarContainer.addSubview(background, positioned: .below, relativeTo: frontView)
-        } else {
-            titlebarContainer.addSubview(background)
-        }
-
-        background.refreshAppearance(using: window.effectiveAppearance)
-    }
-}
-
-private final class AppTitleAccessoryViewController: NSTitlebarAccessoryViewController {
-    private let titleLabel: NSTextField
-
-    override init(nibName nibNameOrNil: NSNib.Name?, bundle nibBundleOrNil: Bundle?) {
-        titleLabel = NSTextField(labelWithString: "SQL Maestro")
-        super.init(nibName: nibNameOrNil, bundle: nibBundleOrNil)
-        layoutAttribute = .leading
-    }
-
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-
-    override func loadView() {
-        titleLabel.font = NSFont.systemFont(ofSize: 14, weight: .medium)
-        titleLabel.textColor = NSColor.labelColor
-        titleLabel.alignment = .left
-        titleLabel.translatesAutoresizingMaskIntoConstraints = false
-
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: 160, height: 28))
-        container.translatesAutoresizingMaskIntoConstraints = false
-        container.addSubview(titleLabel)
-
-        NSLayoutConstraint.activate([
-            container.widthAnchor.constraint(greaterThanOrEqualToConstant: 100),
-            container.heightAnchor.constraint(equalToConstant: 28),
-            titleLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 6),
-            titleLabel.trailingAnchor.constraint(lessThanOrEqualTo: container.trailingAnchor, constant: -6),
-            titleLabel.centerYAnchor.constraint(equalTo: container.centerYAnchor)
-        ])
-
-        view = container
-    }
-
-    func refresh() {
-        titleLabel.stringValue = "SQL Maestro"
-        titleLabel.isHidden = false
-        titleLabel.alphaValue = 1.0
-    }
-}
-
-private final class TitlebarBackgroundView: NSView {
-    static let viewIdentifier = NSUserInterfaceItemIdentifier("SQLMaestroTitlebarBackground")
-
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
-        commonInit()
-    }
-
-    required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        commonInit()
-    }
-
-    private func commonInit() {
-        wantsLayer = true
-        layerContentsRedrawPolicy = .onSetNeedsDisplay
-        refreshAppearance(using: effectiveAppearance)
-    }
-
-    override func viewDidChangeEffectiveAppearance() {
-        super.viewDidChangeEffectiveAppearance()
-        refreshAppearance(using: effectiveAppearance)
-    }
-
-    func refreshAppearance(using appearance: NSAppearance?) {
-        let applyColor = {
-            let base = self.window?.backgroundColor ?? NSColor.windowBackgroundColor
-            self.layer?.backgroundColor = base.cgColor
-        }
-
-        if let appearance {
-            appearance.performAsCurrentDrawingAppearance(applyColor)
-        } else {
-            applyColor()
-        }
     }
 }
 #endif
