@@ -8689,29 +8689,33 @@ struct ContentView: View {
         private var isDirty: Bool { draft != savedValue }
 
         var body: some View {
-            Group {
-                if showsOuterBackground {
-                    contentStack
-                        .padding(.horizontal, 18)
-                        .padding(.vertical, 18)
-                        .background(
-                            RoundedRectangle(cornerRadius: 14)
-                                .fill(Theme.grayBG.opacity(0.22))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 14)
-                                        .stroke(Theme.purple.opacity(0.2), lineWidth: 1)
-                                )
-                        )
-                } else {
-                    contentStack
-                        .padding(.vertical, 12)
+            GeometryReader { proxy in
+                let verticalPadding = showsOuterBackground ? 36.0 : 24.0
+                let stackHeight = max(proxy.size.height - verticalPadding, 0)
+
+                Group {
+                    if showsOuterBackground {
+                        contentStack(height: stackHeight)
+                            .padding(.horizontal, 18)
+                            .padding(.vertical, 18)
+                            .background(
+                                RoundedRectangle(cornerRadius: 14)
+                                    .fill(Theme.grayBG.opacity(0.22))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 14)
+                                            .stroke(Theme.purple.opacity(0.2), lineWidth: 1)
+                                    )
+                            )
+                    } else {
+                        contentStack(height: stackHeight)
+                            .padding(.vertical, 12)
+                    }
                 }
+                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         }
 
-        @ViewBuilder
-        private var contentStack: some View {
+        private func contentStack(height: CGFloat) -> some View {
             VStack(alignment: .leading, spacing: 16) {
                 if showsModePicker {
                     Picker("Notes Mode", selection: $mode) {
@@ -8726,7 +8730,9 @@ struct ContentView: View {
                     modeToolbar
                 }
 
-                contentBody
+                GeometryReader { innerProxy in
+                    contentBody(height: innerProxy.size.height)
+                }
             }
             .onChange(of: mode) { previous, newValue in
                 if newValue != .savedFiles {
@@ -8734,17 +8740,18 @@ struct ContentView: View {
                     onSavedFilesModeExit()
                 }
             }
-            .frame(maxHeight: .infinity, alignment: .top)
+            .frame(height: height, alignment: .top)
             .layoutPriority(1)
         }
 
         @ViewBuilder
-        private var contentBody: some View {
+        private func contentBody(height: CGFloat) -> some View {
             if mode == .notes {
-                notesPane
-                    .padding(.top, showsContentBackground ? 4 : 12)
-                    .frame(maxHeight: .infinity, alignment: .top)
+                let topPadding = showsContentBackground ? 4.0 : 12.0
+                notesPane(height: max(height - topPadding, 0))
+                    .padding(.top, topPadding)
             } else {
+                let topPadding: CGFloat = 2.0
                 SavedFilesWorkspace(
                     fontSize: fontSize,
                     files: savedFiles,
@@ -8759,8 +8766,8 @@ struct ContentView: View {
                     onFocusChange: onSavedFileFocusChanged,
                     onOpenTree: onSavedFileOpenTree
                 )
-                .padding(.top, 2)
-                .frame(maxHeight: .infinity, alignment: .top)
+                .padding(.top, topPadding)
+                .frame(height: max(height - topPadding, 0), alignment: .top)
             }
         }
 
@@ -8810,48 +8817,46 @@ struct ContentView: View {
         }
 
         @ViewBuilder
-        private var notesPane: some View {
-            GeometryReader { proxy in
-                let targetHeight = max(proxy.size.height, 220)
-                let base = Group {
-                    if isPreview {
-                        MarkdownPreviewView(
-                            text: draft,
-                            fontSize: fontSize * 1.5,
-                            onLinkOpen: onLinkOpen
-                        )
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    } else {
-                        MarkdownEditor(
-                            text: $draft,
-                            fontSize: fontSize * 1.5,
-                            controller: controller,
-                            onLinkRequested: onLinkRequested,
-                            onImageAttachment: { info in
-                                onImageAttachment(info)
-                            }
-                        )
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                .layoutPriority(1)
-
-                if showsContentBackground {
-                    base
-                        .background(
-                            RoundedRectangle(cornerRadius: 10)
-                                .fill(Theme.grayBG.opacity(0.25))
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 10)
-                                        .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
-                                )
-                        )
-                        .frame(width: proxy.size.width, height: targetHeight, alignment: .top)
+        private func notesPane(height: CGFloat) -> some View {
+            let targetHeight = max(height, 220)
+            let base = Group {
+                if isPreview {
+                    MarkdownPreviewView(
+                        text: draft,
+                        fontSize: fontSize * 1.5,
+                        onLinkOpen: onLinkOpen
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 } else {
-                    base
-                        .frame(width: proxy.size.width, height: targetHeight, alignment: .top)
+                    MarkdownEditor(
+                        text: $draft,
+                        fontSize: fontSize * 1.5,
+                        controller: controller,
+                        onLinkRequested: onLinkRequested,
+                        onImageAttachment: { info in
+                            onImageAttachment(info)
+                        }
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .layoutPriority(1)
+
+            if showsContentBackground {
+                base
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(Theme.grayBG.opacity(0.25))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
+                            )
+                    )
+                    .frame(height: targetHeight, alignment: .top)
+            } else {
+                base
+                    .frame(height: targetHeight, alignment: .top)
             }
         }
 

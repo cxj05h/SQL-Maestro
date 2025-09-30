@@ -10,22 +10,24 @@ struct JSONTreePreview: View {
     @State private var parseError: Error?
     @State private var layout = JSONTreeLayout()
     @State private var zoomScale: CGFloat = 1.0
-    @State private var treeScrollView: NSScrollView?
-    @State private var scrollEventMonitor: Any?
+    @State private var viewportSize: CGSize = .zero
+    @State private var contentOffset: CGSize = .zero
     @State private var searchQuery: String = ""
     @State private var searchMatches: [UUID] = []
     @State private var currentMatchIndex: Int = 0
     @State private var highlightedNodeID: UUID?
     @State private var lastSubmittedQuery: String = ""
-    @State private var clipViewObserver: NSObjectProtocol?
-    @State private var lockedContentOrigin: NSPoint = .zero
-    @State private var suppressScrollRebound = false
+    @State private var shouldCenterTree: Bool = true
 
     private let zoomRange: ClosedRange<CGFloat> = 0.4...3.0
     private let searchFocusZoom: CGFloat = 1.2
     private let canvasInnerPadding: CGFloat = 60
     private let canvasOuterPadding: CGFloat = 28
     private var canvasContentInset: CGFloat { canvasInnerPadding + canvasOuterPadding }
+    private var canvasSize: CGSize {
+        CGSize(width: layout.size.width + canvasContentInset * 2,
+               height: layout.size.height + canvasContentInset * 2)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -44,7 +46,6 @@ struct JSONTreePreview: View {
         .clipShape(RoundedRectangle(cornerRadius: 12))
         .onAppear {
             parseContent()
-            installScrollMonitor()
         }
         .onChange(of: content) { _ in
             parseContent()
@@ -54,14 +55,7 @@ struct JSONTreePreview: View {
             refreshMatches(resetIndex: true)
         }
         .onChange(of: highlightedNodeID) { _ in
-            scrollToHighlightedNode()
-        }
-        .onChange(of: treeScrollView) { _ in
-            scrollToHighlightedNode()
-        }
-        .onDisappear {
-            removeScrollMonitor()
-            removeClipViewObserver()
+            focusOnHighlightedNode(animated: true)
         }
     }
 
@@ -152,60 +146,77 @@ struct JSONTreePreview: View {
     private func treeView(for root: JSONTreeGraphNode) -> some View {
         let highlighted = highlightedNodeID.map { Set([$0]) } ?? []
 
-        ScrollView([.horizontal, .vertical]) {
-            JSONTreeCanvas(
-                root: root,
-                layout: layout,
-                highlightedNodes: highlighted,
-                contentInset: canvasContentInset
-            )
-            .padding(canvasInnerPadding)
-            .background(
-                RoundedRectangle(cornerRadius: 32)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color(red: 0.08, green: 0.09, blue: 0.18),
-                                Color(red: 0.04, green: 0.05, blue: 0.12)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
+        GeometryReader { proxy in
+            let viewport = proxy.size
+
+            ZStack {
+                LinearGradient(
+                    colors: [
+                        Color(red: 0.07, green: 0.08, blue: 0.16),
+                        Color(red: 0.03, green: 0.03, blue: 0.09)
+                    ],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+
+                JSONTreeCanvas(
+                    root: root,
+                    layout: layout,
+                    highlightedNodes: highlighted,
+                    contentInset: canvasContentInset
+                )
+                .padding(canvasInnerPadding)
+                .background(
+                    RoundedRectangle(cornerRadius: 32)
+                        .fill(
+                            LinearGradient(
+                                colors: [
+                                    Color(red: 0.08, green: 0.09, blue: 0.18),
+                                    Color(red: 0.04, green: 0.05, blue: 0.12)
+                                ],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
                         )
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 32)
-                            .stroke(Theme.purple.opacity(0.18), lineWidth: 1.1)
-                    )
-                    .shadow(color: Theme.purple.opacity(0.25), radius: 22, x: 0, y: 18)
-            )
-            .padding(canvasOuterPadding)
-        }
-        .background(
-            ScrollViewIntrospector { scrollView in
-                if treeScrollView !== scrollView {
-                    treeScrollView = scrollView
-                    prepareScrollView(scrollView)
-                    zoomScale = scrollView.magnification
-                } else {
-                    prepareScrollView(scrollView)
-                }
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 32)
+                                .stroke(Theme.purple.opacity(0.18), lineWidth: 1.1)
+                        )
+                        .shadow(color: Theme.purple.opacity(0.25), radius: 22, x: 0, y: 18)
+                )
+                .padding(canvasOuterPadding)
+                .scaleEffect(zoomScale, anchor: .topLeading)
+                .offset(x: contentOffset.width, y: contentOffset.height)
+                .animation(nil, value: zoomScale)
+                .animation(nil, value: contentOffset)
+
+                ZoomEventCatcher(
+                    onCommandScroll: { payload in
+                        handleCommandScroll(deltaY: payload.deltaY,
+                                            precise: payload.precise,
+                                            inverted: payload.inverted,
+                                            location: payload.location)
+                    },
+                    onMagnify: { payload in
+                        handleMagnification(delta: payload.delta, location: payload.location)
+                    }
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .allowsHitTesting(true)
+                .accessibilityHidden(true)
             }
-        )
-        .background(
-            LinearGradient(
-                colors: [
-                    Color(red: 0.07, green: 0.08, blue: 0.16),
-                    Color(red: 0.03, green: 0.03, blue: 0.09)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
+            .clipShape(RoundedRectangle(cornerRadius: 26))
+            .overlay(
+                RoundedRectangle(cornerRadius: 26)
+                    .stroke(Color.white.opacity(0.05), lineWidth: 0.8)
             )
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 26))
-        .overlay(
-            RoundedRectangle(cornerRadius: 26)
-                .stroke(Color.white.opacity(0.05), lineWidth: 0.8)
-        )
+            .onAppear {
+                handleViewportChange(viewport)
+            }
+            .onChange(of: viewport) { newValue in
+                handleViewportChange(newValue)
+            }
+        }
     }
 
     private func errorView(_ error: Error) -> some View {
@@ -228,13 +239,24 @@ struct JSONTreePreview: View {
             treeRoot = root
             parseError = nil
             layout.performLayout(root: root)
+            zoomScale = 1.0
+            contentOffset = .zero
+            shouldCenterTree = true
             refreshMatches(resetIndex: true)
+            DispatchQueue.main.async {
+                if highlightedNodeID == nil {
+                    alignContentToCenter(animated: false)
+                } else {
+                    focusOnHighlightedNode(animated: false)
+                }
+            }
         case .failure(let error):
             treeRoot = nil
             parseError = error
             searchMatches = []
             highlightedNodeID = nil
             currentMatchIndex = 0
+            shouldCenterTree = true
         }
     }
 
@@ -250,6 +272,8 @@ struct JSONTreePreview: View {
             searchMatches = []
             highlightedNodeID = nil
             currentMatchIndex = 0
+            shouldCenterTree = true
+            alignContentToCenter(animated: false)
             return
         }
         let matches = collectMatches(in: root, query: trimmed)
@@ -257,13 +281,15 @@ struct JSONTreePreview: View {
         guard !matches.isEmpty else {
             highlightedNodeID = nil
             currentMatchIndex = 0
+            shouldCenterTree = true
+            alignContentToCenter(animated: false)
             return
         }
         if resetIndex || currentMatchIndex >= matches.count {
             currentMatchIndex = 0
         }
         highlightedNodeID = matches[currentMatchIndex]
-        dispatchScrollToHighlight()
+        focusOnHighlightedNode(animated: false)
     }
 
     private func handleSearchSubmit() {
@@ -308,238 +334,134 @@ struct JSONTreePreview: View {
         }
         currentMatchIndex = newIndex
         highlightedNodeID = searchMatches[newIndex]
-        dispatchScrollToHighlight()
+        shouldCenterTree = false
+        focusOnHighlightedNode(animated: true)
     }
 
-    private func dispatchScrollToHighlight(animated: Bool = true) {
-        DispatchQueue.main.async {
-            scrollToHighlightedNode(animated: animated)
+    private func handleViewportChange(_ newSize: CGSize) {
+        guard newSize.width > 0, newSize.height > 0 else { return }
+        viewportSize = newSize
+        if highlightedNodeID != nil {
+            focusOnHighlightedNode(animated: false)
+        } else if shouldCenterTree {
+            alignContentToCenter(animated: false)
         }
     }
 
-    private func scrollToHighlightedNode(animated: Bool = true) {
-        guard let scrollView = treeScrollView,
-              let id = highlightedNodeID,
-              let point = layout.position(for: id) else { return }
-
-        let initialDocPoint = documentPoint(fromLayoutPoint: point, in: scrollView)
-        ensureSearchZoomIfNeeded(targetDocPoint: initialDocPoint, in: scrollView, animated: animated)
-
-        let refreshedDocPoint = documentPoint(fromLayoutPoint: point, in: scrollView)
-        centerDocument(on: refreshedDocPoint, in: scrollView, animated: animated)
+    private func handleMagnification(delta: CGFloat, location: CGPoint) {
+        guard abs(delta) > 0.0001 else { return }
+        let factor = 1.0 + delta
+        guard abs(factor - 1.0) > 0.0001 else { return }
+        let proposed = zoomScale * factor
+        let contentPoint = contentPoint(at: location)
+        shouldCenterTree = false
+        applyZoom(to: proposed, focusContentPoint: contentPoint, focusScreenPoint: location, animated: false)
     }
 
-    private func ensureSearchZoomIfNeeded(targetDocPoint point: NSPoint, in scrollView: NSScrollView, animated: Bool) {
-        guard !searchMatches.isEmpty else { return }
-        let current = scrollView.magnification
-        let desired = max(current, searchFocusZoom)
-        guard abs(desired - current) > 0.0001 else { return }
-        updateZoom(to: desired, centeredAt: point, in: scrollView, animated: animated)
+    private func handleCommandScroll(deltaY: CGFloat, precise: Bool, inverted: Bool, location: CGPoint) {
+        guard abs(deltaY) > 0.0001 else { return }
+        let direction: CGFloat = inverted ? -1 : 1
+        let multiplier: CGFloat = precise ? 0.04 : 0.18
+        let delta = -(deltaY * direction) * multiplier
+        let proposed = zoomScale + delta
+        let contentPoint = contentPoint(at: location)
+        shouldCenterTree = false
+        applyZoom(to: proposed, focusContentPoint: contentPoint, focusScreenPoint: location, animated: false)
     }
 
-    private func installScrollMonitor() {
-        guard scrollEventMonitor == nil else { return }
-        scrollEventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .magnify]) { event in
-            guard let scrollView = treeScrollView else { return event }
-            guard let window = scrollView.window, event.window == window else { return event }
-
-            switch event.type {
-            case .magnify:
-                let increment = event.magnification
-                guard abs(increment) > 0.0001 else { return nil }
-                let factor = 1.0 + increment
-                let center = self.documentPoint(fromWindowLocation: event.locationInWindow, in: scrollView)
-                let proposed = scrollView.magnification * factor
-                self.updateZoom(to: proposed, centeredAt: center, in: scrollView, animated: false)
-                dispatchScrollToHighlight(animated: false)
-                return nil
-
-            case .scrollWheel:
-                if event.modifierFlags.contains(.command) {
-                    let center = self.documentPoint(fromWindowLocation: event.locationInWindow, in: scrollView)
-                    let deltaY = event.scrollingDeltaY
-                    guard abs(deltaY) > 0.0001 else { return nil }
-                    let direction: CGFloat = event.isDirectionInvertedFromDevice ? -1 : 1
-                    let multiplier: CGFloat = event.hasPreciseScrollingDeltas ? 0.04 : 0.18
-                    let proposed = scrollView.magnification - (deltaY * direction * multiplier)
-                    self.updateZoom(to: proposed, centeredAt: center, in: scrollView, animated: false)
-                    dispatchScrollToHighlight(animated: false)
-                    return nil
-                }
-                return nil
-
-            default:
-                return event
+    private func focusOnHighlightedNode(animated: Bool) {
+        guard let id = highlightedNodeID,
+              let layoutPoint = layout.position(for: id),
+              viewportSize.width > 0 else {
+            if shouldCenterTree {
+                alignContentToCenter(animated: animated)
             }
+            return
+        }
+
+        let contentPoint = CGPoint(
+            x: layoutPoint.x + canvasContentInset,
+            y: layoutPoint.y + canvasContentInset
+        )
+        let screenPoint = viewportCenterPoint()
+        let targetScale = max(zoomScale, searchFocusZoom)
+        shouldCenterTree = false
+        applyZoom(to: targetScale,
+                  focusContentPoint: contentPoint,
+                  focusScreenPoint: screenPoint,
+                  animated: animated)
+    }
+
+    private func alignContentToCenter(animated: Bool) {
+        guard viewportSize.width > 0 else { return }
+        let targetOffset = centeredOffset(for: zoomScale)
+        if animated {
+            withAnimation(.easeInOut(duration: 0.24)) {
+                contentOffset = targetOffset
+            }
+        } else {
+            contentOffset = targetOffset
         }
     }
 
-    private func removeScrollMonitor() {
-        if let monitor = scrollEventMonitor {
-            NSEvent.removeMonitor(monitor)
-            scrollEventMonitor = nil
+    private func applyZoom(to newScale: CGFloat,
+                           focusContentPoint: CGPoint?,
+                           focusScreenPoint: CGPoint?,
+                           animated: Bool) {
+        let clamped = clampZoom(newScale)
+        guard viewportSize.width > 0 else {
+            zoomScale = clamped
+            return
         }
-        removeClipViewObserver()
+
+        let targetOffset: CGSize
+        if let contentPoint = focusContentPoint, let screenPoint = focusScreenPoint {
+            targetOffset = CGSize(
+                width: screenPoint.x - contentPoint.x * clamped,
+                height: screenPoint.y - contentPoint.y * clamped
+            )
+        } else {
+            targetOffset = centeredOffset(for: clamped)
+        }
+
+        if animated {
+            withAnimation(.easeInOut(duration: 0.24)) {
+                zoomScale = clamped
+                contentOffset = targetOffset
+            }
+        } else {
+            zoomScale = clamped
+            contentOffset = targetOffset
+        }
+    }
+
+    private func centeredOffset(for scale: CGFloat) -> CGSize {
+        let scaledWidth = canvasSize.width * scale
+        let scaledHeight = canvasSize.height * scale
+        let offsetX = (viewportSize.width - scaledWidth) / 2
+        let offsetY = (viewportSize.height - scaledHeight) / 2
+        return CGSize(width: offsetX, height: offsetY)
+    }
+
+    private func contentPoint(at screenPoint: CGPoint) -> CGPoint {
+        guard viewportSize.width > 0 else {
+            return CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
+        }
+        let safeScale = max(zoomScale, 0.0001)
+        let rawX = (screenPoint.x - contentOffset.width) / safeScale
+        let rawY = (screenPoint.y - contentOffset.height) / safeScale
+        let x = min(max(rawX, 0), canvasSize.width)
+        let y = min(max(rawY, 0), canvasSize.height)
+        return CGPoint(x: x, y: y)
+    }
+
+    private func viewportCenterPoint() -> CGPoint? {
+        guard viewportSize.width > 0 else { return nil }
+        return CGPoint(x: viewportSize.width / 2, y: viewportSize.height / 2)
     }
 
     private func clampZoom(_ value: CGFloat) -> CGFloat {
         min(max(value, zoomRange.lowerBound), zoomRange.upperBound)
-    }
-
-    private func prepareScrollView(_ scrollView: NSScrollView) {
-        scrollView.allowsMagnification = true
-        scrollView.minMagnification = zoomRange.lowerBound
-        scrollView.maxMagnification = zoomRange.upperBound
-        scrollView.hasHorizontalScroller = false
-        scrollView.hasVerticalScroller = false
-        scrollView.horizontalScrollElasticity = .none
-        scrollView.verticalScrollElasticity = .none
-        scrollView.contentView.copiesOnScroll = false
-        installClipViewObserver(for: scrollView)
-    }
-
-    private func installClipViewObserver(for scrollView: NSScrollView) {
-        removeClipViewObserver()
-        let clipView = scrollView.contentView
-        clipView.postsBoundsChangedNotifications = true
-        lockedContentOrigin = clipView.bounds.origin
-        clipViewObserver = NotificationCenter.default.addObserver(
-            forName: NSView.boundsDidChangeNotification,
-            object: clipView,
-            queue: .main
-        ) { _ in
-            guard !suppressScrollRebound else { return }
-            let current = clipView.bounds.origin
-            if !current.isApproximatelyEqual(to: lockedContentOrigin) {
-                clipView.setBoundsOrigin(lockedContentOrigin)
-                scrollView.reflectScrolledClipView(clipView)
-            }
-        }
-    }
-
-    private func removeClipViewObserver() {
-        if let token = clipViewObserver {
-            NotificationCenter.default.removeObserver(token)
-            clipViewObserver = nil
-        }
-    }
-
-    private func updateZoom(to newValue: CGFloat, centeredAt docPoint: NSPoint, in scrollView: NSScrollView, animated: Bool) {
-        let clamped = clampZoom(newValue)
-        guard abs(clamped - scrollView.magnification) > 0.0001 else { return }
-        let focusPoint = sanitizedDocumentPoint(docPoint, in: scrollView)
-        let clipView = scrollView.contentView
-        suppressScrollRebound = true
-        if animated {
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.22
-                scrollView.animator().setMagnification(clamped, centeredAt: focusPoint)
-            } completionHandler: {
-                lockedContentOrigin = clipView.bounds.origin
-                suppressScrollRebound = false
-            }
-        } else {
-            scrollView.setMagnification(clamped, centeredAt: focusPoint)
-            DispatchQueue.main.async {
-                lockedContentOrigin = clipView.bounds.origin
-                suppressScrollRebound = false
-            }
-        }
-        zoomScale = clamped
-    }
-
-    private func centerDocument(on docPoint: NSPoint, in scrollView: NSScrollView, animated: Bool) {
-        guard let docView = scrollView.documentView else { return }
-        let clipView = scrollView.contentView
-        let clipSize = clipView.bounds.size
-        guard clipSize.width > 0, clipSize.height > 0 else { return }
-
-        let focusPoint = sanitizedDocumentPoint(docPoint, in: scrollView)
-
-        var targetOrigin = NSPoint(
-            x: focusPoint.x - clipSize.width / 2,
-            y: focusPoint.y - clipSize.height / 2
-        )
-
-        let maxX = max(docView.bounds.width - clipSize.width, 0)
-        let maxY = max(docView.bounds.height - clipSize.height, 0)
-        targetOrigin.x = min(max(targetOrigin.x, 0), maxX)
-        targetOrigin.y = min(max(targetOrigin.y, 0), maxY)
-
-        suppressScrollRebound = true
-        if animated {
-            NSAnimationContext.runAnimationGroup { context in
-                context.duration = 0.24
-                clipView.animator().setBoundsOrigin(targetOrigin)
-            } completionHandler: {
-                scrollView.reflectScrolledClipView(clipView)
-                lockedContentOrigin = clipView.bounds.origin
-                suppressScrollRebound = false
-            }
-        } else {
-            clipView.scroll(to: targetOrigin)
-            scrollView.reflectScrolledClipView(clipView)
-            lockedContentOrigin = clipView.bounds.origin
-            DispatchQueue.main.async {
-                suppressScrollRebound = false
-            }
-        }
-    }
-
-    private func sanitizedDocumentPoint(_ point: NSPoint, in scrollView: NSScrollView) -> NSPoint {
-        guard let docView = scrollView.documentView else { return point }
-        let x = min(max(point.x, 0), docView.bounds.width)
-        let y = min(max(point.y, 0), docView.bounds.height)
-        return NSPoint(x: x, y: y)
-    }
-
-    private func documentPoint(fromWindowLocation location: CGPoint, in scrollView: NSScrollView) -> NSPoint {
-        guard let docView = scrollView.documentView else {
-            return scrollView.documentVisibleRect.center
-        }
-        var converted = docView.convert(location, from: nil)
-        if !converted.x.isFinite || !converted.y.isFinite {
-            converted = scrollView.documentVisibleRect.center
-        }
-        return converted
-    }
-
-    private func documentPoint(fromLayoutPoint point: CGPoint, in scrollView: NSScrollView) -> NSPoint {
-        guard let docView = scrollView.documentView else {
-            return NSPoint(x: point.x + canvasContentInset, y: point.y + canvasContentInset)
-        }
-        let yBase: CGFloat
-        if docView.isFlipped {
-            yBase = point.y + canvasContentInset
-        } else {
-            let baseHeight = docView.bounds.height
-            yBase = baseHeight - (point.y + canvasContentInset)
-        }
-        let x = min(max(point.x + canvasContentInset, 0), docView.bounds.width)
-        let y = min(max(yBase, 0), docView.bounds.height)
-        return NSPoint(x: x, y: y)
-    }
-
-    private struct ScrollViewIntrospector: NSViewRepresentable {
-        let onUpdate: (NSScrollView) -> Void
-
-        func makeNSView(context: Context) -> NSView {
-            let view = NSView(frame: .zero)
-            DispatchQueue.main.async {
-                if let scroll = view.enclosingScrollView {
-                    onUpdate(scroll)
-                }
-            }
-            return view
-        }
-
-        func updateNSView(_ nsView: NSView, context: Context) {
-            DispatchQueue.main.async {
-                if let scroll = nsView.enclosingScrollView {
-                    onUpdate(scroll)
-                }
-            }
-        }
     }
 }
 
@@ -628,6 +550,96 @@ private struct JSONTreeGraphNode: Identifiable {
         case .bool: return Theme.pink
         case .null: return .secondary
         case .object, .array: return Theme.purple
+        }
+    }
+}
+
+private struct ZoomEventCatcher: NSViewRepresentable {
+    struct ScrollPayload {
+        let deltaY: CGFloat
+        let precise: Bool
+        let inverted: Bool
+        let location: CGPoint
+    }
+
+    struct MagnifyPayload {
+        let delta: CGFloat
+        let location: CGPoint
+    }
+
+    let onCommandScroll: (ScrollPayload) -> Void
+    let onMagnify: (MagnifyPayload) -> Void
+
+    func makeNSView(context: Context) -> ZoomEventView {
+        let view = ZoomEventView()
+        view.onCommandScroll = onCommandScroll
+        view.onMagnify = onMagnify
+        return view
+    }
+
+    func updateNSView(_ nsView: ZoomEventView, context: Context) {
+        nsView.onCommandScroll = onCommandScroll
+        nsView.onMagnify = onMagnify
+    }
+
+    final class ZoomEventView: NSView {
+        var onCommandScroll: ((ScrollPayload) -> Void)?
+        var onMagnify: ((MagnifyPayload) -> Void)?
+        private var trackingArea: NSTrackingArea?
+
+        override var acceptsFirstResponder: Bool { true }
+        override var isFlipped: Bool { true }
+        override var isOpaque: Bool { false }
+
+        override init(frame frameRect: NSRect) {
+            super.init(frame: frameRect)
+        }
+
+        @available(*, unavailable)
+        required init?(coder: NSCoder) {
+            fatalError("init(coder:) has not been implemented")
+        }
+
+        override func viewDidMoveToWindow() {
+            super.viewDidMoveToWindow()
+            window?.makeFirstResponder(self)
+        }
+
+        override func updateTrackingAreas() {
+            super.updateTrackingAreas()
+            if let trackingArea {
+                removeTrackingArea(trackingArea)
+            }
+            let options: NSTrackingArea.Options = [.activeInKeyWindow, .inVisibleRect, .mouseEnteredAndExited]
+            let area = NSTrackingArea(rect: bounds, options: options, owner: self, userInfo: nil)
+            addTrackingArea(area)
+            trackingArea = area
+        }
+
+        override func mouseEntered(with event: NSEvent) {
+            super.mouseEntered(with: event)
+            window?.makeFirstResponder(self)
+        }
+
+        override func scrollWheel(with event: NSEvent) {
+            if event.modifierFlags.contains(.command) {
+                let location = convert(event.locationInWindow, from: nil)
+                let payload = ScrollPayload(
+                    deltaY: event.scrollingDeltaY,
+                    precise: event.hasPreciseScrollingDeltas,
+                    inverted: event.isDirectionInvertedFromDevice,
+                    location: location
+                )
+                onCommandScroll?(payload)
+            } else {
+                super.scrollWheel(with: event)
+            }
+        }
+
+        override func magnify(with event: NSEvent) {
+            let location = convert(event.locationInWindow, from: nil)
+            let payload = MagnifyPayload(delta: event.magnification, location: location)
+            onMagnify?(payload)
         }
     }
 }
@@ -751,16 +763,6 @@ private struct JSONTreeCanvas: View {
             }
         }
     }
-}
-
-private extension NSPoint {
-    func isApproximatelyEqual(to other: NSPoint, tolerance: CGFloat = 0.5) -> Bool {
-        abs(x - other.x) <= tolerance && abs(y - other.y) <= tolerance
-    }
-}
-
-private extension NSRect {
-    var center: NSPoint { NSPoint(x: midX, y: midY) }
 }
 
 private final class JSONTreeLayout {
