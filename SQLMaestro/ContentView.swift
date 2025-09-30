@@ -1115,6 +1115,9 @@ struct ContentView: View {
 
     private let hardStopRowHeight: CGFloat = 0
     private let paneRegionMinHeight: CGFloat = 420
+    private let outputRegionHeight: CGFloat = 236
+    private let outputRegionSpacing: CGFloat = 12
+    private let mainContentTopPadding: CGFloat = 56
 
     
     @FocusState private var isSearchFocused: Bool
@@ -1542,7 +1545,7 @@ struct ContentView: View {
             .hidden()
             .registerShortcut(name: "Toggle Sidebar", keyLabel: "T", modifiers: [.command], scope: "Layout")
         }
-        .padding(EdgeInsets(top: 8, leading: 16, bottom: 16, trailing: 16))
+        .padding(EdgeInsets(top: mainContentTopPadding, leading: 16, bottom: 16, trailing: 16))
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
@@ -4399,22 +4402,33 @@ struct ContentView: View {
         private var outputView: some View {
             let guideDirty = templateGuideStore.isNotesDirty(for: selectedTemplate)
             let activeSession = sessions.current
+            let totalHeight = paneRegionMinHeight + outputRegionHeight + outputRegionSpacing
 
-            return VStack(spacing: 12) {
+            return ZStack(alignment: .topLeading) {
+                Color.clear
+                    .frame(maxWidth: .infinity, minHeight: totalHeight)
+
                 if isOutputVisible {
                     outputSQLSection
+                        .frame(maxWidth: .infinity, minHeight: outputRegionHeight, alignment: .top)
+                        .transition(.move(edge: .top).combined(with: .opacity))
                 }
 
-                ZStack(alignment: .topLeading) {
-                    Color.clear
+                VStack(spacing: 0) {
+                    if isOutputVisible {
+                        Spacer().frame(height: outputRegionHeight + outputRegionSpacing)
+                    }
                     if let pane = activeBottomPane {
                         bottomPaneContainer(pane: pane, guideDirty: guideDirty, activeSession: activeSession)
+                            .frame(maxHeight: paneRegionMinHeight, alignment: .top)
+                    } else {
+                        Color.clear.frame(height: paneRegionMinHeight)
                     }
                 }
-                .frame(maxWidth: .infinity)
-                .frame(minHeight: paneRegionMinHeight, alignment: .top)
             }
+            .animation(.easeInOut(duration: 0.22), value: isOutputVisible)
         }
+
 
         private var outputSQLSection: some View {
             VStack(alignment: .leading, spacing: 10) {
@@ -4481,6 +4495,7 @@ struct ContentView: View {
                     )
             )
             .padding(.horizontal, 4)
+            .frame(height: paneRegionMinHeight, alignment: .top)
         }
 
         private func bottomPaneHeader(for pane: BottomPaneContent, guideDirty: Bool, activeSession: TicketSession) -> some View {
