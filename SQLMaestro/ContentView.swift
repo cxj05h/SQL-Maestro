@@ -1976,6 +1976,10 @@ struct ContentView: View {
     Button("Add Tags") { startAddTags(for: template) }
     Button("Open JSON") { openTemplateJSON(template) }
     Button("Show in Finder") { revealTemplateInFinder(template) }
+    if isUsed {
+        Divider()
+        Button("Remove from Recents") { removeTemplateFromRecents(template) }
+    }
     Divider()
     Button("Rename…") { renameTemplateFlow(template) }
     Divider()
@@ -6347,6 +6351,7 @@ struct ContentView: View {
             let alternateFields: [String: String]
             let sessionImages: [SessionImage]
             let savedFiles: [SavedFile]
+            let usedTemplates: [UsedTemplate]
 
             private enum CodingKeys: String, CodingKey {
                 case version
@@ -6361,6 +6366,7 @@ struct ContentView: View {
                 case alternateFields
                 case sessionImages
                 case savedFiles
+                case usedTemplates
             }
 
             init(version: Int,
@@ -6374,7 +6380,8 @@ struct ContentView: View {
                  notes: String,
                  alternateFields: [String : String],
                  sessionImages: [SessionImage],
-                 savedFiles: [SavedFile]) {
+                 savedFiles: [SavedFile],
+                 usedTemplates: [UsedTemplate]) {
                 self.version = version
                 self.sessionName = sessionName
                 self.sessionLink = sessionLink
@@ -6387,6 +6394,7 @@ struct ContentView: View {
                 self.alternateFields = alternateFields
                 self.sessionImages = sessionImages
                 self.savedFiles = savedFiles
+                self.usedTemplates = usedTemplates
             }
 
             init(from decoder: Decoder) throws {
@@ -6403,6 +6411,61 @@ struct ContentView: View {
                 self.alternateFields = try container.decode([String:String].self, forKey: .alternateFields)
                 self.sessionImages = try container.decodeIfPresent([SessionImage].self, forKey: .sessionImages) ?? []
                 self.savedFiles = try container.decodeIfPresent([SavedFile].self, forKey: .savedFiles) ?? []
+                self.usedTemplates = try container.decodeIfPresent([UsedTemplate].self, forKey: .usedTemplates) ?? []
+            }
+
+            struct UsedTemplate: Codable {
+                let templateId: String
+                let templateName: String?
+                let placeholders: [String:String]
+                let lastUpdated: Date?
+                let alternateFields: [SavedAlternateField]
+
+                init(templateId: String,
+                     templateName: String?,
+                     placeholders: [String:String],
+                     lastUpdated: Date?,
+                     alternateFields: [SavedAlternateField]) {
+                    self.templateId = templateId
+                    self.templateName = templateName
+                    self.placeholders = placeholders
+                    self.lastUpdated = lastUpdated
+                    self.alternateFields = alternateFields
+                }
+
+                private enum CodingKeys: String, CodingKey {
+                    case templateId
+                    case templateName
+                    case placeholders
+                    case lastUpdated
+                    case alternateFields
+                }
+
+                init(from decoder: Decoder) throws {
+                    let container = try decoder.container(keyedBy: CodingKeys.self)
+                    self.templateId = try container.decode(String.self, forKey: .templateId)
+                    self.templateName = try container.decodeIfPresent(String.self, forKey: .templateName)
+                    self.placeholders = try container.decodeIfPresent([String:String].self, forKey: .placeholders) ?? [:]
+                    self.lastUpdated = try container.decodeIfPresent(Date.self, forKey: .lastUpdated)
+                    self.alternateFields = try container.decodeIfPresent([SavedAlternateField].self, forKey: .alternateFields) ?? []
+                }
+
+                func encode(to encoder: Encoder) throws {
+                    var container = encoder.container(keyedBy: CodingKeys.self)
+                    try container.encode(templateId, forKey: .templateId)
+                    try container.encodeIfPresent(templateName, forKey: .templateName)
+                    try container.encode(placeholders, forKey: .placeholders)
+                    try container.encodeIfPresent(lastUpdated, forKey: .lastUpdated)
+                    if !alternateFields.isEmpty {
+                        try container.encode(alternateFields, forKey: .alternateFields)
+                    }
+                }
+            }
+
+            struct SavedAlternateField: Codable {
+                let id: UUID
+                let name: String
+                let value: String
             }
         }
 
@@ -6513,8 +6576,36 @@ struct ContentView: View {
                 )
             }
 
+            let usedRecords = UsedTemplatesStore.shared.records(for: session)
+            let usedTemplateSnapshots = usedRecords.map { record in
+                let name = templates.templates.first(where: { $0.id == record.templateId })?.name
+                let alternateFields = record.values.compactMap { key, value -> SavedTicketSession.SavedAlternateField? in
+                    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !trimmed.isEmpty else { return nil }
+                    let templateLabel = name ?? "Template"
+                    return SavedTicketSession.SavedAlternateField(
+                        id: UUID(),
+                        name: "\(templateLabel) • \(key)",
+                        value: trimmed
+                    )
+                }
+                return SavedTicketSession.UsedTemplate(
+                    templateId: record.templateId.uuidString,
+                    templateName: name,
+                    placeholders: record.values,
+                    lastUpdated: record.lastUpdated,
+                    alternateFields: alternateFields
+                )
+            }
+
+            let combinedAlternateFields = buildCombinedAlternateFields(
+                base: sessions.sessionAlternateFields[session] ?? [],
+                usedTemplates: usedTemplateSnapshots
+            )
+            let limitedCombinedFields = Array(combinedAlternateFields.prefix(200))
+
             return SavedTicketSession(
-                version: 2,
+                version: 3,
                 sessionName: sessions.sessionNames[session] ?? "#\(session.rawValue)",
                 sessionLink: sessions.sessionLinks[session],
                 templateId: template.map { "\($0.id)" },
@@ -6523,12 +6614,12 @@ struct ContentView: View {
                 placeholders: placeholders,
                 dbTables: dbTablesSnapshot,
                 notes: sessions.sessionNotes[session] ?? "",
-                alternateFields: sessions.sessionAlternateFields[session]?
-                    .reduce(into: [String:String]()) { dict, field in
-                        dict[field.name] = field.value
-                    } ?? [:],
+                alternateFields: limitedCombinedFields.reduce(into: [String:String]()) { dict, field in
+                    dict[field.name] = field.value
+                },
                 sessionImages: sessions.sessionImages[session] ?? [],
-                savedFiles: savedFilesSnapshot
+                savedFiles: savedFilesSnapshot,
+                usedTemplates: usedTemplateSnapshots
             )
         }
 
@@ -6566,6 +6657,8 @@ struct ContentView: View {
             }
             draftDynamicValues[sessions.current] = [:]
 
+            UsedTemplatesStore.shared.clearSession(sessions.current)
+
             var resolvedTemplate: TemplateItem? = matchedTemplate
             if resolvedTemplate == nil, let templateId = snapshot.templateId {
                 resolvedTemplate = templates.templates.first(where: { "\($0.id)" == templateId })
@@ -6574,7 +6667,41 @@ struct ContentView: View {
                 resolvedTemplate = templates.templates.first(where: { $0.name == name })
             }
 
-            if let template = resolvedTemplate {
+            func locateTemplate(idString: String?, name: String?) -> TemplateItem? {
+                if let idString,
+                   let uuid = UUID(uuidString: idString),
+                   let match = templates.templates.first(where: { $0.id == uuid }) {
+                    return match
+                }
+                if let name,
+                   let match = templates.templates.first(where: { $0.name == name }) {
+                    return match
+                }
+                return nil
+            }
+
+            if !snapshot.usedTemplates.isEmpty {
+                for entry in snapshot.usedTemplates {
+                    let template = locateTemplate(idString: entry.templateId, name: entry.templateName)
+                        ?? resolvedTemplate
+                    guard let template else { continue }
+                    UsedTemplatesStore.shared.markTemplateUsed(session: sessions.current, templateId: template.id)
+                    if !entry.placeholders.isEmpty {
+                        UsedTemplatesStore.shared.setAllValues(
+                            entry.placeholders,
+                            session: sessions.current,
+                            templateId: template.id
+                        )
+                    }
+                    LOG("Used template restored", ctx: [
+                        "template": template.name,
+                        "placeholders": "\(entry.placeholders.count)"
+                    ])
+                }
+            }
+
+            if let template = resolvedTemplate,
+               !UsedTemplatesStore.shared.isTemplateUsed(in: sessions.current, templateId: template.id) {
                 let hasValues = snapshot.placeholders.values.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
                 if hasValues {
                     UsedTemplatesStore.shared.markTemplateUsed(session: sessions.current, templateId: template.id)
@@ -6594,8 +6721,12 @@ struct ContentView: View {
                                  for: sessions.current,
                                  source: source)
 
-            sessions.sessionAlternateFields[sessions.current] =
-                snapshot.alternateFields.map { AlternateField(name: $0.key, value: $0.value) }
+            let baseAlternateFields = snapshot.alternateFields.map { AlternateField(name: $0.key, value: $0.value) }
+            let combinedAlternateFields = buildCombinedAlternateFields(
+                base: baseAlternateFields,
+                usedTemplates: snapshot.usedTemplates
+            )
+            sessions.sessionAlternateFields[sessions.current] = Array(combinedAlternateFields.prefix(200))
 
             sessions.sessionImages[sessions.current] = snapshot.sessionImages
 
@@ -7236,6 +7367,56 @@ struct ContentView: View {
             return imported
         }
 
+        private func buildCombinedAlternateFields(base: [AlternateField],
+                                                  usedTemplates: [SavedTicketSession.UsedTemplate]) -> [AlternateField] {
+            var result: [AlternateField] = []
+            var seenValues: Set<String> = []
+
+            func addField(name rawName: String, value rawValue: String) {
+                let trimmedValue = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmedValue.isEmpty else { return }
+                guard seenValues.insert(trimmedValue).inserted else { return }
+                let baseName = rawName.trimmingCharacters(in: .whitespacesAndNewlines)
+                let normalizedBase = baseName.isEmpty ? "Field" : baseName
+                if result.contains(where: { $0.name == normalizedBase && $0.value == trimmedValue }) { return }
+                var candidate = normalizedBase
+                var suffix = 1
+                while result.contains(where: { $0.name == candidate }) {
+                    if result.contains(where: { $0.name == candidate && $0.value == trimmedValue }) {
+                        return
+                    }
+                    suffix += 1
+                    candidate = "\(normalizedBase) (\(suffix))"
+                }
+                result.append(AlternateField(name: candidate, value: trimmedValue))
+            }
+
+            for field in base {
+                addField(name: field.name, value: field.value)
+            }
+
+            let orderedEntries = usedTemplates.sorted { lhs, rhs in
+                (lhs.lastUpdated ?? Date.distantPast) < (rhs.lastUpdated ?? Date.distantPast)
+            }
+
+            for entry in orderedEntries {
+                if entry.alternateFields.isEmpty {
+                    let templateLabel = (entry.templateName?.isEmpty == false) ? entry.templateName! : "Template"
+                    for key in entry.placeholders.keys.sorted(by: { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }) {
+                        if let value = entry.placeholders[key] {
+                            addField(name: "\(templateLabel) • \(key)", value: value)
+                        }
+                    }
+                } else {
+                    for alt in entry.alternateFields {
+                        addField(name: alt.name, value: alt.value)
+                    }
+                }
+            }
+
+            return result
+        }
+
         private func buildCombinedGuideNotes(from payloads: [SharedTemplatePayload]) -> String {
             var sections: [String] = []
             for (index, payload) in payloads.enumerated() {
@@ -7388,8 +7569,67 @@ struct ContentView: View {
             let nameCandidate = manifest.sessionName.trimmingCharacters(in: .whitespacesAndNewlines)
             let sessionName = nameCandidate.isEmpty ? original.sessionName : nameCandidate
 
+            let adjustedUsedTemplates: [SavedTicketSession.UsedTemplate] = {
+                guard let importedTemplate else { return original.usedTemplates }
+                if manifest.templates.isEmpty {
+                    return original.usedTemplates.map { entry in
+                        let resolvedTemplate: TemplateItem = {
+                            if let uuid = UUID(uuidString: entry.templateId),
+                               let match = templates.templates.first(where: { $0.id == uuid }) {
+                                return match
+                            }
+                            if let name = entry.templateName,
+                               let match = templates.templates.first(where: { $0.name == name }) {
+                                return match
+                            }
+                            if entry.templateName == importedTemplate.name {
+                                return importedTemplate
+                            }
+                            return importedTemplate
+                        }()
+                        let altFields = entry.alternateFields.isEmpty ? buildAlternateFields(from: entry.placeholders,
+                                                                                               templateName: resolvedTemplate.name) : entry.alternateFields
+                        return SavedTicketSession.UsedTemplate(
+                            templateId: resolvedTemplate.id.uuidString,
+                            templateName: resolvedTemplate.name,
+                            placeholders: entry.placeholders,
+                            lastUpdated: entry.lastUpdated,
+                            alternateFields: altFields
+                        )
+                    }
+                } else {
+                    var merged: [String:String] = [:]
+                    for entry in original.usedTemplates {
+                        for (key, value) in entry.placeholders {
+                            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                            if trimmed.isEmpty { continue }
+                            if merged[key] == nil { merged[key] = value }
+                        }
+                    }
+                    return [
+                        SavedTicketSession.UsedTemplate(
+                            templateId: importedTemplate.id.uuidString,
+                            templateName: importedTemplate.name,
+                            placeholders: merged,
+                            lastUpdated: original.usedTemplates.first?.lastUpdated,
+                            alternateFields: buildAlternateFields(from: merged, templateName: importedTemplate.name)
+                        )
+                    ]
+                }
+            }()
+
+            let baseAlternateFields = original.alternateFields.map { AlternateField(name: $0.key, value: $0.value) }
+            let combinedAlternateFields = buildCombinedAlternateFields(
+                base: baseAlternateFields,
+                usedTemplates: adjustedUsedTemplates
+            )
+            let limitedAlternateFields = Array(combinedAlternateFields.prefix(200))
+            let alternateFieldsDict = limitedAlternateFields.reduce(into: [String:String]()) { dict, field in
+                dict[field.name] = field.value
+            }
+
             return SavedTicketSession(
-                version: max(original.version, 2),
+                version: max(original.version, 3),
                 sessionName: sessionName,
                 sessionLink: original.sessionLink,
                 templateId: importedTemplate.map { "\($0.id)" } ?? original.templateId,
@@ -7398,10 +7638,35 @@ struct ContentView: View {
                 placeholders: original.placeholders,
                 dbTables: original.dbTables,
                 notes: original.notes,
-                alternateFields: original.alternateFields,
+                alternateFields: alternateFieldsDict,
                 sessionImages: remappedImages.isEmpty ? original.sessionImages : remappedImages,
-                savedFiles: remappedSavedFiles
+                savedFiles: remappedSavedFiles,
+                usedTemplates: adjustedUsedTemplates
             )
+        }
+
+        private func buildAlternateFields(from placeholders: [String:String], templateName: String?) -> [SavedTicketSession.SavedAlternateField] {
+            placeholders.compactMap { key, value in
+                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { return nil }
+                let templateLabel = (templateName?.isEmpty == false) ? templateName! : "Template"
+                return SavedTicketSession.SavedAlternateField(
+                    id: UUID(),
+                    name: "\(templateLabel) • \(key)",
+                    value: trimmed
+                )
+            }
+        }
+
+        private func removeTemplateFromRecents(_ template: TemplateItem) {
+            UsedTemplatesStore.shared.clearTemplate(session: sessions.current, templateId: template.id)
+            if var fields = sessions.sessionAlternateFields[sessions.current] {
+                fields.removeAll { field in
+                    field.name.hasPrefix("\(template.name) • ")
+                }
+                sessions.sessionAlternateFields[sessions.current] = fields
+            }
+            LOG("Template removed from recents", ctx: ["template": template.name, "session": "\(sessions.current.rawValue)"])
         }
 
         private func importSharedSessionFlow() {

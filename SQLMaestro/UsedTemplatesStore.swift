@@ -107,6 +107,16 @@ final class UsedTemplatesStore: ObservableObject {
         DispatchQueue.main.async { [weak self] in self?.objectWillChange.send() }
     }
 
+    /// Remove a specific template usage record for the given session.
+    func clearTemplate(session: TicketSession, templateId: UUID) {
+        lock.lock()
+        var map = usedBySession[session] ?? [:]
+        map.removeValue(forKey: templateId)
+        usedBySession[session] = map
+        lock.unlock()
+        DispatchQueue.main.async { [weak self] in self?.objectWillChange.send() }
+    }
+
     /// Clear all recorded usage for a specific session (invoked by "Clear Session #N").
     func clearSession(_ session: TicketSession) {
         lock.lock()
