@@ -8232,7 +8232,13 @@ struct ContentView: View {
             var body: some View {
                 let baseWidth: CGFloat = 480
                 let baseHeight: CGFloat = 360
-                let widthRange: CGFloat = 936
+
+                // Get the screen size and calculate max width based on available space
+                let screenSize = NSScreen.main?.visibleFrame.size ?? CGSize(width: 1920, height: 1080)
+                let screenPadding: CGFloat = 100 // padding from screen edges
+                let maxWidth = screenSize.width - screenPadding
+                let widthRange: CGFloat = maxWidth - baseWidth
+
                 let chromeHeight: CGFloat = 220
 
                 let resolvedWidth = baseWidth + CGFloat(sliderValue) * widthRange
@@ -8360,7 +8366,13 @@ struct ContentView: View {
             var body: some View {
                 let baseWidth: CGFloat = 480
                 let baseHeight: CGFloat = 360
-                let widthRange: CGFloat = 936
+
+                // Get the screen size and calculate max width based on available space
+                let screenSize = NSScreen.main?.visibleFrame.size ?? CGSize(width: 1920, height: 1080)
+                let screenPadding: CGFloat = 100 // padding from screen edges
+                let maxWidth = screenSize.width - screenPadding
+                let widthRange: CGFloat = maxWidth - baseWidth
+
                 let chromeHeight: CGFloat = 220
 
                 let resolvedWidth = baseWidth + CGFloat(sliderValue) * widthRange
