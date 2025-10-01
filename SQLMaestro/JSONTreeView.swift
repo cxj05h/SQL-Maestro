@@ -371,7 +371,7 @@ struct JSONTreePreview: View {
     private func handleCommandScroll(deltaY: CGFloat, precise: Bool, inverted: Bool, location: CGPoint) {
         guard abs(deltaY) > 0.0001 else { return }
         let direction: CGFloat = inverted ? -1 : 1
-        let multiplier: CGFloat = precise ? 0.015 : 0.08
+        let multiplier: CGFloat = precise ? 0.005 : 0.025
         let delta = -(deltaY * direction) * multiplier
         let proposed = zoomScale + delta
         let contentPoint = contentPoint(at: location)
