@@ -1563,45 +1563,29 @@ struct ContentView: View {
     }
 
     private func truncateSessionName(_ name: String) -> String {
-        if name.count > 50 {
-            return String(name.prefix(47)) + "..."
+        if name.count > 80 {
+            return String(name.prefix(77)) + "..."
         }
         return name
     }
 
     private func mainDetailContent(topPadding: CGFloat) -> some View {
         VStack(spacing: 12) {
-            VStack(spacing: 8) {
-                ZStack {
-                    // Session name on the left
-                    HStack {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text("Session")
-                                .font(.system(size: fontSize - 2))
-                                .foregroundStyle(.secondary)
-                            Text(truncateSessionName(sessions.sessionNames[sessions.current] ?? "#\(sessions.current.rawValue)"))
-                                .font(.system(size: fontSize + 3, weight: .semibold))
-                                .foregroundStyle(Theme.purple)
-                        }
-                        Spacer()
-                    }
-
-                    // Company centered absolutely
-                    if !companyLabel.isEmpty {
-                        VStack(alignment: .center, spacing: 4) {
-                            Text("Company")
-                                .font(.system(size: fontSize - 2))
-                                .foregroundStyle(.secondary)
-                            Text(companyLabel)
-                                .font(.system(size: fontSize + 3, weight: .medium))
-                                .foregroundStyle(Theme.accent)
-                        }
-                    }
-                }
-
+            ZStack {
                 HStack {
+                    // Session name on the left
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Session")
+                            .font(.system(size: fontSize - 2))
+                            .foregroundStyle(.secondary)
+                        Text(truncateSessionName(sessions.sessionNames[sessions.current] ?? "#\(sessions.current.rawValue)"))
+                            .font(.system(size: fontSize + 3, weight: .semibold))
+                            .foregroundStyle(Theme.purple)
+                    }
+
                     Spacer()
 
+                    // Active Template on the right
                     VStack(alignment: .trailing, spacing: 4) {
                         Text("Active Template")
                             .font(.system(size: fontSize - 2))
@@ -1620,17 +1604,30 @@ struct ContentView: View {
                         }
                     }
                 }
-                .padding(.horizontal, 12)
-                .padding(.vertical, 8)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(Theme.grayBG.opacity(0.5))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8)
-                                .stroke(Theme.purple.opacity(0.2), lineWidth: 1)
-                        )
-                )
+
+                // Company absolutely centered
+                if !companyLabel.isEmpty {
+                    VStack(alignment: .center, spacing: 4) {
+                        Text("Company")
+                            .font(.system(size: fontSize - 2))
+                            .foregroundStyle(.secondary)
+                        Text(companyLabel)
+                            .font(.system(size: fontSize + 3, weight: .medium))
+                            .foregroundStyle(Theme.accent)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .center)
+                }
             }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Theme.grayBG.opacity(0.5))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Theme.purple.opacity(0.2), lineWidth: 1)
+                    )
+            )
 
             Divider()
 
@@ -4970,6 +4967,35 @@ struct ContentView: View {
                     .background(Theme.grayBG.opacity(0.25), in: RoundedRectangle(cornerRadius: 10))
                 }
 
+                Divider()
+
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("Sharing")
+                        .font(.system(size: fontSize - 2, weight: .semibold))
+                        .foregroundStyle(.secondary)
+                    Button(action: shareTicketSessionFlow) {
+                        Label("Share Session", systemImage: "square.and.arrow.up")
+                            .labelStyle(.titleAndIcon)
+                            .font(.system(size: fontSize - 1, weight: .medium))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 10)
+                    .background(Theme.grayBG.opacity(0.25), in: RoundedRectangle(cornerRadius: 10))
+
+                    Button(action: importSharedSessionFlow) {
+                        Label("Import Session", systemImage: "tray.and.arrow.down")
+                            .labelStyle(.titleAndIcon)
+                            .font(.system(size: fontSize - 1, weight: .medium))
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 10)
+                    .background(Theme.grayBG.opacity(0.25), in: RoundedRectangle(cornerRadius: 10))
+                }
+
                 Spacer(minLength: 12)
             }
             .padding(.vertical, 24)
@@ -6379,7 +6405,390 @@ struct ContentView: View {
                 self.savedFiles = try container.decodeIfPresent([SavedFile].self, forKey: .savedFiles) ?? []
             }
         }
-        
+
+        private struct SessionShareManifest: Codable {
+            let version: Int
+            let exportedAt: Date
+            let sessionName: String
+            let templateIncluded: Bool
+            let templateFileName: String?
+            let templateDisplayName: String?
+            let templateId: String?
+
+            init(version: Int = 1,
+                 exportedAt: Date = Date(),
+                 sessionName: String,
+                 templateIncluded: Bool,
+                 templateFileName: String?,
+                 templateDisplayName: String?,
+                 templateId: String?) {
+                self.version = version
+                self.exportedAt = exportedAt
+                self.sessionName = sessionName
+                self.templateIncluded = templateIncluded
+                self.templateFileName = templateFileName
+                self.templateDisplayName = templateDisplayName
+                self.templateId = templateId
+            }
+        }
+
+        private func buildSessionSnapshot(for session: TicketSession,
+                                          template: TemplateItem?) -> SavedTicketSession {
+            let staticData = sessionStaticFields[session] ?? (orgId, acctId, mysqlDb, companyLabel)
+            let sFields = SavedTicketSession.StaticFields(
+                orgId: staticData.orgId,
+                acctId: staticData.acctId,
+                mysqlDb: staticData.mysqlDb,
+                companyLabel: staticData.company
+            )
+
+            var placeholders: [String:String] = [:]
+            if let template {
+                for placeholder in template.placeholders {
+                    placeholders[placeholder] = sessions.value(for: placeholder)
+                }
+            }
+
+            let dbTablesSnapshot: [String] = {
+                if let template {
+                    return dbTablesStore.workingSet(for: session, template: template)
+                }
+                return []
+            }()
+
+            let savedFilesSnapshot = (sessions.sessionSavedFiles[session] ?? []).map { file in
+                SavedTicketSession.SavedFile(
+                    id: file.id,
+                    name: file.name,
+                    content: file.content,
+                    createdAt: file.createdAt,
+                    updatedAt: file.updatedAt
+                )
+            }
+
+            return SavedTicketSession(
+                version: 2,
+                sessionName: sessions.sessionNames[session] ?? "#\(session.rawValue)",
+                sessionLink: sessions.sessionLinks[session],
+                templateId: template.map { "\($0.id)" },
+                templateName: template?.name,
+                staticFields: sFields,
+                placeholders: placeholders,
+                dbTables: dbTablesSnapshot,
+                notes: sessions.sessionNotes[session] ?? "",
+                alternateFields: sessions.sessionAlternateFields[session]?
+                    .reduce(into: [String:String]()) { dict, field in
+                        dict[field.name] = field.value
+                    } ?? [:],
+                sessionImages: sessions.sessionImages[session] ?? [],
+                savedFiles: savedFilesSnapshot
+            )
+        }
+
+        private func persistSnapshot(_ snapshot: SavedTicketSession, to url: URL) throws {
+            let encoder = JSONEncoder()
+            if #available(macOS 10.13, *) {
+                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            } else {
+                encoder.outputFormatting = [.prettyPrinted]
+            }
+            let data = try encoder.encode(snapshot)
+            try data.write(to: url, options: .atomic)
+        }
+
+        private func applySessionSnapshot(_ snapshot: SavedTicketSession,
+                                          inferredName: String,
+                                          matchedTemplate: TemplateItem?,
+                                          source: String) {
+            sessions.renameCurrent(to: inferredName)
+
+            if let link = snapshot.sessionLink?.trimmingCharacters(in: .whitespacesAndNewlines), !link.isEmpty {
+                sessions.sessionLinks[sessions.current] = link
+            } else {
+                sessions.sessionLinks.removeValue(forKey: sessions.current)
+            }
+
+            orgId = snapshot.staticFields.orgId
+            acctId = snapshot.staticFields.acctId
+            mysqlDb = snapshot.staticFields.mysqlDb
+            companyLabel = snapshot.staticFields.companyLabel
+            sessionStaticFields[sessions.current] = (orgId, acctId, mysqlDb, companyLabel)
+
+            for (placeholder, value) in snapshot.placeholders {
+                sessions.setValue(value, for: placeholder)
+            }
+            draftDynamicValues[sessions.current] = [:]
+
+            var resolvedTemplate: TemplateItem? = matchedTemplate
+            if resolvedTemplate == nil, let templateId = snapshot.templateId {
+                resolvedTemplate = templates.templates.first(where: { "\($0.id)" == templateId })
+            }
+            if resolvedTemplate == nil, let name = snapshot.templateName {
+                resolvedTemplate = templates.templates.first(where: { $0.name == name })
+            }
+
+            if let template = resolvedTemplate {
+                let hasValues = snapshot.placeholders.values.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                if hasValues {
+                    UsedTemplatesStore.shared.markTemplateUsed(session: sessions.current, templateId: template.id)
+                    UsedTemplatesStore.shared.setAllValues(
+                        snapshot.placeholders,
+                        session: sessions.current,
+                        templateId: template.id
+                    )
+                    LOG("UsedTemplates rehydrated from snapshot",
+                        ctx: ["template": template.name, "count": "\(snapshot.placeholders.count)"])
+                }
+            }
+
+            isLoadingTicketSession = true
+            sessions.sessionNotes[sessions.current] = snapshot.notes
+            setSessionNotesDraft(snapshot.notes,
+                                 for: sessions.current,
+                                 source: source)
+
+            sessions.sessionAlternateFields[sessions.current] =
+                snapshot.alternateFields.map { AlternateField(name: $0.key, value: $0.value) }
+
+            sessions.sessionImages[sessions.current] = snapshot.sessionImages
+
+            let restoredFiles = snapshot.savedFiles.map { item in
+                SessionSavedFile(
+                    id: item.id,
+                    name: item.name,
+                    content: item.content,
+                    createdAt: item.createdAt ?? Date(),
+                    updatedAt: item.updatedAt ?? Date()
+                )
+            }
+            sessions.setSavedFiles(restoredFiles, for: sessions.current)
+            ensureSavedFileState(for: sessions.current)
+
+            if let template = resolvedTemplate {
+                loadTemplate(template)
+                if !snapshot.dbTables.isEmpty {
+                    dbTablesStore.setWorkingSet(snapshot.dbTables,
+                                                for: sessions.current,
+                                                template: template,
+                                                markDirty: false)
+                }
+            } else {
+                LOG("Session template not found; restored values only",
+                    ctx: ["templateName": snapshot.templateName ?? "?" ])
+            }
+
+            populateQuery()
+            updateSavedSnapshot(for: sessions.current)
+            isLoadingTicketSession = false
+        }
+
+        private func exportSavedFiles(from snapshot: SavedTicketSession, to directory: URL) throws {
+            guard !snapshot.savedFiles.isEmpty else { return }
+            let fm = FileManager.default
+            try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+            for file in snapshot.savedFiles {
+                let base = sanitizeFileName(file.name)
+                var target = directory.appendingPathComponent(base)
+                if target.pathExtension.lowercased() != "json" {
+                    target = target.appendingPathExtension("json")
+                }
+                try file.content.write(to: target, atomically: true, encoding: .utf8)
+            }
+        }
+
+        private func exportSessionImages(from snapshot: SavedTicketSession, to directory: URL) throws {
+            guard !snapshot.sessionImages.isEmpty else { return }
+            let fm = FileManager.default
+            try fm.createDirectory(at: directory, withIntermediateDirectories: true)
+            for image in snapshot.sessionImages {
+                let source = AppPaths.sessionImages.appendingPathComponent(image.fileName)
+                guard fm.fileExists(atPath: source.path) else {
+                    LOG("Share session missing image file", ctx: ["file": image.fileName])
+                    continue
+                }
+                let destination = directory.appendingPathComponent(image.fileName)
+                if fm.fileExists(atPath: destination.path) {
+                    try fm.removeItem(at: destination)
+                }
+                try fm.copyItem(at: source, to: destination)
+            }
+        }
+
+        private func exportTemplateAssets(_ template: TemplateItem, to baseDirectory: URL) throws {
+            let fm = FileManager.default
+            let folder = baseDirectory.appendingPathComponent("template", isDirectory: true)
+            try fm.createDirectory(at: folder, withIntermediateDirectories: true)
+
+            let sqlDestination = folder.appendingPathComponent(template.url.lastPathComponent)
+            if fm.fileExists(atPath: sqlDestination.path) {
+                try fm.removeItem(at: sqlDestination)
+            }
+            try fm.copyItem(at: template.url, to: sqlDestination)
+
+            let sidecars: [(URL, String)] = [
+                (template.url.templateLinksSidecarURL(), "links"),
+                (template.url.templateTablesSidecarURL(), "tables"),
+                (template.url.templateTagsSidecarURL(), "tags")
+            ]
+            for (source, kind) in sidecars {
+                guard fm.fileExists(atPath: source.path) else { continue }
+                let destination = folder.appendingPathComponent(source.lastPathComponent)
+                if fm.fileExists(atPath: destination.path) {
+                    try fm.removeItem(at: destination)
+                }
+                try fm.copyItem(at: source, to: destination)
+                LOG("Template sidecar bundled", ctx: ["file": source.lastPathComponent, "kind": kind])
+            }
+
+            let templateBase = template.url.deletingPathExtension().lastPathComponent
+            let guideSource = AppPaths.templateGuides.appendingPathComponent(templateBase, isDirectory: true)
+            guard fm.fileExists(atPath: guideSource.path) else { return }
+            let guideDestination = baseDirectory.appendingPathComponent("template-guide", isDirectory: true)
+            if fm.fileExists(atPath: guideDestination.path) {
+                try fm.removeItem(at: guideDestination)
+            }
+            try fm.copyItem(at: guideSource, to: guideDestination)
+            LOG("Template guide bundled", ctx: ["template": template.name])
+        }
+
+        private func writeShareManifest(_ manifest: SessionShareManifest, to url: URL) throws {
+            let encoder = JSONEncoder()
+            if #available(macOS 10.13, *) {
+                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            } else {
+                encoder.outputFormatting = [.prettyPrinted]
+            }
+            let data = try encoder.encode(manifest)
+            try data.write(to: url, options: .atomic)
+        }
+
+        private func zipFolder(at source: URL, to destination: URL) throws {
+            let fm = FileManager.default
+            if fm.fileExists(atPath: destination.path) {
+                try fm.removeItem(at: destination)
+            }
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = ["zip", "-r", destination.path, "."]
+            process.currentDirectoryURL = source
+            try process.run()
+            process.waitUntilExit()
+            if process.terminationStatus != 0 {
+                throw NSError(domain: "zip", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: "zip failed with status \(process.terminationStatus)"])
+            }
+        }
+
+        private func unzipArchive(_ archive: URL, to destination: URL) throws {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+            process.arguments = ["unzip", "-q", archive.path, "-d", destination.path]
+            try process.run()
+            process.waitUntilExit()
+            if process.terminationStatus != 0 {
+                throw NSError(domain: "unzip", code: Int(process.terminationStatus), userInfo: [NSLocalizedDescriptionKey: "unzip failed with status \(process.terminationStatus)"])
+            }
+        }
+
+        private func iso8601String(_ date: Date = Date()) -> String {
+            let formatter = ISO8601DateFormatter()
+            formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            return formatter.string(from: date)
+        }
+
+        private func rewriteLinksSidecar(from source: URL, to destination: URL, templateId: UUID) throws {
+            let decoder = JSONDecoder()
+            var model = try decoder.decode(TemplateLinks.self, from: Data(contentsOf: source))
+            model.templateId = templateId
+            model.updatedAt = iso8601String()
+            let encoder = JSONEncoder()
+            if #available(macOS 10.13, *) {
+                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            } else {
+                encoder.outputFormatting = [.prettyPrinted]
+            }
+            let data = try encoder.encode(model)
+            try data.write(to: destination, options: .atomic)
+        }
+
+        private func rewriteTablesSidecar(from source: URL, to destination: URL, templateId: UUID) throws {
+            let decoder = JSONDecoder()
+            var model = try decoder.decode(TemplateTables.self, from: Data(contentsOf: source))
+            model.templateId = templateId
+            model.updatedAt = iso8601String()
+            let encoder = JSONEncoder()
+            if #available(macOS 10.13, *) {
+                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            } else {
+                encoder.outputFormatting = [.prettyPrinted]
+            }
+            let data = try encoder.encode(model)
+            try data.write(to: destination, options: .atomic)
+        }
+
+        private func rewriteTagsSidecar(from source: URL, to destination: URL, templateId: UUID) throws {
+            let decoder = JSONDecoder()
+            var model = try decoder.decode(TemplateTags.self, from: Data(contentsOf: source))
+            model.templateId = templateId
+            model.updatedAt = iso8601String()
+            let encoder = JSONEncoder()
+            if #available(macOS 10.13, *) {
+                encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            } else {
+                encoder.outputFormatting = [.prettyPrinted]
+            }
+            let data = try encoder.encode(model)
+            try data.write(to: destination, options: .atomic)
+        }
+
+        private func rewriteGuideManifest(at url: URL, templateId: UUID) {
+            guard let data = try? Data(contentsOf: url),
+                  var object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
+            object["templateId"] = templateId.uuidString
+            object["updatedAt"] = iso8601String()
+            if let rewritten = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]) {
+                try? rewritten.write(to: url, options: .atomic)
+            }
+        }
+
+        private func rewriteGuideImagesManifest(at url: URL, templateId: UUID) {
+            guard let data = try? Data(contentsOf: url),
+                  var object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else { return }
+            object["templateId"] = templateId.uuidString
+            object["updatedAt"] = iso8601String()
+            if var images = object["images"] as? [[String: Any]] {
+                for idx in images.indices {
+                    images[idx]["id"] = UUID().uuidString
+                }
+                object["images"] = images
+            }
+            if let rewritten = try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys]) {
+                try? rewritten.write(to: url, options: .atomic)
+            }
+        }
+
+        private func importSessionImage(from source: URL,
+                                         original: SessionImage,
+                                         nextIndex: inout Int) throws -> SessionImage {
+            let fm = FileManager.default
+            try fm.createDirectory(at: AppPaths.sessionImages, withIntermediateDirectories: true)
+            let prefix = "Session\(sessions.current.rawValue)"
+            while true {
+                nextIndex += 1
+                let candidate = String(format: "%@_%03d.png", prefix, nextIndex)
+                let destination = AppPaths.sessionImages.appendingPathComponent(candidate)
+                if fm.fileExists(atPath: destination.path) {
+                    continue
+                }
+                try fm.copyItem(at: source, to: destination)
+                return SessionImage(
+                    fileName: candidate,
+                    originalPath: original.originalPath,
+                    savedAt: original.savedAt,
+                    customName: original.customName
+                )
+            }
+        }
+
         private func sanitizeFileName(_ name: String) -> String {
             let invalid = CharacterSet(charactersIn: "/\\?%*|\"<>:")
             return name.components(separatedBy: invalid).joined(separator: "_")
@@ -6416,58 +6825,10 @@ struct ContentView: View {
                 guard overwrite.runModal() == .alertFirstButtonReturn else { return false }
             }
             
-            // Snapshot current UI/session state
-            let staticData = sessionStaticFields[sessions.current] ?? (orgId, acctId, mysqlDb, companyLabel)
-            let sFields = SavedTicketSession.StaticFields(
-                orgId: staticData.orgId,
-                acctId: staticData.acctId,
-                mysqlDb: staticData.mysqlDb,
-                companyLabel: staticData.company
-            )
-            
-            var placeholders: [String:String] = [:]
-            if let t = selectedTemplate {
-                for ph in t.placeholders { placeholders[ph] = sessions.value(for: ph) }
-            }
-            
-            let dbSet: [String] = {
-                if let t = selectedTemplate { return dbTablesStore.workingSet(for: sessions.current, template: t) }
-                return []
-            }()
-            
-            let savedFiles = sessions.sessionSavedFiles[sessions.current] ?? []
+            let snapshot = buildSessionSnapshot(for: sessions.current, template: selectedTemplate)
 
-            let saved = SavedTicketSession(
-                version: 2,
-                sessionName: sessions.sessionNames[sessions.current] ?? "#\(sessions.current.rawValue)",
-                sessionLink: sessions.sessionLinks[sessions.current],
-                templateId: selectedTemplate.map { "\($0.id)" },
-                templateName: selectedTemplate?.name,
-                staticFields: sFields,
-                placeholders: placeholders,
-                dbTables: dbSet,
-                notes: sessions.sessionNotes[sessions.current] ?? "",
-                alternateFields: sessions.sessionAlternateFields[sessions.current]?
-                    .reduce(into: [String:String]()) { dict, field in
-                        dict[field.name] = field.value
-                    } ?? [:],
-                sessionImages: sessions.sessionImages[sessions.current] ?? [],
-                savedFiles: savedFiles.map { file in
-                    SavedTicketSession.SavedFile(
-                        id: file.id,
-                        name: file.name,
-                        content: file.content,
-                        createdAt: file.createdAt,
-                        updatedAt: file.updatedAt
-                    )
-                }
-            )
-            
             do {
-                let enc = JSONEncoder()
-                if #available(macOS 10.13, *) { enc.outputFormatting = [.prettyPrinted, .sortedKeys] } else { enc.outputFormatting = [.prettyPrinted] }
-                let data = try enc.encode(saved)
-                try data.write(to: url, options: .atomic)
+                try persistSnapshot(snapshot, to: url)
                 LOG("Ticket session saved", ctx: ["file": url.lastPathComponent])
                 updateSavedSnapshot(for: sessions.current)
                 return true
@@ -6476,6 +6837,304 @@ struct ContentView: View {
                 showAlert(title: "Save Failed", message: error.localizedDescription)
                 LOG("Ticket session save failed", ctx: ["error": error.localizedDescription])
                 return false
+            }
+        }
+
+        private func shareTicketSessionFlow() {
+            let snapshot = buildSessionSnapshot(for: sessions.current, template: selectedTemplate)
+
+            let templateCandidate: TemplateItem? = {
+                if let current = selectedTemplate {
+                    return current
+                }
+                if let templateId = snapshot.templateId,
+                   let match = templates.templates.first(where: { "\($0.id)" == templateId }) {
+                    return match
+                }
+                if let name = snapshot.templateName,
+                   let match = templates.templates.first(where: { $0.name == name }) {
+                    return match
+                }
+                return nil
+            }()
+
+            let sanitizedName = sanitizeFileName(snapshot.sessionName.isEmpty ? "Session-\(sessions.current.rawValue)" : snapshot.sessionName)
+
+            let panel = NSSavePanel()
+            panel.title = "Share Ticket Session"
+            panel.prompt = "Save"
+            panel.canCreateDirectories = true
+            panel.nameFieldStringValue = "SharedSession-\(sanitizedName.isEmpty ? "Ticket" : sanitizedName).zip"
+            panel.allowedContentTypes = [UTType.zip]
+            panel.directoryURL = AppPaths.sessions
+
+            guard panel.runModal() == .OK, let destination = panel.url else { return }
+
+            let fm = FileManager.default
+            let tempRoot = fm.temporaryDirectory.appendingPathComponent("SQLMaestroShare-\(UUID().uuidString)", isDirectory: true)
+
+            do {
+                try fm.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+                defer { try? fm.removeItem(at: tempRoot) }
+
+                try persistSnapshot(snapshot, to: tempRoot.appendingPathComponent("session.json"))
+
+                let manifest = SessionShareManifest(
+                    sessionName: snapshot.sessionName,
+                    templateIncluded: templateCandidate != nil,
+                    templateFileName: templateCandidate?.url.lastPathComponent,
+                    templateDisplayName: templateCandidate?.name,
+                    templateId: templateCandidate.map { "\($0.id)" }
+                )
+                try writeShareManifest(manifest, to: tempRoot.appendingPathComponent("metadata.json"))
+
+                try exportSavedFiles(from: snapshot, to: tempRoot.appendingPathComponent("saved-files", isDirectory: true))
+                try exportSessionImages(from: snapshot, to: tempRoot.appendingPathComponent("session-images", isDirectory: true))
+
+                if let templateCandidate {
+                    try exportTemplateAssets(templateCandidate, to: tempRoot)
+                }
+
+                try zipFolder(at: tempRoot, to: destination)
+                LOG("Ticket session share archive created", ctx: ["zip": destination.lastPathComponent])
+            } catch {
+                NSSound.beep()
+                showAlert(title: "Share Failed", message: error.localizedDescription)
+                LOG("Ticket session share failed", ctx: ["error": error.localizedDescription])
+            }
+        }
+
+        private func importTemplateAssets(from extractionRoot: URL,
+                                           manifest: SessionShareManifest) throws -> TemplateItem? {
+            guard manifest.templateIncluded else { return nil }
+
+            let fm = FileManager.default
+            let templateFolder = extractionRoot.appendingPathComponent("template", isDirectory: true)
+            guard fm.fileExists(atPath: templateFolder.path) else {
+                throw NSError(domain: "import", code: 20, userInfo: [NSLocalizedDescriptionKey: "Shared archive missing template folder"])
+            }
+
+            let sqlFiles = try fm.contentsOfDirectory(at: templateFolder,
+                                                      includingPropertiesForKeys: nil,
+                                                      options: [.skipsHiddenFiles])
+                .filter { $0.pathExtension.lowercased() == "sql" }
+            guard let sqlSource = sqlFiles.first else {
+                throw NSError(domain: "import", code: 21, userInfo: [NSLocalizedDescriptionKey: "Shared archive missing template SQL file"])
+            }
+
+            let providedName = manifest.templateDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let originalBase = sqlSource.deletingPathExtension().lastPathComponent
+            let baseName = (providedName?.isEmpty == false ? providedName! : originalBase)
+            var candidateBase = "(shared) \(baseName)".trimmingCharacters(in: .whitespacesAndNewlines)
+            if candidateBase.isEmpty {
+                candidateBase = "(shared) Template"
+            }
+
+            var finalBase = candidateBase
+            var destination = AppPaths.templates.appendingPathComponent("\(finalBase).sql")
+            var suffix = 2
+            while fm.fileExists(atPath: destination.path) {
+                finalBase = "\(candidateBase) \(suffix)"
+                destination = AppPaths.templates.appendingPathComponent("\(finalBase).sql")
+                suffix += 1
+            }
+
+            try fm.copyItem(at: sqlSource, to: destination)
+            let newTemplateId = TemplateIdentityStore.shared.id(for: destination)
+            LOG("Shared template SQL imported", ctx: ["file": destination.lastPathComponent])
+
+            let originalSidecarBase = originalBase
+            typealias SidecarTransform = (_ source: URL, _ destination: URL, _ templateId: UUID) throws -> Void
+            let sidecarPairs: [(source: URL, name: String, apply: SidecarTransform)] = [
+                (
+                    templateFolder.appendingPathComponent("\(originalSidecarBase).links.json"),
+                    "links",
+                    { source, destination, templateId in
+                        try self.rewriteLinksSidecar(from: source, to: destination, templateId: templateId)
+                    }
+                ),
+                (
+                    templateFolder.appendingPathComponent("\(originalSidecarBase).tables.json"),
+                    "tables",
+                    { source, destination, templateId in
+                        try self.rewriteTablesSidecar(from: source, to: destination, templateId: templateId)
+                    }
+                ),
+                (
+                    templateFolder.appendingPathComponent("\(originalSidecarBase).tags.json"),
+                    "tags",
+                    { source, destination, templateId in
+                        try self.rewriteTagsSidecar(from: source, to: destination, templateId: templateId)
+                    }
+                )
+            ]
+
+            for pair in sidecarPairs {
+                guard fm.fileExists(atPath: pair.source.path) else { continue }
+                let destinationURL = AppPaths.templates.appendingPathComponent(pair.source.lastPathComponent.replacingOccurrences(of: originalSidecarBase, with: finalBase))
+                if fm.fileExists(atPath: destinationURL.path) {
+                    try fm.removeItem(at: destinationURL)
+                }
+                try pair.apply(pair.source, destinationURL, newTemplateId)
+                LOG("Shared template sidecar imported", ctx: ["file": destinationURL.lastPathComponent, "kind": pair.name])
+            }
+
+            let guideSource = extractionRoot.appendingPathComponent("template-guide", isDirectory: true)
+            if fm.fileExists(atPath: guideSource.path) {
+                let guideDestination = AppPaths.templateGuides.appendingPathComponent(finalBase, isDirectory: true)
+                if fm.fileExists(atPath: guideDestination.path) {
+                    try fm.removeItem(at: guideDestination)
+                }
+                try fm.copyItem(at: guideSource, to: guideDestination)
+                rewriteGuideManifest(at: guideDestination.appendingPathComponent("guide.json"), templateId: newTemplateId)
+                rewriteGuideImagesManifest(at: guideDestination.appendingPathComponent("images.json"), templateId: newTemplateId)
+                LOG("Shared template guide imported", ctx: ["template": finalBase])
+            }
+
+            templates.loadTemplates()
+            guard let imported = templates.templates.first(where: { $0.url == destination }) else {
+                throw NSError(domain: "import", code: 22, userInfo: [NSLocalizedDescriptionKey: "Failed to register shared template"])
+            }
+
+            TemplateLinksStore.shared.loadSidecar(for: imported)
+            TemplateTagsStore.shared.ensureLoaded(imported)
+            TemplateGuideStore.shared.prepare(for: imported)
+
+            return imported
+        }
+
+        private func snapshotForImportedSession(original: SavedTicketSession,
+                                                 manifest: SessionShareManifest,
+                                                 extractionRoot: URL,
+                                                 importedTemplate: TemplateItem?) throws -> SavedTicketSession {
+            let fm = FileManager.default
+
+            let imagesFolder = extractionRoot.appendingPathComponent("session-images", isDirectory: true)
+            var nextImageIndex = sessions.sessionImages[sessions.current]?.count ?? 0
+            var remappedImages: [SessionImage] = []
+            if fm.fileExists(atPath: imagesFolder.path) {
+                for image in original.sessionImages {
+                    let source = imagesFolder.appendingPathComponent(image.fileName)
+                    guard fm.fileExists(atPath: source.path) else {
+                        LOG("Shared session missing referenced image", ctx: ["file": image.fileName])
+                        continue
+                    }
+                    let copied = try importSessionImage(from: source,
+                                                        original: image,
+                                                        nextIndex: &nextImageIndex)
+                    remappedImages.append(copied)
+                }
+            }
+
+            let remappedSavedFiles = original.savedFiles.map { file in
+                SavedTicketSession.SavedFile(
+                    id: UUID(),
+                    name: file.name,
+                    content: file.content,
+                    createdAt: file.createdAt,
+                    updatedAt: file.updatedAt
+                )
+            }
+
+            let nameCandidate = manifest.sessionName.trimmingCharacters(in: .whitespacesAndNewlines)
+            let sessionName = nameCandidate.isEmpty ? original.sessionName : nameCandidate
+
+            return SavedTicketSession(
+                version: max(original.version, 2),
+                sessionName: sessionName,
+                sessionLink: original.sessionLink,
+                templateId: importedTemplate.map { "\($0.id)" } ?? original.templateId,
+                templateName: importedTemplate?.name ?? original.templateName,
+                staticFields: original.staticFields,
+                placeholders: original.placeholders,
+                dbTables: original.dbTables,
+                notes: original.notes,
+                alternateFields: original.alternateFields,
+                sessionImages: remappedImages.isEmpty ? original.sessionImages : remappedImages,
+                savedFiles: remappedSavedFiles
+            )
+        }
+
+        private func importSharedSessionFlow() {
+            let panel = NSOpenPanel()
+            panel.title = "Import Shared Session"
+            panel.prompt = "Import"
+            panel.allowedContentTypes = [UTType.zip]
+            panel.canChooseDirectories = false
+            panel.canChooseFiles = true
+            panel.allowsMultipleSelection = false
+            panel.directoryURL = AppPaths.sessions
+
+            guard panel.runModal() == .OK, let archiveURL = panel.url else { return }
+
+            let fm = FileManager.default
+            let tempRoot = fm.temporaryDirectory.appendingPathComponent("SQLMaestroImport-\(UUID().uuidString)", isDirectory: true)
+
+            do {
+                try fm.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+                defer { try? fm.removeItem(at: tempRoot) }
+
+                try unzipArchive(archiveURL, to: tempRoot)
+
+                let metadataURL = tempRoot.appendingPathComponent("metadata.json")
+                let sessionURL = tempRoot.appendingPathComponent("session.json")
+                guard fm.fileExists(atPath: metadataURL.path), fm.fileExists(atPath: sessionURL.path) else {
+                    throw NSError(domain: "import", code: 30, userInfo: [NSLocalizedDescriptionKey: "Archive missing metadata.json or session.json"])
+                }
+
+                let decoder = JSONDecoder()
+                let manifest = try decoder.decode(SessionShareManifest.self, from: Data(contentsOf: metadataURL))
+                let originalSnapshot = try decoder.decode(SavedTicketSession.self, from: Data(contentsOf: sessionURL))
+
+                let importedTemplate = try importTemplateAssets(from: tempRoot, manifest: manifest)
+                let preparedSnapshot = try snapshotForImportedSession(original: originalSnapshot,
+                                                                      manifest: manifest,
+                                                                      extractionRoot: tempRoot,
+                                                                      importedTemplate: importedTemplate)
+
+                let rename = preparedSnapshot.sessionName.trimmingCharacters(in: .whitespacesAndNewlines)
+                applySessionSnapshot(preparedSnapshot,
+                                     inferredName: rename.isEmpty ? "Shared Session" : rename,
+                                     matchedTemplate: importedTemplate ?? selectedTemplate,
+                                     source: "importSharedSession")
+
+                var baseName = sanitizeFileName(preparedSnapshot.sessionName)
+                if baseName.isEmpty {
+                    baseName = "SharedSession"
+                }
+                var finalURL = AppPaths.sessions.appendingPathComponent(baseName, conformingTo: .json)
+                if finalURL.pathExtension.lowercased() != "json" {
+                    finalURL = finalURL.appendingPathExtension("json")
+                }
+                var suffix = 2
+                while fm.fileExists(atPath: finalURL.path) {
+                    var candidate = baseName
+                    if candidate.lowercased().hasSuffix(".json") {
+                        candidate = String(candidate.dropLast(5))
+                    }
+                    candidate = "\(candidate)-\(suffix)"
+                    finalURL = AppPaths.sessions.appendingPathComponent(candidate, conformingTo: .json)
+                    if finalURL.pathExtension.lowercased() != "json" {
+                        finalURL = finalURL.appendingPathExtension("json")
+                    }
+                    suffix += 1
+                }
+
+                try persistSnapshot(preparedSnapshot, to: finalURL)
+                updateSavedSnapshot(for: sessions.current)
+                LOG("Shared session imported", ctx: ["file": finalURL.lastPathComponent])
+
+                if let template = importedTemplate {
+                    showAlert(title: "Session Imported",
+                              message: "Loaded session ‘\(preparedSnapshot.sessionName)’ with template ‘\(template.name)’.\nSaved as \(finalURL.lastPathComponent)")
+                } else {
+                    showAlert(title: "Session Imported",
+                              message: "Loaded session ‘\(preparedSnapshot.sessionName)’.\nSaved as \(finalURL.lastPathComponent)")
+                }
+            } catch {
+                NSSound.beep()
+                showAlert(title: "Import Failed", message: error.localizedDescription)
+                LOG("Shared session import failed", ctx: ["error": error.localizedDescription])
             }
         }
         
@@ -6526,71 +7185,12 @@ struct ContentView: View {
             }
             draftDynamicValues[sessions.current] = [:]
 
-            // Try to resolve template
-            var matched: TemplateItem? = nil
-            if let tid = loaded.templateId {
-                matched = templates.templates.first(where: { "\($0.id)" == tid })
-            }
-            if matched == nil, let tname = loaded.templateName {
-                matched = templates.templates.first(where: { $0.name == tname })
-            }
-
-            // Rehydrate template usage
-            if let t = matched ?? selectedTemplate {
-                let hasValues = loaded.placeholders.values.contains { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
-                if hasValues {
-                    UsedTemplatesStore.shared.markTemplateUsed(session: sessions.current, templateId: t.id)
-                    UsedTemplatesStore.shared.setAllValues(
-                        loaded.placeholders,
-                        session: sessions.current,
-                        templateId: t.id
-                    )
-                    LOG("UsedTemplates rehydrated from loaded session",
-                        ctx: ["template": t.name, "count": "\(loaded.placeholders.count)"])
-                }
-            }
-
-            // Restore notes, alternates, images
-            // Set flag to prevent binding race conditions during load
-            isLoadingTicketSession = true
-            sessions.sessionNotes[sessions.current] = loaded.notes
-            setSessionNotesDraft(loaded.notes,
-                                 for: sessions.current,
+            let matched = templates.templates.first(where: { "\($0.id)" == loaded.templateId ?? "" })
+                ?? templates.templates.first(where: { $0.name == loaded.templateName ?? "" })
+            applySessionSnapshot(loaded,
+                                 inferredName: inferredName,
+                                 matchedTemplate: matched ?? selectedTemplate,
                                  source: "loadTicketSession")
-            sessions.sessionAlternateFields[sessions.current] =
-                loaded.alternateFields.map { AlternateField(name: $0.key, value: $0.value) }
-            sessions.sessionImages[sessions.current] = loaded.sessionImages
-            let restoredFiles = loaded.savedFiles.map { item in
-                SessionSavedFile(
-                    id: item.id,
-                    name: item.name,
-                    content: item.content,
-                    createdAt: item.createdAt ?? Date(),
-                    updatedAt: item.updatedAt ?? Date()
-                )
-            }
-            sessions.setSavedFiles(restoredFiles, for: sessions.current)
-            ensureSavedFileState(for: sessions.current)
-
-            // Restore template if matched
-            if let t = matched {
-                loadTemplate(t)
-                if !loaded.dbTables.isEmpty {
-                    dbTablesStore.setWorkingSet(loaded.dbTables,
-                                                for: sessions.current,
-                                                template: t,
-                                                markDirty: false)
-                }
-            } else {
-                LOG("Saved session template not found; restored values only", ctx: ["templateName": loaded.templateName ?? "?"])
-            }
-            
-            // Refresh populated SQL
-            populateQuery()
-            updateSavedSnapshot(for: sessions.current)
-
-            // Clear flag after load completes
-            isLoadingTicketSession = false
 
             LOG("Ticket session loaded", ctx: ["file": url.lastPathComponent])
         } catch {
