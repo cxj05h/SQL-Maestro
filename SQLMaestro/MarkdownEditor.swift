@@ -793,4 +793,18 @@ private final class MarkdownLayoutManager: NSLayoutManager {
             }
         }
 
+        override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
+            // Prevent undo/redo crashes when the stack is empty
+            let undoSelector = NSSelectorFromString("undo:")
+            let redoSelector = NSSelectorFromString("redo:")
+
+            if item.action == undoSelector {
+                return undoManager?.canUndo ?? false
+            }
+            if item.action == redoSelector {
+                return undoManager?.canRedo ?? false
+            }
+            return super.validateUserInterfaceItem(item)
+        }
+
     }

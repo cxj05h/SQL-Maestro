@@ -1126,6 +1126,8 @@ struct ContentView: View {
         var id: TemplateGuideImage.ID { image.id }
     }
     @State private var sessionNotesDrafts: [TicketSession: String] = [:]
+    @State private var isLoadingTicketSession = false
+    @State private var isSwitchingSession = false
     @StateObject private var sessionNotesEditor = MarkdownEditorController()
     @StateObject private var guideNotesEditor = MarkdownEditorController()
     @StateObject private var sessionNotesAutosave = SessionNotesAutosaveCoordinator()
@@ -1210,6 +1212,14 @@ struct ContentView: View {
             templatesPane
         } detail: {
             detailContent
+        }
+        .onAppear {
+            // Initialize session notes drafts from saved values on first load
+            for session in [TicketSession.one, .two, .three] {
+                if sessionNotesDrafts[session] == nil {
+                    sessionNotesDrafts[session] = sessions.sessionNotes[session] ?? ""
+                }
+            }
         }
     }
 
@@ -1391,6 +1401,11 @@ struct ContentView: View {
         let sessionDraftBinding = Binding<String>(
             get: { sessionNotesDrafts[targetSession] ?? "" },
             set: { newValue in
+                // Prevent updates when loading a ticket session
+                if isLoadingTicketSession { return }
+                // Prevent updates if this isn't the active session
+                if targetSession != sessions.current { return }
+                if sessionNotesDrafts[targetSession] == newValue { return }
                 setSessionNotesDraft(newValue,
                                      for: targetSession,
                                      source: "session.popout")
@@ -2444,7 +2459,9 @@ struct ContentView: View {
                 LOG("Draft committed", ctx: ["session": "\(cur.rawValue)", "ph": ph, "value": trimmed])
             }
 
-            if let liveNotes = sessionNotesEditor.currentText() {
+            // Only trust the editor if it's showing the current session
+            // This prevents empty drafts from being written during session switches
+            if let liveNotes = sessionNotesEditor.currentText(), !isLoadingTicketSession, !isSwitchingSession {
                 // Keep the in-memory draft in sync with what the editor currently shows.
                 if sessionNotesDrafts[cur] != liveNotes {
                     setSessionNotesDraft(liveNotes, for: cur, source: "commitDrafts")
@@ -5043,8 +5060,10 @@ struct ContentView: View {
                         guideNotesPane
                     case .sessionNotes:
                         sessionNotesPane(for: activeSession)
+                            .id("session-notes-\(activeSession.rawValue)")
                     case .savedFiles:
                         savedFilesPane(for: activeSession)
+                            .id("saved-files-\(activeSession.rawValue)")
                     }
                 }
                 .frame(width: proxy.size.width,
@@ -5146,6 +5165,10 @@ struct ContentView: View {
                     get: { sessionNotesDrafts[activeSession] ?? "" },
                     set: { newValue in
                         let session = activeSession
+                        // Prevent updates when loading a ticket session
+                        if isLoadingTicketSession { return }
+                        // Prevent updates if this isn't the active session
+                        if session != sessions.current { return }
                         if sessionNotesDrafts[session] == newValue { return }
                         LOG("Session notes binding set", ctx: [
                             "session": "\(session.rawValue)",
@@ -5209,8 +5232,14 @@ struct ContentView: View {
                 draft: Binding(
                     get: { sessionNotesDrafts[activeSession] ?? "" },
                     set: { newValue in
+                        let session = activeSession
+                        // Prevent updates when loading a ticket session
+                        if isLoadingTicketSession { return }
+                        // Prevent updates if this isn't the active session
+                        if session != sessions.current { return }
+                        if sessionNotesDrafts[session] == newValue { return }
                         setSessionNotesDraft(newValue,
-                                            for: activeSession,
+                                            for: session,
                                             source: "editor-inline")
                     }
                 ),
@@ -5831,15 +5860,25 @@ struct ContentView: View {
                 "fromNotesDirty": previousDraft == previousSaved ? "clean" : "dirty",
                 "sample": String(previousDraft.prefix(80)).replacingOccurrences(of: "\n", with: "⏎")
             ])
+
+            // Set flag BEFORE commitDrafts to prevent editor reads during transition
+            isSwitchingSession = true
+
             commitDraftsForCurrentSession()
 
             // Save current session's static fields
             sessionStaticFields[sessions.current] = (orgId, acctId, mysqlDb, companyLabel)
-            
+
             // Switch to new session
             sessions.setCurrent(newSession)
-            let incomingDraft = sessionNotesDrafts[newSession] ?? ""
+
+            // Initialize draft from saved value if draft doesn't exist
             let incomingSaved = sessions.sessionNotes[newSession] ?? ""
+            if sessionNotesDrafts[newSession] == nil {
+                sessionNotesDrafts[newSession] = incomingSaved
+            }
+            let incomingDraft = sessionNotesDrafts[newSession] ?? ""
+
             LOG("Session switch applied", ctx: [
                 "from": "\(previousSession.rawValue)",
                 "to": "\(newSession.rawValue)",
@@ -5882,6 +5921,13 @@ struct ContentView: View {
                 sessionNotesMode[newSession] = .savedFiles
             } else {
                 sessionNotesMode[newSession] = .notes
+            }
+
+            // Clear flag after SwiftUI updates complete
+            // Use asyncAfter to ensure views have fully rendered
+            // 250ms delay ensures view hierarchy is fully rebuilt
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
+                self.isSwitchingSession = false
             }
         }
 
@@ -6498,6 +6544,8 @@ struct ContentView: View {
             }
 
             // Restore notes, alternates, images
+            // Set flag to prevent binding race conditions during load
+            isLoadingTicketSession = true
             sessions.sessionNotes[sessions.current] = loaded.notes
             setSessionNotesDraft(loaded.notes,
                                  for: sessions.current,
@@ -6533,8 +6581,14 @@ struct ContentView: View {
             // Refresh populated SQL
             populateQuery()
             updateSavedSnapshot(for: sessions.current)
+
+            // Clear flag after load completes
+            isLoadingTicketSession = false
+
             LOG("Ticket session loaded", ctx: ["file": url.lastPathComponent])
         } catch {
+            // Clear flag even on error
+            isLoadingTicketSession = false
             NSSound.beep()
             showAlert(title: "Load Failed", message: error.localizedDescription)
             LOG("Ticket session load failed", ctx: ["error": error.localizedDescription])
