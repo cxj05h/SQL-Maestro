@@ -835,6 +835,7 @@ struct MarkdownPreviewView: View {
     private var previewMarkdown: some View {
         Markdown(text)
             .markdownTheme(previewTheme)
+            .markdownSoftBreakMode(.lineBreak)
             .markdownMargin(top: 0, bottom: 0)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 8)
