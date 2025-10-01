@@ -1562,21 +1562,31 @@ struct ContentView: View {
         .padding(.top, 4)
     }
 
+    private func truncateSessionName(_ name: String) -> String {
+        if name.count > 50 {
+            return String(name.prefix(47)) + "..."
+        }
+        return name
+    }
+
     private func mainDetailContent(topPadding: CGFloat) -> some View {
         VStack(spacing: 12) {
             VStack(spacing: 8) {
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Session")
-                            .font(.system(size: fontSize - 2))
-                            .foregroundStyle(.secondary)
-                        Text(sessions.sessionNames[sessions.current] ?? "#\(sessions.current.rawValue)")
-                            .font(.system(size: fontSize + 3, weight: .semibold))
-                            .foregroundStyle(Theme.purple)
+                ZStack {
+                    // Session name on the left
+                    HStack {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("Session")
+                                .font(.system(size: fontSize - 2))
+                                .foregroundStyle(.secondary)
+                            Text(truncateSessionName(sessions.sessionNames[sessions.current] ?? "#\(sessions.current.rawValue)"))
+                                .font(.system(size: fontSize + 3, weight: .semibold))
+                                .foregroundStyle(Theme.purple)
+                        }
+                        Spacer()
                     }
 
-                    Spacer()
-
+                    // Company centered absolutely
                     if !companyLabel.isEmpty {
                         VStack(alignment: .center, spacing: 4) {
                             Text("Company")
@@ -1586,15 +1596,10 @@ struct ContentView: View {
                                 .font(.system(size: fontSize + 3, weight: .medium))
                                 .foregroundStyle(Theme.accent)
                         }
-                    } else {
-                        VStack(alignment: .center) {
-                            Text(" ")
-                                .font(.system(size: fontSize - 2))
-                            Text(" ")
-                                .font(.system(size: fontSize + 3))
-                        }
                     }
+                }
 
+                HStack {
                     Spacer()
 
                     VStack(alignment: .trailing, spacing: 4) {
@@ -5000,7 +5005,7 @@ struct ContentView: View {
             let isActive = sessions.current == session
             return Button(action: { switchToSession(session) }) {
                 HStack {
-                    Text(sessions.sessionNames[session] ?? "Session #\(session.rawValue)")
+                    Text(truncateSessionName(sessions.sessionNames[session] ?? "Session #\(session.rawValue)"))
                         .font(.system(size: fontSize - 1, weight: isActive ? .semibold : .regular))
                     Spacer()
                     Text("⌃\(session.rawValue)")
@@ -5379,7 +5384,7 @@ struct ContentView: View {
                     Button(action: {
                         switchToSession(s)
                     }) {
-                        Text(sessions.sessionNames[s] ?? "#\(s.rawValue)")
+                        Text(truncateSessionName(sessions.sessionNames[s] ?? "#\(s.rawValue)"))
                             .font(.system(size: fontSize - 1, weight: sessions.current == s ? .semibold : .regular))
                             .frame(minWidth: 60)
                             .padding(.horizontal, 12)
