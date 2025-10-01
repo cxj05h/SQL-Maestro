@@ -807,4 +807,46 @@ private final class MarkdownLayoutManager: NSLayoutManager {
             return super.validateUserInterfaceItem(item)
         }
 
+        override func keyDown(with event: NSEvent) {
+            // Handle Option+Arrow keys for word/paragraph navigation
+            if event.modifierFlags.contains(.option) {
+                let shift = event.modifierFlags.contains(.shift)
+
+                switch Int(event.keyCode) {
+                case 123: // Left arrow
+                    if shift {
+                        moveWordBackwardAndModifySelection(nil)
+                    } else {
+                        moveWordBackward(nil)
+                    }
+                    return
+                case 124: // Right arrow
+                    if shift {
+                        moveWordForwardAndModifySelection(nil)
+                    } else {
+                        moveWordForward(nil)
+                    }
+                    return
+                case 125: // Down arrow
+                    if shift {
+                        moveToEndOfParagraphAndModifySelection(nil)
+                    } else {
+                        moveToEndOfParagraph(nil)
+                    }
+                    return
+                case 126: // Up arrow
+                    if shift {
+                        moveToBeginningOfParagraphAndModifySelection(nil)
+                    } else {
+                        moveToBeginningOfParagraph(nil)
+                    }
+                    return
+                default:
+                    break
+                }
+            }
+
+            super.keyDown(with: event)
+        }
+
     }
