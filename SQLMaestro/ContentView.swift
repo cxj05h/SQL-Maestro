@@ -9197,6 +9197,45 @@ struct ContentView: View {
                 var body: some View {
                     VStack(alignment: .leading, spacing: 8) {
                         HStack(alignment: .center, spacing: 8) {
+                            HStack(spacing: -8) {
+                                if let onPopOut {
+                                    Button {
+                                        onPopOut()
+                                    } label: {
+                                        Label("Pop Out", systemImage: "rectangle.expand.vertical")
+                                            .font(.system(size: (fontSize - 1) * 3, weight: .semibold))
+                                            .padding(.leading, 36)
+                                            .padding(.trailing, 20)
+                                            .padding(.vertical, 18)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.extraLarge)
+                                    .tint(Theme.accent)
+                                }
+
+                                if selectedID != nil {
+                                    Button {
+                                        if let id = selectedID {
+                                            onOpenTree(id)
+                                        }
+                                    } label: {
+                                        Label("Structure", systemImage: "point.3.connected.trianglepath.dotted")
+                                            .font(.system(size: fontSize - 1, weight: .semibold))
+                                    }
+                                    .buttonStyle(.borderedProminent)
+                                    .tint(Theme.accent)
+                                }
+                            }
+
+                            Button {
+                                onAdd()
+                            } label: {
+                                Label("Add", systemImage: "plus")
+                                    .font(.system(size: fontSize - 1, weight: .semibold))
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(Theme.purple)
+
                             ScrollViewReader { proxy in
                                 ScrollView(.horizontal, showsIndicators: false) {
                                     HStack(spacing: 8) {
@@ -9231,40 +9270,6 @@ struct ContentView: View {
                                 }
                             }
                             Spacer(minLength: 8)
-                            Button {
-                                onAdd()
-                            } label: {
-                                Label("Add", systemImage: "plus")
-                                    .font(.system(size: fontSize - 1, weight: .semibold))
-                            }
-                            .buttonStyle(.bordered)
-                            .tint(Theme.aqua)
-
-                            Button {
-                                if let id = selectedID {
-                                    onOpenTree(id)
-                                }
-                            } label: {
-                                Label("Structure", systemImage: "point.3.connected.trianglepath.dotted")
-                                    .font(.system(size: fontSize - 1, weight: .semibold))
-                            }
-                            .buttonStyle(.bordered)
-                            .tint(Theme.gold)
-                            .disabled(selectedID == nil)
-
-                            if let onPopOut {
-                                Button {
-                                    onPopOut()
-                                } label: {
-                                    Label("Pop Out", systemImage: "rectangle.expand.vertical")
-                                        .font(.system(size: (fontSize - 1) * 3, weight: .semibold))
-                                        .padding(.horizontal, 36)
-                                        .padding(.vertical, 18)
-                                }
-                                .buttonStyle(.bordered)
-                                .controlSize(.extraLarge)
-                                .tint(Theme.accent)
-                            }
                         }
                     }
                 }
