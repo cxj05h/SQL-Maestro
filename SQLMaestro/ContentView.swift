@@ -1231,6 +1231,17 @@ struct ContentView: View {
         }
         .background(Theme.grayBG)
         .frame(minWidth: 980, minHeight: 640)
+        .toolbar {
+            ToolbarItemGroup(placement: .automatic) {
+                Spacer()
+                Button(action: {
+                    toggleSidebar()
+                }) {
+                    Image(systemName: "sidebar.right")
+                }
+                .help("Toggle Sidebar (⌘T)")
+            }
+        }
         .overlay(alignment: .trailing) { commandSidebar }
         .overlay(alignment: .top) { toastOverlay }
         .onReceive(NotificationCenter.default.publisher(for: .fontBump)) { note in
