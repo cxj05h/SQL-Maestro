@@ -6407,6 +6407,13 @@ struct ContentView: View {
         }
 
         private struct SessionShareManifest: Codable {
+            struct TemplateDescriptor: Codable {
+                let order: Int
+                let originalId: String
+                let name: String
+                let folder: String
+            }
+
             let version: Int
             let exportedAt: Date
             let sessionName: String
@@ -6414,6 +6421,7 @@ struct ContentView: View {
             let templateFileName: String?
             let templateDisplayName: String?
             let templateId: String?
+            let templates: [TemplateDescriptor]
 
             init(version: Int = 1,
                  exportedAt: Date = Date(),
@@ -6421,7 +6429,8 @@ struct ContentView: View {
                  templateIncluded: Bool,
                  templateFileName: String?,
                  templateDisplayName: String?,
-                 templateId: String?) {
+                 templateId: String?,
+                 templates: [TemplateDescriptor]) {
                 self.version = version
                 self.exportedAt = exportedAt
                 self.sessionName = sessionName
@@ -6429,6 +6438,44 @@ struct ContentView: View {
                 self.templateFileName = templateFileName
                 self.templateDisplayName = templateDisplayName
                 self.templateId = templateId
+                self.templates = templates
+            }
+
+            private enum CodingKeys: String, CodingKey {
+                case version
+                case exportedAt
+                case sessionName
+                case templateIncluded
+                case templateFileName
+                case templateDisplayName
+                case templateId
+                case templates
+            }
+
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                self.version = try container.decodeIfPresent(Int.self, forKey: .version) ?? 1
+                self.exportedAt = try container.decodeIfPresent(Date.self, forKey: .exportedAt) ?? Date()
+                self.sessionName = try container.decodeIfPresent(String.self, forKey: .sessionName) ?? "Shared Session"
+                self.templateIncluded = try container.decodeIfPresent(Bool.self, forKey: .templateIncluded) ?? false
+                self.templateFileName = try container.decodeIfPresent(String.self, forKey: .templateFileName)
+                self.templateDisplayName = try container.decodeIfPresent(String.self, forKey: .templateDisplayName)
+                self.templateId = try container.decodeIfPresent(String.self, forKey: .templateId)
+                self.templates = try container.decodeIfPresent([TemplateDescriptor].self, forKey: .templates) ?? []
+            }
+
+            func encode(to encoder: Encoder) throws {
+                var container = encoder.container(keyedBy: CodingKeys.self)
+                try container.encode(version, forKey: .version)
+                try container.encode(exportedAt, forKey: .exportedAt)
+                try container.encode(sessionName, forKey: .sessionName)
+                try container.encode(templateIncluded, forKey: .templateIncluded)
+                try container.encodeIfPresent(templateFileName, forKey: .templateFileName)
+                try container.encodeIfPresent(templateDisplayName, forKey: .templateDisplayName)
+                try container.encodeIfPresent(templateId, forKey: .templateId)
+                if !templates.isEmpty {
+                    try container.encode(templates, forKey: .templates)
+                }
             }
         }
 
@@ -6614,41 +6661,110 @@ struct ContentView: View {
             }
         }
 
-        private func exportTemplateAssets(_ template: TemplateItem, to baseDirectory: URL) throws {
+        private func exportTemplateAssets(_ template: TemplateItem, to folder: URL) throws {
             let fm = FileManager.default
-            let folder = baseDirectory.appendingPathComponent("template", isDirectory: true)
             try fm.createDirectory(at: folder, withIntermediateDirectories: true)
 
-            let sqlDestination = folder.appendingPathComponent(template.url.lastPathComponent)
-            if fm.fileExists(atPath: sqlDestination.path) {
-                try fm.removeItem(at: sqlDestination)
+            TemplateGuideStore.shared.prepare(for: template)
+            _ = TemplateLinksStore.shared.saveSidecar(for: template)
+            _ = TemplateTagsStore.shared.saveSidecar(for: template)
+            if TemplateGuideStore.shared.isNotesDirty(for: template) {
+                _ = TemplateGuideStore.shared.saveNotes(for: template)
             }
-            try fm.copyItem(at: template.url, to: sqlDestination)
 
-            let sidecars: [(URL, String)] = [
-                (template.url.templateLinksSidecarURL(), "links"),
-                (template.url.templateTablesSidecarURL(), "tables"),
-                (template.url.templateTagsSidecarURL(), "tags")
+            let sqlDestination = folder.appendingPathComponent("template.sql")
+            try template.rawSQL.write(to: sqlDestination, atomically: true, encoding: .utf8)
+
+            let sidecarPairs: [(URL, String, String)] = [
+                (template.url.templateLinksSidecarURL(), "links", "links.json"),
+                (template.url.templateTablesSidecarURL(), "tables", "tables.json"),
+                (template.url.templateTagsSidecarURL(), "tags", "tags.json")
             ]
-            for (source, kind) in sidecars {
+            for (source, kind, targetName) in sidecarPairs {
                 guard fm.fileExists(atPath: source.path) else { continue }
-                let destination = folder.appendingPathComponent(source.lastPathComponent)
-                if fm.fileExists(atPath: destination.path) {
-                    try fm.removeItem(at: destination)
-                }
-                try fm.copyItem(at: source, to: destination)
-                LOG("Template sidecar bundled", ctx: ["file": source.lastPathComponent, "kind": kind])
+                let data = try Data(contentsOf: source)
+                try data.write(to: folder.appendingPathComponent(targetName), options: .atomic)
+                LOG("Template sidecar bundled", ctx: ["file": targetName, "kind": kind])
             }
 
             let templateBase = template.url.deletingPathExtension().lastPathComponent
             let guideSource = AppPaths.templateGuides.appendingPathComponent(templateBase, isDirectory: true)
-            guard fm.fileExists(atPath: guideSource.path) else { return }
-            let guideDestination = baseDirectory.appendingPathComponent("template-guide", isDirectory: true)
-            if fm.fileExists(atPath: guideDestination.path) {
-                try fm.removeItem(at: guideDestination)
+            if fm.fileExists(atPath: guideSource.path) {
+                let guideDestination = folder.appendingPathComponent("guide", isDirectory: true)
+                if fm.fileExists(atPath: guideDestination.path) {
+                    try fm.removeItem(at: guideDestination)
+                }
+                try fm.copyItem(at: guideSource, to: guideDestination)
+                LOG("Template guide bundled", ctx: ["template": template.name])
             }
-            try fm.copyItem(at: guideSource, to: guideDestination)
-            LOG("Template guide bundled", ctx: ["template": template.name])
+        }
+
+        private func templatesForSharing(snapshot: SavedTicketSession,
+                                          primaryTemplate: TemplateItem?) -> [TemplateItem] {
+            var ordered: [TemplateItem] = []
+            var seen: Set<UUID> = []
+
+            func append(_ template: TemplateItem) {
+                if seen.insert(template.id).inserted {
+                    ordered.append(template)
+                }
+            }
+
+            if let primaryTemplate {
+                append(primaryTemplate)
+            }
+
+            if let templateId = snapshot.templateId,
+               let uuid = UUID(uuidString: templateId),
+               let template = templates.templates.first(where: { $0.id == uuid }) {
+                append(template)
+            }
+
+            let records = UsedTemplatesStore.shared
+                .records(for: sessions.current)
+                .sorted(by: { $0.lastUpdated < $1.lastUpdated })
+
+            for record in records {
+                if let template = templates.templates.first(where: { $0.id == record.templateId }) {
+                    append(template)
+                }
+            }
+
+            if ordered.isEmpty,
+               let templateId = snapshot.templateId,
+               let uuid = UUID(uuidString: templateId),
+               let template = templates.templates.first(where: { $0.id == uuid }) {
+                append(template)
+            }
+
+            return ordered
+        }
+
+        private struct SharedGuideNotesModel: Codable {
+            var templateId: UUID?
+            var text: String
+            var updatedAt: String?
+        }
+
+        private struct SharedGuideImagesManifest: Codable {
+            var templateId: UUID?
+            var images: [TemplateGuideImage]
+            var updatedAt: String?
+        }
+
+        private struct SharedGuideImagePayload {
+            let url: URL
+            let meta: TemplateGuideImage
+        }
+
+        private struct SharedTemplatePayload {
+            let descriptor: SessionShareManifest.TemplateDescriptor
+            let sql: String
+            let guideNotes: String
+            let links: [TemplateLink]
+            let tags: [String]
+            let tables: [String]
+            let guideImages: [SharedGuideImagePayload]
         }
 
         private func writeShareManifest(_ manifest: SessionShareManifest, to url: URL) throws {
@@ -6879,21 +6995,39 @@ struct ContentView: View {
 
                 try persistSnapshot(snapshot, to: tempRoot.appendingPathComponent("session.json"))
 
+                let templatesToShare = templatesForSharing(snapshot: snapshot,
+                                                            primaryTemplate: templateCandidate)
+                var templateDescriptors: [SessionShareManifest.TemplateDescriptor] = []
+                if !templatesToShare.isEmpty {
+                    let templatesRoot = tempRoot.appendingPathComponent("templates", isDirectory: true)
+                    try fm.createDirectory(at: templatesRoot, withIntermediateDirectories: true)
+                    for (index, template) in templatesToShare.enumerated() {
+                        let folderName = String(format: "template_%03d", index + 1)
+                        let folderURL = templatesRoot.appendingPathComponent(folderName, isDirectory: true)
+                        try exportTemplateAssets(template, to: folderURL)
+                        templateDescriptors.append(
+                            SessionShareManifest.TemplateDescriptor(
+                                order: index,
+                                originalId: template.id.uuidString,
+                                name: template.name,
+                                folder: "templates/\(folderName)"
+                            )
+                        )
+                    }
+                }
+
                 let manifest = SessionShareManifest(
                     sessionName: snapshot.sessionName,
-                    templateIncluded: templateCandidate != nil,
+                    templateIncluded: !templatesToShare.isEmpty,
                     templateFileName: templateCandidate?.url.lastPathComponent,
                     templateDisplayName: templateCandidate?.name,
-                    templateId: templateCandidate.map { "\($0.id)" }
+                    templateId: templateCandidate.map { "\($0.id)" },
+                    templates: templateDescriptors
                 )
                 try writeShareManifest(manifest, to: tempRoot.appendingPathComponent("metadata.json"))
 
                 try exportSavedFiles(from: snapshot, to: tempRoot.appendingPathComponent("saved-files", isDirectory: true))
                 try exportSessionImages(from: snapshot, to: tempRoot.appendingPathComponent("session-images", isDirectory: true))
-
-                if let templateCandidate {
-                    try exportTemplateAssets(templateCandidate, to: tempRoot)
-                }
 
                 try zipFolder(at: tempRoot, to: destination)
                 LOG("Ticket session share archive created", ctx: ["zip": destination.lastPathComponent])
@@ -6905,6 +7039,221 @@ struct ContentView: View {
         }
 
         private func importTemplateAssets(from extractionRoot: URL,
+                                           manifest: SessionShareManifest) throws -> TemplateItem? {
+            if !manifest.templates.isEmpty {
+                let payloads = try loadSharedTemplatePayloads(from: manifest.templates,
+                                                              extractionRoot: extractionRoot)
+                return try importCombinedTemplates(from: payloads, manifest: manifest)
+            }
+
+            if manifest.templateIncluded {
+                return try importLegacyTemplate(from: extractionRoot, manifest: manifest)
+            }
+
+            return nil
+        }
+
+        private func loadSharedTemplatePayloads(from descriptors: [SessionShareManifest.TemplateDescriptor],
+                                                extractionRoot: URL) throws -> [SharedTemplatePayload] {
+            let sorted = descriptors.sorted { $0.order < $1.order }
+            var payloads: [SharedTemplatePayload] = []
+            for descriptor in sorted {
+                let folderURL = extractionRoot.appendingPathComponent(descriptor.folder, isDirectory: true)
+                guard FileManager.default.fileExists(atPath: folderURL.path) else {
+                    throw NSError(domain: "import", code: 40, userInfo: [NSLocalizedDescriptionKey: "Shared archive missing folder for template ‘\(descriptor.name)’"])
+                }
+                payloads.append(try loadSharedTemplatePayload(from: folderURL, descriptor: descriptor))
+            }
+            return payloads
+        }
+
+        private func loadSharedTemplatePayload(from folder: URL,
+                                               descriptor: SessionShareManifest.TemplateDescriptor) throws -> SharedTemplatePayload {
+            let fm = FileManager.default
+            let sqlURL = folder.appendingPathComponent("template.sql")
+            guard fm.fileExists(atPath: sqlURL.path) else {
+                throw NSError(domain: "import", code: 41, userInfo: [NSLocalizedDescriptionKey: "Shared archive missing SQL for template ‘\(descriptor.name)’"])
+            }
+            let sql = try String(contentsOf: sqlURL, encoding: .utf8)
+
+            let guideFolder = folder.appendingPathComponent("guide", isDirectory: true)
+            let guideNotesURL = guideFolder.appendingPathComponent("guide.json")
+            var guideNotes = ""
+            if fm.fileExists(atPath: guideNotesURL.path) {
+                let data = try Data(contentsOf: guideNotesURL)
+                if let model = try? JSONDecoder().decode(SharedGuideNotesModel.self, from: data) {
+                    guideNotes = model.text
+                }
+            }
+
+            var links: [TemplateLink] = []
+            let linksURL = folder.appendingPathComponent("links.json")
+            if fm.fileExists(atPath: linksURL.path) {
+                let data = try Data(contentsOf: linksURL)
+                if let payload = try? JSONDecoder().decode(TemplateLinks.self, from: data) {
+                    links = payload.links
+                }
+            }
+
+            var tags: [String] = []
+            let tagsURL = folder.appendingPathComponent("tags.json")
+            if fm.fileExists(atPath: tagsURL.path) {
+                let data = try Data(contentsOf: tagsURL)
+                if let payload = try? JSONDecoder().decode(TemplateTags.self, from: data) {
+                    tags = payload.tags
+                }
+            }
+
+            var tables: [String] = []
+            let tablesURL = folder.appendingPathComponent("tables.json")
+            if fm.fileExists(atPath: tablesURL.path) {
+                let data = try Data(contentsOf: tablesURL)
+                if let payload = try? JSONDecoder().decode(TemplateTables.self, from: data) {
+                    tables = payload.tables
+                }
+            }
+
+            var guideImages: [SharedGuideImagePayload] = []
+            let guideImagesURL = guideFolder.appendingPathComponent("images.json")
+            if fm.fileExists(atPath: guideImagesURL.path) {
+                let data = try Data(contentsOf: guideImagesURL)
+                if let manifest = try? JSONDecoder().decode(SharedGuideImagesManifest.self, from: data) {
+                    for image in manifest.images {
+                        let source = guideFolder.appendingPathComponent("images", isDirectory: true).appendingPathComponent(image.fileName)
+                        if fm.fileExists(atPath: source.path) {
+                            guideImages.append(SharedGuideImagePayload(url: source, meta: image))
+                        }
+                    }
+                }
+            }
+
+            return SharedTemplatePayload(
+                descriptor: descriptor,
+                sql: sql,
+                guideNotes: guideNotes,
+                links: links,
+                tags: tags,
+                tables: tables,
+                guideImages: guideImages
+            )
+        }
+
+        private func importCombinedTemplates(from payloads: [SharedTemplatePayload],
+                                              manifest: SessionShareManifest) throws -> TemplateItem? {
+            let fm = FileManager.default
+            let sessionComponent = sanitizeFileName(manifest.sessionName.trimmingCharacters(in: .whitespacesAndNewlines))
+            let preferredName = !sessionComponent.isEmpty
+                ? sessionComponent
+                : (manifest.templateDisplayName?.trimmingCharacters(in: .whitespacesAndNewlines)
+                    ?? payloads.first?.descriptor.name
+                    ?? "Template")
+            var candidateBase = "(shared) \(preferredName)".trimmingCharacters(in: .whitespacesAndNewlines)
+            if candidateBase.isEmpty {
+                candidateBase = "(shared) Template"
+            }
+
+            var finalBase = candidateBase
+            var destination = AppPaths.templates.appendingPathComponent("\(finalBase).sql")
+            var suffix = 2
+            while fm.fileExists(atPath: destination.path) {
+                finalBase = "\(candidateBase) \(suffix)"
+                destination = AppPaths.templates.appendingPathComponent("\(finalBase).sql")
+                suffix += 1
+            }
+
+            let combinedSQL = payloads.map { payload -> String in
+                let name = payload.descriptor.name.isEmpty ? "Unnamed Template" : payload.descriptor.name
+                let header = "-- ---\n-- Template: \(name)\n-- ---\n\n"
+                let body = payload.sql.trimmingCharacters(in: .whitespacesAndNewlines)
+                return header + body + "\n"
+            }.joined(separator: "\n")
+
+            try combinedSQL.write(to: destination, atomically: true, encoding: .utf8)
+            let newTemplateId = TemplateIdentityStore.shared.id(for: destination)
+            LOG("Shared combined template created", ctx: ["file": destination.lastPathComponent, "fragments": "\(payloads.count)"])
+
+            templates.loadTemplates()
+            guard let imported = templates.templates.first(where: { $0.url == destination }) else {
+                throw NSError(domain: "import", code: 52, userInfo: [NSLocalizedDescriptionKey: "Failed to register combined shared template"])
+            }
+
+            // Links
+            var combinedLinks: [TemplateLink] = []
+            var seenLinkKeys: Set<String> = []
+            for payload in payloads {
+                let name = payload.descriptor.name.isEmpty ? "Unnamed Template" : payload.descriptor.name
+                for link in payload.links {
+                    let title = name.isEmpty ? link.title : "[\(name)] \(link.title)"
+                    let key = "\(title)::\(link.url)"
+                    if seenLinkKeys.insert(key).inserted {
+                        combinedLinks.append(TemplateLink(title: title, url: link.url))
+                    }
+                }
+            }
+            if !combinedLinks.isEmpty {
+                TemplateLinksStore.shared.setLinks(combinedLinks, for: imported)
+                _ = TemplateLinksStore.shared.saveSidecar(for: imported)
+            }
+
+            // Tags
+            let combinedTags = Array(Set(payloads.flatMap { $0.tags })).sorted()
+            if !combinedTags.isEmpty {
+                TemplateTagsStore.shared.setTags(combinedTags, for: imported)
+                _ = TemplateTagsStore.shared.saveSidecar(for: imported)
+            }
+
+            // Tables
+            let combinedTables = Array(Set(payloads.flatMap { $0.tables })).sorted()
+            if !combinedTables.isEmpty {
+                let model = TemplateTables(templateId: newTemplateId, tables: combinedTables, updatedAt: Date())
+                let encoder = JSONEncoder()
+                if #available(macOS 10.13, *) {
+                    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+                } else {
+                    encoder.outputFormatting = [.prettyPrinted]
+                }
+                let data = try encoder.encode(model)
+                try data.write(to: imported.url.templateTablesSidecarURL(), options: .atomic)
+                LOG("Combined template tables saved", ctx: ["template": imported.name, "count": "\(combinedTables.count)"])
+            }
+
+            // Guide notes and images
+            TemplateGuideStore.shared.prepare(for: imported)
+            let combinedNotes = buildCombinedGuideNotes(from: payloads)
+            TemplateGuideStore.shared.setNotes(combinedNotes, for: imported)
+            _ = TemplateGuideStore.shared.saveNotes(for: imported)
+
+            for payload in payloads {
+                for image in payload.guideImages {
+                    if let data = try? Data(contentsOf: image.url) {
+                        _ = TemplateGuideStore.shared.addImage(data: data,
+                                                               suggestedName: image.meta.customName,
+                                                               for: imported)
+                    }
+                }
+            }
+
+            return imported
+        }
+
+        private func buildCombinedGuideNotes(from payloads: [SharedTemplatePayload]) -> String {
+            var sections: [String] = []
+            for (index, payload) in payloads.enumerated() {
+                let name = payload.descriptor.name.isEmpty ? "Unnamed Template" : payload.descriptor.name
+                let trimmed = payload.guideNotes.trimmingCharacters(in: .whitespacesAndNewlines)
+                let content = trimmed.isEmpty ? "_No guide notes provided._" : trimmed
+                let heading = "# Guide notes from \(name)"
+                if index == 0 {
+                    sections.append("\(heading)\n\n\(content)")
+                } else {
+                    let separator = "---\n\(name) - Guide Notes\n---"
+                    sections.append("\(separator)\n\n\(heading)\n\n\(content)")
+                }
+            }
+            return sections.joined(separator: "\n\n")
+        }
+
+        private func importLegacyTemplate(from extractionRoot: URL,
                                            manifest: SessionShareManifest) throws -> TemplateItem? {
             guard manifest.templateIncluded else { return nil }
 
@@ -7124,9 +7473,15 @@ struct ContentView: View {
                 updateSavedSnapshot(for: sessions.current)
                 LOG("Shared session imported", ctx: ["file": finalURL.lastPathComponent])
 
+                let templateCount = !manifest.templates.isEmpty ? manifest.templates.count : (importedTemplate == nil ? 0 : 1)
                 if let template = importedTemplate {
-                    showAlert(title: "Session Imported",
-                              message: "Loaded session ‘\(preparedSnapshot.sessionName)’ with template ‘\(template.name)’.\nSaved as \(finalURL.lastPathComponent)")
+                    if templateCount > 1 {
+                        showAlert(title: "Session Imported",
+                                  message: "Loaded session ‘\(preparedSnapshot.sessionName)’ with \(templateCount) shared templates merged into ‘\(template.name)’.\nSaved as \(finalURL.lastPathComponent)")
+                    } else {
+                        showAlert(title: "Session Imported",
+                                  message: "Loaded session ‘\(preparedSnapshot.sessionName)’ with template ‘\(template.name)’.\nSaved as \(finalURL.lastPathComponent)")
+                    }
                 } else {
                     showAlert(title: "Session Imported",
                               message: "Loaded session ‘\(preparedSnapshot.sessionName)’.\nSaved as \(finalURL.lastPathComponent)")
