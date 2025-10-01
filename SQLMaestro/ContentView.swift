@@ -4340,6 +4340,7 @@ struct ContentView: View {
                             LazyVStack(alignment: .leading, spacing: 6) {
                                 ForEach(guideImages) { image in
                                     TemplateGuideImageRow(
+                                        template: template,
                                         image: image,
                                         fontSize: fontSize,
                                         onOpen: { openGuideImage(image) },
@@ -8091,23 +8092,23 @@ struct ContentView: View {
                             }
                     )
                     .help("⌘-click to preview")
-                    
+
                     Spacer()
-                    
+
                     HStack(spacing: 4) {
                         Button("Open") {
                             openSessionImage(image)
                         }
                         .buttonStyle(.bordered)
                         .font(.system(size: fontSize - 3))
-                        
+
                         Button("Rename") {
                             onRename(image)
                         }
                         .buttonStyle(.bordered)
                         .tint(Theme.aqua)
                         .font(.system(size: fontSize - 3))
-                        
+
                         Button("Delete") {
                             onDelete(image)
                         }
@@ -8122,6 +8123,31 @@ struct ContentView: View {
                     RoundedRectangle(cornerRadius: 6)
                         .fill(Color.secondary.opacity(0.1))
                 )
+                .contextMenu {
+                    Button("Show in Finder") {
+                        showInFinder(image)
+                    }
+                    Button("Open") {
+                        openSessionImage(image)
+                    }
+                    Divider()
+                    Button("Rename") {
+                        onRename(image)
+                    }
+                    Button("Delete", role: .destructive) {
+                        onDelete(image)
+                    }
+                }
+            }
+
+            private func showInFinder(_ image: SessionImage) {
+                let imageURL = AppPaths.sessionImages.appendingPathComponent(image.fileName)
+                if FileManager.default.fileExists(atPath: imageURL.path) {
+                    NSWorkspace.shared.activateFileViewerSelecting([imageURL])
+                    LOG("Showed session image in Finder", ctx: ["fileName": image.fileName])
+                } else {
+                    LOG("Session image file not found", ctx: ["fileName": image.fileName])
+                }
             }
             
             private func formatDate(_ date: Date) -> String {
@@ -8143,6 +8169,7 @@ struct ContentView: View {
         }
 
         struct TemplateGuideImageRow: View {
+            let template: TemplateItem
             let image: TemplateGuideImage
             let fontSize: CGFloat
             let onOpen: () -> Void
@@ -8198,6 +8225,31 @@ struct ContentView: View {
                     RoundedRectangle(cornerRadius: 6)
                         .fill(Color.secondary.opacity(0.1))
                 )
+                .contextMenu {
+                    Button("Show in Finder") {
+                        showInFinder()
+                    }
+                    Button("Open") {
+                        onOpen()
+                    }
+                    Divider()
+                    Button("Rename") {
+                        onRename()
+                    }
+                    Button("Delete", role: .destructive) {
+                        onDelete()
+                    }
+                }
+            }
+
+            private func showInFinder() {
+                let imageURL = TemplateGuideStore.shared.imageURL(for: image, template: template)
+                if FileManager.default.fileExists(atPath: imageURL.path) {
+                    NSWorkspace.shared.activateFileViewerSelecting([imageURL])
+                    LOG("Showed guide image in Finder", ctx: ["fileName": image.fileName])
+                } else {
+                    LOG("Guide image file not found", ctx: ["fileName": image.fileName])
+                }
             }
 
             private func formatDate(_ date: Date) -> String {
