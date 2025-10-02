@@ -5564,7 +5564,13 @@ struct ContentView: View {
             values.append(mysqlDb)
             var blockLines: [String] = []
             let sessionName = sessions.sessionNames[sessions.current] ?? "Session #\(sessions.current.rawValue)"
-            blockLines.append(sessionName)
+            let formattedSessionName: String
+            if sessionName.isEmpty {
+                formattedSessionName = sessionName
+            } else {
+                formattedSessionName = "**\(sessionName)**"
+            }
+            blockLines.append(formattedSessionName)
             blockLines.append("Org-ID: \(orgId)")
             blockLines.append("Acct-ID: \(acctId)")
             blockLines.append("mysqlDb: \(mysqlDb)")
@@ -5580,7 +5586,15 @@ struct ContentView: View {
             if let alternates = sessions.sessionAlternateFields[sessions.current] {
                 for alt in alternates {
                     values.append(alt.value)
-                    blockLines.append("\(alt.name): \(alt.value)")
+                    let formattedName: String
+                    if let separatorRange = alt.name.range(of: " • ") {
+                        let templateName = alt.name[..<separatorRange.lowerBound]
+                        let fieldName = alt.name[separatorRange.upperBound...]
+                        formattedName = "*\(templateName)* • \(fieldName)"
+                    } else {
+                        formattedName = alt.name
+                    }
+                    blockLines.append("\(formattedName): \(alt.value)")
                 }
             }
             let pb = NSPasteboard.general
