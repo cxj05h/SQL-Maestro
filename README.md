@@ -251,6 +251,84 @@ These are fields that remain available per ticket session that hold important va
 
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-17.27.23.png)
 
+## Sidebar Toggle
+
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/Sidebar.png)
+
+The sidebar provides quick access to three main panels containing project and session information:
+
+  **Panels**
+
+  - Guide Notes - Project documentation and guides
+  - Session Notes - Notes for the current ticket session
+  - Saved Files - Saved query templates and session files
+  - Ticket Session 1
+  - Ticket Session 2
+  - Ticket Session 3
+
+  Each panel can be accessed via the Sidebar or KB shortcuts:
+
+   Keyboard Shortcuts
+    - Cmd+1 - Toggle Guide Notes
+    - Cmd+2 - Toggle Session Notes
+    - Cmd+3 - Toggle Saved Files
+    - Ctrl+1 - Go to ticket session 1
+    - Ctrl+2 - Go to ticket session 2
+    - Ctrl+3 - Go to ticket session 3
+
+  Panel Features
+
+  - Panels open inline by default in the main window
+  - Each panel can be popped out into a separate window 
+  - Panels include a markdown toolbar for formatting
+
+  ---
+  
+  ### **Share & Import Sessions**
+
+  The share and import feature allows you to save and transfer complete session states, including query templates, dynamic field values, and copy block values.
+
+  **Sharing a Session**
+
+  1. Click the Share button in the title bar
+  2. A JSON file is generated containing:
+    - Active query template(s)
+    - All dynamic field values
+    - Copy block values
+    - Session notes
+    - Company and session metadata
+  3. If multiple Query Templates are used in a session, their Guide Notes will stack with clear separation.
+  4. The imported session will appear as a complete stack under one newly imported Query Template marked with "(shared)" prepended to the Query Template name. **Sharing Query Templates specifically should be done via individual file sharing.** 
+  5. Save the file to share with others or for backup purposes
+
+  **Importing a Session**
+
+  1. Click the Import button in the title bar
+  2. Select a previously saved session JSON file
+  3. The session is restored with all its data
+
+  **Multiple Query Templates**
+
+  When a session contains multiple query templates:
+  - All templates are preserved in the exported JSON
+  - On import, all templates are restored to their respective ticket sessions
+  - Template relationships and order are maintained
+
+  **Copy Block Values**
+
+  Copy block values are handled as follows:
+  - On Export: All copy block values (CBV) from the session are included in the JSON
+  - On Import: Copy block values are restored to the Alternate Fields Pane (AFP)
+  - Locked values remain locked
+  - All CBV maintain their associations with their respective dynamic fields
+
+  Use Cases
+
+  - Collaboration: Share complex tickets with team members
+  - Templates: Create reusable session configurations
+  - Backup: Save work in progress for later restoration
+  - Documentation: Archive example sessions with real field values
+
 ## **Ticket Session**
 
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/CleanShot-2025-09-19-at-17.49.44.png)
@@ -371,10 +449,15 @@ There are a few helpful KB shortcuts that work in the main screen of the app.
 | Cmd + Enter | Populates the values in Dynamic and Static Fields into the Query Template in focus/ Saves Dynamic Field values into field "recents"                                                                                                           |
 | Cmd + Left-Click | Click on an image in the "Session & Template" pane--either Ses. Images or Guide Images, or click the hyperlink in Guide Notes or in Session Notes where the image resides in those notes to view the image in "preview" mode |
 | Cmd + F     | Jumps to "Search Queries" text field                                                                                                                                                          |
-| Cmd + E     | Toggle Ticket Session "Edit" or "Preview" mode  / Toggle locked panes                                                                                                                                              |
-| Cmd + 1     | Jump to Ticket Session 1                                                                                                                                                                      |
-| Cmd + 2     | Jump to Ticket Session 2                                                                                                                                                                      |
-| Cmd + 3     | Jump to Ticket Session 3                                                                                                                                                                      |
+| Cmd + T     | Toggle Sidebar                                                                                                                                                                                |
+| Cmd + E     | Toggle Ticket Session "Edit" or "Preview" mode  / Toggle locked panes                                                                                                                         |
+| Cmd + K     | Insert link into note                                                                                                                                                                         |
+| Ctrl + 1     | Jump to Ticket Session 1                                                                                                                                                                      |
+| Ctrl + 2     | Jump to Ticket Session 2                                                                                                                                                                      |
+| Ctrl + 3     | Jump to Ticket Session 3                                                                                                                                                                      |
+| Cmd + 1     | Jump to Guide Notes                                                                                                                                                                    |
+| Cmd + 2     | Jump to Session Notes                                                                                                                                                                    |
+| Cmd + 3     | Jump to Saved JSON Files                                                                                                                                                                   |
 | Cmd + R     | Reload Queries (used to manually reload the Query Templates if changes were made; however, this action is done automatically after saving a query template if done from the in-app editor)    |
 | Cmd + L     | Load Ticket Session                                                                                                                                                                           |
 | Cmd + S     | Save Ticket Session                                                                                                                                                                           |
@@ -407,7 +490,7 @@ The intention here was to provide relevant links for troubleshooting a particula
 **Note!!**:
 - Links will ONLY be saved if you hit the 'Save Links' button in the first image.  
 
-## **Session Notes**
+## **Session Notes and Images**
 
 Freeform notes that are specific to a ticket session.
 
@@ -421,7 +504,7 @@ Deleting the image from the "Session and Template" pane will remove it from the 
 
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/gif-for-images.gif)
 
-## **Troubleshooting Guide and Images**
+## **Troubleshooting Guide Notes and Images**
 
 Troubleshooting Guide notes act similarly to "Session Notes" with the difference being they are specific to a Query Template.
 
@@ -458,6 +541,20 @@ and open them whenever you need.
 - Once renamed, the new label is reflected everywhere the image appears, including existing Markdown links.
 
 These tools make it easy to capture, organize, and reuse visual notes while keeping your session and guide documentation in sync.
+
+
+## Saved JSON Files
+
+- This pane is used to hold relevant JSON files per ticket session
+- You can add multiple files per ticket session
+- Search the JSON with the "find" field
+- View JSON in "structure" flow form and search for keywords
+
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/SavedFilesPane.png)
+
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/jsonstructure.png)
+
+
 
 ## **Database Connections**
 
