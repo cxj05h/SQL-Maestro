@@ -1,0 +1,444 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		3CE5C49E2E8E9BEE007A7FEB /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = 3CE5C49D2E8E9BEE007A7FEB /* MarkdownUI */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		3CE5BBF82E8E94A5007A7FEB /* SQLMaestro.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = SQLMaestro.app; sourceTree = BUILT_PRODUCTS_DIR; };
+/* End PBXFileReference section */
+
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		3CE5C49B2E8E99C9007A7FEB /* Exceptions for "SQLMaestro" folder in "SQLMaestro" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-12.40.28.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-12.41.42.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-12.45.57-1.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-12.49.27.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-12.56.30-1.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-12.58.20.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.00.07.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.03.52-1.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.05.17.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.07.33.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.08.02.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.12.00.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.12.18.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.13.52.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.14.14.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.15.27.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.16.11.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.18.08.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.24.14.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.26.18.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.26.37.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.28.19.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.28.48.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.29.42.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.33.17.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.34.55.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.38.46.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.41.55.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.44.15-1.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.46.14.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.48.21.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.49.27.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.50.22.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.50.33.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-13.50.48.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-14.06.44.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-14.08.25.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-14.09.57.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-14.11.50.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-14.12.33.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-14.13.02.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-14.22.31.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-14.22.55.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-17.26.57.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-17.27.04.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-17.27.16.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-17.27.23.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-17.40.39.png",
+				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-17.49.44.png",
+				"images/Maestro-Screenshots/gif-for-images.gif",
+				"images/Maestro-Screenshots/Guide-Image-Rename.png",
+				"images/Maestro-Screenshots/jsonstructure.png",
+				"images/Maestro-Screenshots/Quick-capture1.png",
+				"images/Maestro-Screenshots/Quick-capture2.png",
+				"images/Maestro-Screenshots/QuickCapture-enter-value.png",
+				"images/Maestro-Screenshots/quickcapture-value-entered.png",
+				"images/Maestro-Screenshots/SavedFilesPane.png",
+				"images/Maestro-Screenshots/Session-Images-Rename.png",
+				"images/Maestro-Screenshots/sessiontemplateimageguide1.png",
+				"images/Maestro-Screenshots/sessiontemplateimageguide2.png",
+				"images/Maestro-Screenshots/Sidebar.png",
+				"images/Maestro-Screenshots/Tagging-Add-Tag.png",
+				"images/Maestro-Screenshots/Tagging-Add-Tags-UI.png",
+				"images/Maestro-Screenshots/Tagging-Enter-QT.png",
+				"images/Maestro-Screenshots/Tagging-Search.png",
+				"images/Maestro-Screenshots/Tagging-Template-Main.png",
+			);
+			target = 3CE5BBF72E8E94A5007A7FEB /* SQLMaestro */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
+/* Begin PBXFileSystemSynchronizedRootGroup section */
+		3C3149C22E744E3F00762156 /* SQLMaestro */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				3CE5C49B2E8E99C9007A7FEB /* Exceptions for "SQLMaestro" folder in "SQLMaestro" target */,
+			);
+			path = SQLMaestro;
+			sourceTree = "<group>";
+		};
+/* End PBXFileSystemSynchronizedRootGroup section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		3CE5BBF52E8E94A5007A7FEB /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				3CE5C49E2E8E9BEE007A7FEB /* MarkdownUI in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		3C3149B72E744E3F00762156 = {
+			isa = PBXGroup;
+			children = (
+				3C3149C22E744E3F00762156 /* SQLMaestro */,
+				3CE5C49C2E8E9BEE007A7FEB /* Frameworks */,
+				3C3149C12E744E3F00762156 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		3C3149C12E744E3F00762156 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				3CE5BBF82E8E94A5007A7FEB /* SQLMaestro.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		3CE5C49C2E8E9BEE007A7FEB /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		3CE5BBF72E8E94A5007A7FEB /* SQLMaestro */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 3CE5BC1C2E8E94A8007A7FEB /* Build configuration list for PBXNativeTarget "SQLMaestro" */;
+			buildPhases = (
+				3CE5BBF42E8E94A5007A7FEB /* Sources */,
+				3CE5BBF52E8E94A5007A7FEB /* Frameworks */,
+				3CE5BBF62E8E94A5007A7FEB /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				3C3149C22E744E3F00762156 /* SQLMaestro */,
+			);
+			name = SQLMaestro;
+			packageProductDependencies = (
+				3CE5C49D2E8E9BEE007A7FEB /* MarkdownUI */,
+			);
+			productName = SQLMaestro;
+			productReference = 3CE5BBF82E8E94A5007A7FEB /* SQLMaestro.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		3C3149B82E744E3F00762156 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 1640;
+				LastUpgradeCheck = 1640;
+				TargetAttributes = {
+					3CE5BBF72E8E94A5007A7FEB = {
+						CreatedOnToolsVersion = 16.4;
+					};
+				};
+			};
+			buildConfigurationList = 3C3149BB2E744E3F00762156 /* Build configuration list for PBXProject "SQLMaestro" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 3C3149B72E744E3F00762156;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				3C1986892E868A6800092B1B /* XCLocalSwiftPackageReference "SQLMaestro/ThirdParty/MarkdownUI/swift-markdown-ui-main" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 3C3149C12E744E3F00762156 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				3CE5BBF72E8E94A5007A7FEB /* SQLMaestro */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		3CE5BBF62E8E94A5007A7FEB /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		3CE5BBF42E8E94A5007A7FEB /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		3C3149E02E744E4200762156 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		3C3149E12E744E4200762156 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				ASSETCATALOG_COMPILER_GENERATE_SWIFT_ASSET_SYMBOL_EXTENSIONS = YES;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++20";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu17;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		3CE5BC162E8E94A8007A7FEB /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 92XW3WQF9N;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = Flexera.SQLMaestro;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = macosx;
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		3CE5BC172E8E94A8007A7FEB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 92XW3WQF9N;
+				ENABLE_PREVIEWS = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.5;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = Flexera.SQLMaestro;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				REGISTER_APP_GROUPS = YES;
+				SDKROOT = iphoneos;
+				SUPPORTED_PLATFORMS = macosx;
+				SUPPORTS_MACCATALYST = NO;
+				SUPPORTS_MAC_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SUPPORTS_XR_DESIGNED_FOR_IPHONE_IPAD = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		3C3149BB2E744E3F00762156 /* Build configuration list for PBXProject "SQLMaestro" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3C3149E02E744E4200762156 /* Debug */,
+				3C3149E12E744E4200762156 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		3CE5BC1C2E8E94A8007A7FEB /* Build configuration list for PBXNativeTarget "SQLMaestro" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3CE5BC162E8E94A8007A7FEB /* Debug */,
+				3CE5BC172E8E94A8007A7FEB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		3C1986892E868A6800092B1B /* XCLocalSwiftPackageReference "SQLMaestro/ThirdParty/MarkdownUI/swift-markdown-ui-main" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "SQLMaestro/ThirdParty/MarkdownUI/swift-markdown-ui-main";
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		3CE5C49D2E8E9BEE007A7FEB /* MarkdownUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MarkdownUI;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 3C3149B82E744E3F00762156 /* Project object */;
+}
