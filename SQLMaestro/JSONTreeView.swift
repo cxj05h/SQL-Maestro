@@ -824,11 +824,42 @@ private struct JSONTreeCanvas: View {
             context.draw(Text(keyText), at: keyPoint, anchor: .leading)
 
             if let value = node.valueDescription {
-                var valueText = AttributedString(value)
-                valueText.font = .system(size: 12, weight: .regular, design: .monospaced)
-                valueText.foregroundColor = (isHighlighted ? Theme.gold : node.valueColor).opacity(0.9)
-                let valuePoint = CGPoint(x: point.x + 22, y: point.y + 14)
-                context.draw(Text(valueText), at: valuePoint, anchor: .leading)
+                let isLightMode = context.environment.colorScheme == .light
+                let valueOpacity: Double = isLightMode ? 1.0 : 0.9
+                let baseColor = isHighlighted ? Theme.gold : node.valueColor
+
+                // For strings, render quotes separately in white for light mode
+                if case .string(let stringValue) = node.kind, isLightMode {
+                    let valuePoint = CGPoint(x: point.x + 22, y: point.y + 14)
+
+                    // Opening quote in white
+                    var openQuote = AttributedString("\"")
+                    openQuote.font = .system(size: 12, weight: .regular, design: .monospaced)
+                    openQuote.foregroundColor = .white
+                    context.draw(Text(openQuote), at: valuePoint, anchor: .leading)
+
+                    // String content in color
+                    var stringText = AttributedString(stringValue)
+                    stringText.font = .system(size: 12, weight: .regular, design: .monospaced)
+                    stringText.foregroundColor = baseColor.opacity(valueOpacity)
+                    let stringPoint = CGPoint(x: valuePoint.x + 7, y: valuePoint.y)
+                    context.draw(Text(stringText), at: stringPoint, anchor: .leading)
+
+                    // Closing quote in white
+                    var closeQuote = AttributedString("\"")
+                    closeQuote.font = .system(size: 12, weight: .regular, design: .monospaced)
+                    closeQuote.foregroundColor = .white
+                    let quoteOffset = CGFloat(stringValue.count * 7 + 7)
+                    let closePoint = CGPoint(x: valuePoint.x + quoteOffset, y: valuePoint.y)
+                    context.draw(Text(closeQuote), at: closePoint, anchor: .leading)
+                } else {
+                    // For non-strings or dark mode, render as before
+                    var valueText = AttributedString(value)
+                    valueText.font = .system(size: 12, weight: .regular, design: .monospaced)
+                    valueText.foregroundColor = baseColor.opacity(valueOpacity)
+                    let valuePoint = CGPoint(x: point.x + 22, y: point.y + 14)
+                    context.draw(Text(valueText), at: valuePoint, anchor: .leading)
+                }
             }
         }
     }

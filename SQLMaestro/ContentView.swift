@@ -845,15 +845,22 @@ struct MarkdownPreviewView: View {
 
     private var previewTheme: MarkdownUI.Theme {
         let inlineFill: Color
+        let textColor: Color
 
         if colorScheme == .dark {
             inlineFill = Color(nsColor: NSColor(calibratedWhite: 0.22, alpha: 1.0))
+            textColor = .primary
         } else {
+            // Light mode: lighter background for inline code, white text for regular content
             inlineFill = Color(nsColor: NSColor(calibratedWhite: 0.9, alpha: 1.0))
+            textColor = .white
         }
 
         return MarkdownUI.Theme.gitHub
-            .text { FontSize(fontSize) }
+            .text {
+                FontSize(fontSize)
+                ForegroundColor(textColor)
+            }
             .code { InlineCodeTextStyle(fontSize: fontSize, fill: inlineFill) }
             .strong {
                 ForegroundColor(Theme.gold)

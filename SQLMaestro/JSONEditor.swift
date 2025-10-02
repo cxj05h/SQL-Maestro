@@ -312,7 +312,8 @@ private final class JSONSyntaxHighlighter {
 }
 
 private enum JSONEditorPalette {
-    static let base = NSColor.labelColor
+    // Use white for base text (punctuation) since background is always dark (#2A2A35)
+    static let base = NSColor.white
     static let key = NSColor(calibratedRed: 99/255.0, green: 102/255.0, blue: 241/255.0, alpha: 1)
     static let string = NSColor(calibratedRed: 52/255.0, green: 211/255.0, blue: 153/255.0, alpha: 1)
     static let number = NSColor(calibratedRed: 251/255.0, green: 191/255.0, blue: 36/255.0, alpha: 1)

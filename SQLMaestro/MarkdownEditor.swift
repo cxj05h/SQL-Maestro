@@ -93,6 +93,7 @@ struct MarkdownEditor: NSViewRepresentable {
         textView.textContainer?.heightTracksTextView = false
         textView.backgroundColor = .clear
         textView.drawsBackground = false
+        textView.textColor = .white // Force white text for both dark and light mode on dark background
         textView.linkTextAttributes = [
             .foregroundColor: NSColor.systemBlue,
             .underlineStyle: NSUnderlineStyle.single.rawValue
