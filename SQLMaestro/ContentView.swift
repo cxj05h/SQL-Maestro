@@ -919,6 +919,73 @@ private struct InlineCodeTextStyle: TextStyle {
     }
 }
 
+/// ScrollView replacement that keeps the scroller visible while optionally ignoring wheel input.
+private struct BlockableScrollView<Content: View>: NSViewRepresentable {
+    var isBlocked: Bool
+    var content: Content
+
+    init(isBlocked: Bool, @ViewBuilder content: () -> Content) {
+        self.isBlocked = isBlocked
+        self.content = content()
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator()
+    }
+
+    func makeNSView(context: Context) -> BlockableNSScrollView {
+        let scrollView = BlockableNSScrollView()
+        scrollView.drawsBackground = false
+        scrollView.borderType = .noBorder
+        scrollView.hasVerticalScroller = true
+        scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .overlay
+        scrollView.automaticallyAdjustsContentInsets = false
+
+        let hosting = NSHostingView(rootView: content)
+        hosting.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.documentView = hosting
+        context.coordinator.hostingView = hosting
+
+        if let clipView = scrollView.contentView as? NSClipView {
+            let constraints = [
+                hosting.leadingAnchor.constraint(equalTo: clipView.leadingAnchor),
+                hosting.trailingAnchor.constraint(equalTo: clipView.trailingAnchor),
+                hosting.topAnchor.constraint(equalTo: clipView.topAnchor),
+                hosting.widthAnchor.constraint(equalTo: clipView.widthAnchor)
+            ]
+            NSLayoutConstraint.activate(constraints)
+
+            let bottom = hosting.bottomAnchor.constraint(greaterThanOrEqualTo: clipView.bottomAnchor)
+            bottom.priority = .defaultLow
+            bottom.isActive = true
+        }
+
+        return scrollView
+    }
+
+    func updateNSView(_ nsView: BlockableNSScrollView, context: Context) {
+        nsView.isBlocked = isBlocked
+        if let hosting = context.coordinator.hostingView {
+            hosting.rootView = content
+        }
+    }
+
+    final class Coordinator {
+        var hostingView: NSHostingView<Content>?
+    }
+
+    final class BlockableNSScrollView: NSScrollView {
+        var isBlocked: Bool = false
+
+        override func scrollWheel(with event: NSEvent) {
+            guard !isBlocked else { return }
+            super.scrollWheel(with: event)
+        }
+    }
+}
+
 /// Minimal stub that opens the template file in the default editor.
 /// Replaced by the full-featured editor when that file is linked.
 enum TemplateEditorWindow {
@@ -1149,6 +1216,8 @@ struct ContentView: View {
     @State private var savedFileValidation: [TicketSession: [UUID: JSONValidationState]] = [:]
     @State private var savedFileTreePreview: SavedFileTreePreviewContext?
     @State private var isSavedFileEditorFocused: Bool = false
+    @State private var isHoveringAlternateFieldsPane: Bool = false
+    @State private var isHoveringDynamicFieldsPane: Bool = false
     
     @State private var searchText: String = ""
     @State private var showShortcutsSheet: Bool = false
@@ -1233,9 +1302,10 @@ struct ContentView: View {
             hardStopTitleRow
             hardStopDivider
             GeometryReader { geometry in
-                ScrollView {
+                BlockableScrollView(isBlocked: isHoveringAlternateFieldsPane || isHoveringDynamicFieldsPane) {
                     mainDetailContent(topPadding: resolvedMainContentTopPadding(for: geometry.size.height))
                         .frame(maxWidth: .infinity, alignment: .top)
+                        .frame(width: geometry.size.width)
                 }
                 .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
             }
@@ -3112,7 +3182,14 @@ struct ContentView: View {
                                     }
                                 }
                             }
-                        }.frame(maxHeight: 260)
+                        }
+                        .frame(maxHeight: 260)
+                        .onHover { hovering in
+                            isHoveringDynamicFieldsPane = hovering
+                        }
+                        .onDisappear {
+                            isHoveringDynamicFieldsPane = false
+                        }
                     }
                 } else {
                     Text("Load a template to see its fields.")
@@ -4109,6 +4186,12 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, minHeight: minPaneHeight, alignment: .topLeading)
                 }
                 .frame(minHeight: minPaneHeight, maxHeight: maxPaneHeight)
+                .onHover { hovering in
+                    isHoveringAlternateFieldsPane = hovering
+                }
+                .onDisappear {
+                    isHoveringAlternateFieldsPane = false
+                }
                 .background(
                     RoundedRectangle(cornerRadius: 8)
                         .fill(Theme.grayBG.opacity(0.25))
