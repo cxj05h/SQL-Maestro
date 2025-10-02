@@ -6,6 +6,10 @@ final class MappingStore: ObservableObject {
     init() {
         AppPaths.ensureAll()
         load()
+        NotificationCenter.default.addObserver(self,
+                                               selector: #selector(reloadFromNotification(_:)),
+                                               name: .orgMappingsDidImport,
+                                               object: nil)
     }
 
     func load() {
@@ -36,5 +40,13 @@ final class MappingStore: ObservableObject {
 
     func lookup(orgId: String) -> MappingEntry? {
         map[orgId]
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    @objc private func reloadFromNotification(_ notification: Notification) {
+        load()
     }
 }

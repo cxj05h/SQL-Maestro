@@ -6,6 +6,10 @@ final class MysqlHostStore: ObservableObject {
     init() {
         AppPaths.ensureAll()
         load()
+        NotificationCenter.default.addObserver(self,
+                                               selector: #selector(reloadFromNotification(_:)),
+                                               name: .mysqlHostsDidImport,
+                                               object: nil)
     }
 
     func load() {
@@ -42,5 +46,13 @@ final class MysqlHostStore: ObservableObject {
         hostsMap.removeValue(forKey: mysqlDb)
         try persist()
         LOG("MySQL host mapping removed", ctx: ["mysqlDb": mysqlDb])
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    @objc private func reloadFromNotification(_ notification: Notification) {
+        load()
     }
 }

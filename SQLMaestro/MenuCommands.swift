@@ -36,6 +36,16 @@ struct AppMenuCommands: Commands {
             }
             
             Divider()
+
+            Button("Import Orgs…") {
+                importOrgMappings()
+            }
+
+            Button("Import Hosts…") {
+                importHostMappings()
+            }
+
+            Divider()
             
             Button("Database Connection Settings...") {
                 NotificationCenter.default.post(name: .showDatabaseSettings, object: nil)
@@ -87,6 +97,86 @@ struct AppMenuCommands: Commands {
         openFileInVSCode(url)
     }
     
+    private func importOrgMappings() {
+        runImport(
+            title: "Import Orgs",
+            itemName: "Org mappings",
+            prompt: "Select the org_mysql_map.json file you want to import.",
+            destination: AppPaths.orgMysqlMap,
+            notification: .orgMappingsDidImport
+        ) { data in
+            let decoded = try JSONDecoder().decode(OrgMysqlMap.self, from: data)
+            return decoded.count
+        }
+    }
+
+    private func importHostMappings() {
+        runImport(
+            title: "Import Hosts",
+            itemName: "MySQL host mappings",
+            prompt: "Select the mysql_hosts_map.json file you want to import.",
+            destination: AppPaths.mysqlHostsMap,
+            notification: .mysqlHostsDidImport
+        ) { data in
+            let decoder = JSONDecoder()
+            let decoded = try decoder.decode(MysqlHostsMap.self, from: data)
+            return decoded.count
+        }
+    }
+
+    private func runImport(
+        title: String,
+        itemName: String,
+        prompt: String,
+        destination: URL,
+        notification: Notification.Name,
+        validate: (Data) throws -> Int
+    ) {
+        let panel = NSOpenPanel()
+        panel.title = title
+        panel.prompt = "Import"
+        panel.message = prompt
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedFileTypes = ["json"]
+
+        let response = panel.runModal()
+        guard response == .OK, let sourceURL = panel.url else {
+            LOG("Import cancelled", ctx: ["item": itemName])
+            return
+        }
+
+        do {
+            let data = try Data(contentsOf: sourceURL)
+            let count = try validate(data)
+            AppPaths.ensureAll()
+            try data.write(to: destination, options: [.atomic])
+            NotificationCenter.default.post(name: notification, object: nil)
+            LOG("\(itemName) import succeeded", ctx: ["source": sourceURL.lastPathComponent, "count": "\(count)"])
+            presentAlert(
+                title: "\(itemName) Imported",
+                message: "Replaced \(destination.lastPathComponent) with \(sourceURL.lastPathComponent). Entries: \(count)."
+            )
+        } catch {
+            NSSound.beep()
+            WARN("\(itemName) import failed", ctx: ["error": error.localizedDescription])
+            presentAlert(
+                title: "\(itemName) Import Failed",
+                message: error.localizedDescription
+            )
+        }
+    }
+
+    private func presentAlert(title: String, message: String) {
+        let alert = NSAlert()
+        alert.alertStyle = .informational
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
+    }
+
     // Helper function to open the MySQL hosts mapping file in VS Code
     private func openHostMappingFileInVSCode() {
         let url = AppPaths.mysqlHostsMap
@@ -148,4 +238,6 @@ extension Notification.Name {
     static let saveTicketSession = Notification.Name("SaveTicketSession")
     static let loadTicketSession = Notification.Name("LoadTicketSession")
     static let openSessionsFolder = Notification.Name("OpenSessionsFolder")
+    static let orgMappingsDidImport = Notification.Name("OrgMappingsDidImport")
+    static let mysqlHostsDidImport = Notification.Name("MysqlHostsDidImport")
 }
