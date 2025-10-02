@@ -5244,7 +5244,7 @@ struct ContentView: View {
             .layoutPriority(1)
             .background(
                 RoundedRectangle(cornerRadius: 12)
-                    .fill(Theme.grayBG.opacity(0.22))
+                    .fill(Color(hex: "#2A2A35"))
                     .overlay(
                         RoundedRectangle(cornerRadius: 12)
                             .stroke(Theme.purple.opacity(0.18), lineWidth: 1)
@@ -5262,7 +5262,7 @@ struct ContentView: View {
             .layoutPriority(1)
             .background(
                 RoundedRectangle(cornerRadius: 12)
-                    .fill(Theme.grayBG.opacity(0.18))
+                    .fill(Color(hex: "#2A2A35"))
                     .overlay(
                         RoundedRectangle(cornerRadius: 12)
                             .stroke(Theme.purple.opacity(0.15), lineWidth: 1)
@@ -10435,7 +10435,7 @@ struct ContentView: View {
                 base
                     .background(
                         RoundedRectangle(cornerRadius: 10)
-                            .fill(Theme.grayBG.opacity(0.25))
+                            .fill(Color(hex: "#2A2A35"))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 10)
                                     .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
@@ -10444,6 +10444,7 @@ struct ContentView: View {
                     .frame(minHeight: editorMinHeight, alignment: .top)
             } else {
                 base
+                    .background(Color(hex: "#2A2A35"))
                     .frame(minHeight: editorMinHeight, alignment: .top)
             }
         }
@@ -10605,7 +10606,7 @@ struct ContentView: View {
                         .layoutPriority(1)
                         .background(
                             RoundedRectangle(cornerRadius: 10)
-                                .fill(Theme.grayBG.opacity(0.25))
+                                .fill(Color(hex: "#2A2A35"))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 10)
                                         .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
