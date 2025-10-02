@@ -855,6 +855,14 @@ struct MarkdownPreviewView: View {
         return MarkdownUI.Theme.gitHub
             .text { FontSize(fontSize) }
             .code { InlineCodeTextStyle(fontSize: fontSize, fill: inlineFill) }
+            .strong {
+                ForegroundColor(Theme.gold)
+                FontWeight(.semibold)
+            }
+            .emphasis {
+                ForegroundColor(Theme.pink)
+                FontStyle(.italic)
+            }
             .codeBlock { configuration in
                 codeBlock(configuration)
             }
