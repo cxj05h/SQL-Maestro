@@ -18,6 +18,12 @@ struct AppMenuCommands: Commands {
                     NSSound.beep()
                 }
             }
+
+            Divider()
+
+            Button("Import Query Template…") {
+                NotificationCenter.default.post(name: .importQueryTemplatesRequested, object: nil)
+            }
         }
 
         CommandMenu("Debug") {
@@ -240,4 +246,5 @@ extension Notification.Name {
     static let openSessionsFolder = Notification.Name("OpenSessionsFolder")
     static let orgMappingsDidImport = Notification.Name("OrgMappingsDidImport")
     static let mysqlHostsDidImport = Notification.Name("MysqlHostsDidImport")
+    static let importQueryTemplatesRequested = Notification.Name("ImportQueryTemplatesRequested")
 }

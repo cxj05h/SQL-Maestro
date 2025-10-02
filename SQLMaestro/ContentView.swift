@@ -1193,7 +1193,7 @@ struct ContentView: View {
     // Toasts
     @State private var toastCopied: Bool = false
     @State private var toastOpenDB: Bool = false
-    @State private var toastReloaded: Bool = false
+    @State private var toastTemplatesMessage: String? = nil
     @State private var imageAttachmentToast: String? = nil
     @State private var toastPreviewBehind: Bool = false
 
@@ -1366,6 +1366,9 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .showKeyboardShortcuts)) { _ in
             showShortcutsSheet = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .importQueryTemplatesRequested)) { _ in
+            importTemplatesFlow()
         }
         .onReceive(NotificationCenter.default.publisher(for: .beginQuickCaptureRequested)) { _ in
             startBeginCapture()
@@ -1634,8 +1637,8 @@ struct ContentView: View {
                     .clipShape(Capsule())
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
-            if toastReloaded {
-                Text("Templates reloaded")
+            if let templateToast = toastTemplatesMessage {
+                Text(templateToast)
                     .font(.system(size: fontSize))
                     .padding(.horizontal, 12).padding(.vertical, 6)
                     .background(Theme.accent.opacity(0.9)).foregroundStyle(.black)
@@ -1660,6 +1663,13 @@ struct ContentView: View {
             }
         }
         .padding(.top, 4)
+    }
+
+    private func showTemplateToast(_ message: String) {
+        withAnimation { toastTemplatesMessage = message }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+            withAnimation { toastTemplatesMessage = nil }
+        }
     }
 
     private func truncateSessionName(_ name: String) -> String {
@@ -1884,19 +1894,316 @@ struct ContentView: View {
                 .buttonStyle(.borderedProminent)
                 .tint(Theme.purple)
                 .font(.system(size: fontSize))
-            Button("Reload") {
-                templates.loadTemplates()
-                withAnimation { toastReloaded = true }
-                DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
-                    withAnimation { toastReloaded = false }
-                }
+            Button("Import") {
+                importTemplatesFlow()
             }
             .buttonStyle(.borderedProminent)
             .tint(Theme.accent)
             .font(.system(size: fontSize))
-            .keyboardShortcut("r", modifiers: [.command])
-            .registerShortcut(name: "Reload Templates", keyLabel: "R", modifiers: [.command], scope: "Templates")
         }
+    }
+
+    private struct TemplateArchiveManifest: Codable {
+        var version: Int
+        var exportedAt: Date
+        var templateName: String
+        var originalTemplateId: String?
+    }
+
+    private func importTemplatesFlow() {
+        let panel = NSOpenPanel()
+        panel.title = "Import Query Templates"
+        panel.prompt = "Import"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = true
+        panel.allowedFileTypes = ["zip"]
+        panel.allowedContentTypes = [UTType.zip]
+        panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+
+        guard panel.runModal() == .OK else {
+            LOG("Template import cancelled", ctx: ["reason": "panel dismissed"])
+            return
+        }
+
+        let archives = panel.urls
+        guard !archives.isEmpty else { return }
+
+        var importedDestinations: [URL] = []
+        var failures: [String] = []
+
+        for archive in archives {
+            do {
+                let destination = try importTemplateArchive(from: archive)
+                importedDestinations.append(destination)
+                LOG("Template archive imported", ctx: [
+                    "archive": archive.lastPathComponent,
+                    "template": destination.lastPathComponent
+                ])
+            } catch {
+                let message = "\(archive.lastPathComponent): \(error.localizedDescription)"
+                failures.append(message)
+                WARN("Template archive import failed", ctx: [
+                    "archive": archive.lastPathComponent,
+                    "error": error.localizedDescription
+                ])
+            }
+        }
+
+        guard !importedDestinations.isEmpty else {
+            if !failures.isEmpty {
+                NSSound.beep()
+                showAlert(title: "Import Failed", message: failures.joined(separator: "\n"))
+            }
+            return
+        }
+
+        templates.loadTemplates()
+
+        let importedTemplates: [TemplateItem] = importedDestinations.compactMap { destination in
+            templates.templates.first(where: { $0.url.standardizedFileURL == destination.standardizedFileURL })
+        }
+
+        for template in importedTemplates {
+            _ = templateLinksStore.loadSidecar(for: template)
+            templateTagsStore.ensureLoaded(template)
+            templateGuideStore.prepare(for: template)
+        }
+
+        if let newlyImported = importedTemplates.last {
+            selectTemplate(newlyImported)
+        }
+
+        let message = importedTemplates.count == 1
+            ? "Imported 1 template"
+            : "Imported \(importedTemplates.count) templates"
+        showTemplateToast(message)
+
+        if !failures.isEmpty {
+            NSSound.beep()
+            showAlert(title: "Some imports failed", message: failures.joined(separator: "\n"))
+        }
+    }
+
+    private func exportTemplate(_ template: TemplateItem) {
+        let fm = FileManager.default
+        guard let downloads = fm.urls(for: .downloadsDirectory, in: .userDomainMask).first else {
+            WARN("Downloads directory unavailable", ctx: [:])
+            showAlert(title: "Export Failed", message: "Could not locate the Downloads folder.")
+            return
+        }
+
+        let trimmedName = template.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let baseCandidate = trimmedName.isEmpty ? "Template" : trimmedName
+        let sanitizedBase = sanitizeFileName(baseCandidate)
+        var finalBase = sanitizedBase.isEmpty ? "Template" : sanitizedBase
+
+        var destination = downloads.appendingPathComponent("\(finalBase).zip")
+        var suffix = 2
+        while fm.fileExists(atPath: destination.path) {
+            destination = downloads.appendingPathComponent("\(finalBase)-\(suffix).zip")
+            suffix += 1
+        }
+
+        let tempRoot = fm.temporaryDirectory.appendingPathComponent("SQLMaestroTemplateExport-\(UUID().uuidString)", isDirectory: true)
+
+        do {
+            try fm.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+            defer { try? fm.removeItem(at: tempRoot) }
+
+            try exportTemplateAssets(template, to: tempRoot)
+
+            let manifest = TemplateArchiveManifest(
+                version: 1,
+                exportedAt: Date(),
+                templateName: template.name,
+                originalTemplateId: template.id.uuidString
+            )
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            encoder.dateEncodingStrategy = .iso8601
+            let manifestURL = tempRoot.appendingPathComponent("metadata.json")
+            let manifestData = try encoder.encode(manifest)
+            try manifestData.write(to: manifestURL, options: .atomic)
+
+            try zipFolder(at: tempRoot, to: destination)
+            LOG("Template archive exported", ctx: [
+                "template": template.name,
+                "zip": destination.lastPathComponent
+            ])
+            showTemplateToast("Exported \(template.name)")
+            NSWorkspace.shared.activateFileViewerSelecting([destination])
+        } catch {
+            NSSound.beep()
+            showAlert(title: "Export Failed", message: error.localizedDescription)
+            WARN("Template archive export failed", ctx: [
+                "template": template.name,
+                "error": error.localizedDescription
+            ])
+        }
+    }
+
+    private func importTemplateArchive(from archiveURL: URL) throws -> URL {
+        let fm = FileManager.default
+        let tempRoot = fm.temporaryDirectory.appendingPathComponent("SQLMaestroTemplateImport-\(UUID().uuidString)", isDirectory: true)
+        try fm.createDirectory(at: tempRoot, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: tempRoot) }
+
+        try unzipArchive(archiveURL, to: tempRoot)
+
+        let payloadRoot = try resolveTemplateArchiveRoot(at: tempRoot)
+        let manifest = decodeTemplateArchiveManifest(at: payloadRoot)
+        let sqlURL = try resolveTemplateSQL(in: payloadRoot)
+        let sqlContent = try String(contentsOf: sqlURL, encoding: .utf8)
+
+        let manifestName = manifest?.templateName.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let fileName = sqlURL.deletingPathExtension().lastPathComponent
+        let archiveName = archiveURL.deletingPathExtension().lastPathComponent
+
+        let prioritizedNames = [manifestName, fileName, archiveName]
+        let chosenName = prioritizedNames.first(where: { !$0.isEmpty && $0.lowercased() != "template" }) ?? "Imported Template"
+        let sanitizedBase = sanitizeFileName(chosenName).isEmpty ? "Imported Template" : sanitizeFileName(chosenName)
+
+        var finalBase = sanitizedBase
+        var destination = AppPaths.templates.appendingPathComponent("\(finalBase).sql")
+        var suffix = 2
+        while fm.fileExists(atPath: destination.path) {
+            finalBase = "\(sanitizedBase) \(suffix)"
+            destination = AppPaths.templates.appendingPathComponent("\(finalBase).sql")
+            suffix += 1
+        }
+
+        try sqlContent.write(to: destination, atomically: true, encoding: .utf8)
+        let templateId = TemplateIdentityStore.shared.id(for: destination)
+
+        let decoder = JSONDecoder()
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+
+        // Links sidecar
+        let linksSource = payloadRoot.appendingPathComponent("links.json")
+        if fm.fileExists(atPath: linksSource.path) {
+            do {
+                let data = try Data(contentsOf: linksSource)
+                if let payload = try? decoder.decode(TemplateLinks.self, from: data) {
+                    let model = TemplateLinks(templateId: templateId, links: payload.links)
+                    let dest = destination.deletingPathExtension().appendingPathExtension("links.json")
+                    let encoded = try encoder.encode(model)
+                    try encoded.write(to: dest, options: .atomic)
+                    LOG("Template links imported", ctx: ["file": dest.lastPathComponent])
+                }
+            } catch {
+                WARN("Template links import failed", ctx: ["error": error.localizedDescription])
+            }
+        }
+
+        // Tables sidecar
+        let tablesSource = payloadRoot.appendingPathComponent("tables.json")
+        if fm.fileExists(atPath: tablesSource.path) {
+            do {
+                let data = try Data(contentsOf: tablesSource)
+                if let payload = try? decoder.decode(TemplateTables.self, from: data) {
+                    let model = TemplateTables(templateId: templateId, tables: payload.tables)
+                    let dest = destination.deletingPathExtension().appendingPathExtension("tables.json")
+                    let encoded = try encoder.encode(model)
+                    try encoded.write(to: dest, options: .atomic)
+                    LOG("Template tables imported", ctx: ["file": dest.lastPathComponent, "count": "\(payload.tables.count)"])
+                }
+            } catch {
+                WARN("Template tables import failed", ctx: ["error": error.localizedDescription])
+            }
+        }
+
+        // Tags sidecar
+        let tagsSource = payloadRoot.appendingPathComponent("tags.json")
+        if fm.fileExists(atPath: tagsSource.path) {
+            do {
+                let data = try Data(contentsOf: tagsSource)
+                if let payload = try? decoder.decode(TemplateTags.self, from: data) {
+                    let model = TemplateTags(templateId: templateId, tags: payload.tags)
+                    let dest = destination.deletingPathExtension().appendingPathExtension("tags.json")
+                    let encoded = try encoder.encode(model)
+                    try encoded.write(to: dest, options: .atomic)
+                    LOG("Template tags imported", ctx: ["file": dest.lastPathComponent, "count": "\(payload.tags.count)"])
+                }
+            } catch {
+                WARN("Template tags import failed", ctx: ["error": error.localizedDescription])
+            }
+        }
+
+        // Guide assets
+        let guideSource = payloadRoot.appendingPathComponent("guide", isDirectory: true)
+        if fm.fileExists(atPath: guideSource.path) {
+            let guideDestination = AppPaths.templateGuides.appendingPathComponent(finalBase, isDirectory: true)
+            if fm.fileExists(atPath: guideDestination.path) {
+                try? fm.removeItem(at: guideDestination)
+            }
+            do {
+                try fm.createDirectory(at: guideDestination.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try fm.copyItem(at: guideSource, to: guideDestination)
+                rewriteGuideManifest(at: guideDestination.appendingPathComponent("guide.json"), templateId: templateId)
+                rewriteGuideImagesManifest(at: guideDestination.appendingPathComponent("images.json"), templateId: templateId)
+                LOG("Template guide imported", ctx: ["folder": guideDestination.lastPathComponent])
+            } catch {
+                WARN("Template guide import failed", ctx: ["error": error.localizedDescription])
+            }
+        }
+
+        return destination.standardizedFileURL
+    }
+
+    private func resolveTemplateArchiveRoot(at directory: URL) throws -> URL {
+        let fm = FileManager.default
+        let contents = try fm.contentsOfDirectory(at: directory,
+                                                  includingPropertiesForKeys: [.isDirectoryKey],
+                                                  options: [.skipsHiddenFiles])
+        if contents.count == 1,
+           let first = contents.first,
+           (try first.resourceValues(forKeys: [.isDirectoryKey]).isDirectory ?? false) {
+            return first
+        }
+        return directory
+    }
+
+    private func resolveTemplateSQL(in folder: URL) throws -> URL {
+        let fm = FileManager.default
+        let preferred = folder.appendingPathComponent("template.sql")
+        if fm.fileExists(atPath: preferred.path) {
+            return preferred
+        }
+
+        guard let enumerator = fm.enumerator(at: folder,
+                                             includingPropertiesForKeys: [.isRegularFileKey],
+                                             options: [.skipsHiddenFiles, .skipsPackageDescendants]) else {
+            throw templateArchiveError("Unable to inspect template archive")
+        }
+        for case let fileURL as URL in enumerator {
+            if fileURL.pathExtension.lowercased() == "sql" {
+                return fileURL
+            }
+        }
+        throw templateArchiveError("Archive missing SQL template file")
+    }
+
+    private func decodeTemplateArchiveManifest(at folder: URL) -> TemplateArchiveManifest? {
+        let manifestURL = folder.appendingPathComponent("metadata.json")
+        guard FileManager.default.fileExists(atPath: manifestURL.path) else { return nil }
+        do {
+            let data = try Data(contentsOf: manifestURL)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            return try decoder.decode(TemplateArchiveManifest.self, from: data)
+        } catch {
+            WARN("Template archive manifest decode failed", ctx: [
+                "file": manifestURL.lastPathComponent,
+                "error": error.localizedDescription
+            ])
+            return nil
+        }
+    }
+
+    private func templateArchiveError(_ message: String) -> NSError {
+        NSError(domain: "TemplateArchive", code: 1, userInfo: [NSLocalizedDescriptionKey: message])
     }
 
     @ViewBuilder
@@ -2076,6 +2383,8 @@ struct ContentView: View {
     Button("Add Tags") { startAddTags(for: template) }
     Button("Open JSON") { openTemplateJSON(template) }
     Button("Show in Finder") { revealTemplateInFinder(template) }
+    Divider()
+    Button("Export Template…") { exportTemplate(template) }
     if isUsed {
         Divider()
         Button("Remove from Recents") { removeTemplateFromRecents(template) }
