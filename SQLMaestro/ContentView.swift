@@ -848,10 +848,9 @@ struct MarkdownPreviewView: View {
         let textColor: Color
 
         if colorScheme == .dark {
-            inlineFill = Color(nsColor: NSColor(calibratedWhite: 0.22, alpha: 1.0))
+            inlineFill = Color(nsColor: NSColor(calibratedWhite: 0.85, alpha: 1.0))
             textColor = .primary
         } else {
-            // Light mode: lighter background for inline code, white text for regular content
             inlineFill = Color(nsColor: NSColor(calibratedWhite: 0.9, alpha: 1.0))
             textColor = .white
         }
@@ -861,7 +860,7 @@ struct MarkdownPreviewView: View {
                 FontSize(fontSize)
                 ForegroundColor(textColor)
             }
-            .code { InlineCodeTextStyle(fontSize: fontSize, fill: inlineFill) }
+            .code { InlineCodeTextStyle(fontSize: fontSize, fill: inlineFill, foreground: .black) }
             .strong {
                 ForegroundColor(Theme.gold)
                 FontWeight(.semibold)
@@ -871,12 +870,12 @@ struct MarkdownPreviewView: View {
                 FontStyle(.italic)
             }
             .codeBlock { configuration in
-                codeBlock(configuration)
+                codeBlock(configuration, fill: inlineFill)
             }
     }
 
     @ViewBuilder
-    private func codeBlock(_ configuration: CodeBlockConfiguration) -> some View {
+    private func codeBlock(_ configuration: CodeBlockConfiguration, fill: Color) -> some View {
         ScrollView(.horizontal) {
             configuration.label
                 .fixedSize(horizontal: false, vertical: true)
@@ -884,10 +883,11 @@ struct MarkdownPreviewView: View {
                 .markdownTextStyle {
                     FontFamilyVariant(.monospaced)
                     FontSize(fontSize)
+                    ForegroundColor(.black)
                 }
                 .padding(16)
         }
-        .background(Theme.grayBG.opacity(0.35))
+        .background(fill)
         .clipShape(RoundedRectangle(cornerRadius: 6))
         .overlay(
             RoundedRectangle(cornerRadius: 6)
@@ -925,12 +925,13 @@ private struct MonospacedTextStyle: TextStyle {
 private struct InlineCodeTextStyle: TextStyle {
     var fontSize: CGFloat
     var fill: Color
+    var foreground: Color
 
     func _collectAttributes(in attributes: inout AttributeContainer) {
         FontFamilyVariant(.monospaced)._collectAttributes(in: &attributes)
         FontSize(fontSize)._collectAttributes(in: &attributes)
         BackgroundColor(fill)._collectAttributes(in: &attributes)
-        attributes.foregroundColor = Color.primary
+        attributes.foregroundColor = foreground
     }
 }
 
