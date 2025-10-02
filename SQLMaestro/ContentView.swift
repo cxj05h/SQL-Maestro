@@ -933,8 +933,8 @@ private struct NonBubblingScrollView<Content: View>: NSViewRepresentable {
         Coordinator()
     }
 
-    func makeNSView(context: Context) -> BlockingNSScrollView {
-        let scrollView = BlockingNSScrollView()
+    func makeNSView(context: Context) -> NonBubblingNSScrollView {
+        let scrollView = NonBubblingNSScrollView()
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
         scrollView.hasVerticalScroller = showsIndicators
@@ -964,7 +964,7 @@ private struct NonBubblingScrollView<Content: View>: NSViewRepresentable {
         return scrollView
     }
 
-    func updateNSView(_ nsView: BlockingNSScrollView, context: Context) {
+    func updateNSView(_ nsView: NonBubblingNSScrollView, context: Context) {
         if let hosting = context.coordinator.hostingView {
             hosting.rootView = content
         }
@@ -973,33 +973,33 @@ private struct NonBubblingScrollView<Content: View>: NSViewRepresentable {
     final class Coordinator {
         var hostingView: NSHostingView<Content>?
     }
+}
 
-    final class BlockingNSScrollView: NSScrollView {
-        override func scrollWheel(with event: NSEvent) {
-            guard let documentView = documentView else {
-                super.scrollWheel(with: event)
-                return
-            }
-
-            let clipBoundsBefore = contentView.bounds
-            let docBounds = documentView.bounds
-            let maxOffsetY = max(docBounds.height - clipBoundsBefore.height, 0)
-            let hasScrollableContent = maxOffsetY > 0.5
-
-            let originalNextResponder = nextResponder
-            nextResponder = nil
+final class NonBubblingNSScrollView: NSScrollView {
+    override func scrollWheel(with event: NSEvent) {
+        guard let documentView = documentView else {
             super.scrollWheel(with: event)
-            nextResponder = originalNextResponder
+            return
+        }
 
-            let clipBoundsAfter = contentView.bounds
-            let moved = abs(clipBoundsAfter.origin.y - clipBoundsBefore.origin.y) > 0.05
+        let clipBoundsBefore = contentView.bounds
+        let docBounds = documentView.bounds
+        let maxOffsetY = max(docBounds.height - clipBoundsBefore.height, 0)
+        let hasScrollableContent = maxOffsetY > 0.5
 
-            if !moved {
-                if !hasScrollableContent {
-                    originalNextResponder?.scrollWheel(with: event)
-                }
-                // Otherwise swallow the overflow event so the parent scroll view stays put.
+        let originalNextResponder = nextResponder
+        nextResponder = nil
+        super.scrollWheel(with: event)
+        nextResponder = originalNextResponder
+
+        let clipBoundsAfter = contentView.bounds
+        let moved = abs(clipBoundsAfter.origin.y - clipBoundsBefore.origin.y) > 0.05
+
+        if !moved {
+            if !hasScrollableContent {
+                originalNextResponder?.scrollWheel(with: event)
             }
+            // Otherwise swallow the overflow event so the parent scroll view stays put.
         }
     }
 }

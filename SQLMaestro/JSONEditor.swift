@@ -61,10 +61,12 @@ struct JSONEditor: NSViewRepresentable {
             context.coordinator.handleFindCommand()
         }
 
-        let scrollView = NSScrollView()
+        let scrollView = NonBubblingNSScrollView()
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .overlay
         scrollView.documentView = textView
 
         scrollView.setContentHuggingPriority(.init(1), for: .vertical)
