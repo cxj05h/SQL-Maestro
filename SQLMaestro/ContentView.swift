@@ -919,13 +919,13 @@ private struct InlineCodeTextStyle: TextStyle {
     }
 }
 
-/// ScrollView replacement that keeps the scroller visible while optionally ignoring wheel input.
-private struct BlockableScrollView<Content: View>: NSViewRepresentable {
-    var isBlocked: Bool
+/// Scroll view used inside nested panes to swallow edge scroll events so the parent view doesn't move.
+private struct NonBubblingScrollView<Content: View>: NSViewRepresentable {
+    var showsIndicators: Bool
     var content: Content
 
-    init(isBlocked: Bool, @ViewBuilder content: () -> Content) {
-        self.isBlocked = isBlocked
+    init(showsIndicators: Bool = true, @ViewBuilder content: () -> Content) {
+        self.showsIndicators = showsIndicators
         self.content = content()
     }
 
@@ -933,13 +933,13 @@ private struct BlockableScrollView<Content: View>: NSViewRepresentable {
         Coordinator()
     }
 
-    func makeNSView(context: Context) -> BlockableNSScrollView {
-        let scrollView = BlockableNSScrollView()
+    func makeNSView(context: Context) -> BlockingNSScrollView {
+        let scrollView = BlockingNSScrollView()
         scrollView.drawsBackground = false
         scrollView.borderType = .noBorder
-        scrollView.hasVerticalScroller = true
+        scrollView.hasVerticalScroller = showsIndicators
         scrollView.hasHorizontalScroller = false
-        scrollView.autohidesScrollers = true
+        scrollView.autohidesScrollers = showsIndicators
         scrollView.scrollerStyle = .overlay
         scrollView.automaticallyAdjustsContentInsets = false
 
@@ -949,13 +949,12 @@ private struct BlockableScrollView<Content: View>: NSViewRepresentable {
         context.coordinator.hostingView = hosting
 
         if let clipView = scrollView.contentView as? NSClipView {
-            let constraints = [
+            NSLayoutConstraint.activate([
                 hosting.leadingAnchor.constraint(equalTo: clipView.leadingAnchor),
                 hosting.trailingAnchor.constraint(equalTo: clipView.trailingAnchor),
                 hosting.topAnchor.constraint(equalTo: clipView.topAnchor),
                 hosting.widthAnchor.constraint(equalTo: clipView.widthAnchor)
-            ]
-            NSLayoutConstraint.activate(constraints)
+            ])
 
             let bottom = hosting.bottomAnchor.constraint(greaterThanOrEqualTo: clipView.bottomAnchor)
             bottom.priority = .defaultLow
@@ -965,8 +964,7 @@ private struct BlockableScrollView<Content: View>: NSViewRepresentable {
         return scrollView
     }
 
-    func updateNSView(_ nsView: BlockableNSScrollView, context: Context) {
-        nsView.isBlocked = isBlocked
+    func updateNSView(_ nsView: BlockingNSScrollView, context: Context) {
         if let hosting = context.coordinator.hostingView {
             hosting.rootView = content
         }
@@ -976,12 +974,32 @@ private struct BlockableScrollView<Content: View>: NSViewRepresentable {
         var hostingView: NSHostingView<Content>?
     }
 
-    final class BlockableNSScrollView: NSScrollView {
-        var isBlocked: Bool = false
-
+    final class BlockingNSScrollView: NSScrollView {
         override func scrollWheel(with event: NSEvent) {
-            guard !isBlocked else { return }
+            guard let documentView = documentView else {
+                super.scrollWheel(with: event)
+                return
+            }
+
+            let clipBoundsBefore = contentView.bounds
+            let docBounds = documentView.bounds
+            let maxOffsetY = max(docBounds.height - clipBoundsBefore.height, 0)
+            let hasScrollableContent = maxOffsetY > 0.5
+
+            let originalNextResponder = nextResponder
+            nextResponder = nil
             super.scrollWheel(with: event)
+            nextResponder = originalNextResponder
+
+            let clipBoundsAfter = contentView.bounds
+            let moved = abs(clipBoundsAfter.origin.y - clipBoundsBefore.origin.y) > 0.05
+
+            if !moved {
+                if !hasScrollableContent {
+                    originalNextResponder?.scrollWheel(with: event)
+                }
+                // Otherwise swallow the overflow event so the parent scroll view stays put.
+            }
         }
     }
 }
@@ -1216,8 +1234,6 @@ struct ContentView: View {
     @State private var savedFileValidation: [TicketSession: [UUID: JSONValidationState]] = [:]
     @State private var savedFileTreePreview: SavedFileTreePreviewContext?
     @State private var isSavedFileEditorFocused: Bool = false
-    @State private var isHoveringAlternateFieldsPane: Bool = false
-    @State private var isHoveringDynamicFieldsPane: Bool = false
     
     @State private var searchText: String = ""
     @State private var showShortcutsSheet: Bool = false
@@ -1302,10 +1318,9 @@ struct ContentView: View {
             hardStopTitleRow
             hardStopDivider
             GeometryReader { geometry in
-                BlockableScrollView(isBlocked: isHoveringAlternateFieldsPane || isHoveringDynamicFieldsPane) {
+                ScrollView {
                     mainDetailContent(topPadding: resolvedMainContentTopPadding(for: geometry.size.height))
                         .frame(maxWidth: .infinity, alignment: .top)
-                        .frame(width: geometry.size.width)
                 }
                 .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
             }
@@ -3172,7 +3187,7 @@ struct ContentView: View {
                             .foregroundStyle(.secondary)
                             .font(.system(size: fontSize))
                     } else {
-                        ScrollView {
+                        NonBubblingScrollView {
                             VStack(alignment: .leading, spacing: 8) {
                                 ForEach(dynamicPlaceholders, id: \.self) { ph in
                                     if ph.lowercased() == "date" {
@@ -3184,12 +3199,6 @@ struct ContentView: View {
                             }
                         }
                         .frame(maxHeight: 260)
-                        .onHover { hovering in
-                            isHoveringDynamicFieldsPane = hovering
-                        }
-                        .onDisappear {
-                            isHoveringDynamicFieldsPane = false
-                        }
                     }
                 } else {
                     Text("Load a template to see its fields.")
@@ -4142,7 +4151,7 @@ struct ContentView: View {
                 let minPaneHeight = max(160, fontSize * 8)
                 let maxPaneHeight = max(220, fontSize * 11)
 
-                ScrollView {
+                NonBubblingScrollView {
                     VStack(alignment: .leading, spacing: 6) {
                         ForEach(sessions.sessionAlternateFields[sessions.current] ?? [], id: \.id) { field in
                             AlternateFieldRow(session: sessions.current,
@@ -4186,12 +4195,6 @@ struct ContentView: View {
                     .frame(maxWidth: .infinity, minHeight: minPaneHeight, alignment: .topLeading)
                 }
                 .frame(minHeight: minPaneHeight, maxHeight: maxPaneHeight)
-                .onHover { hovering in
-                    isHoveringAlternateFieldsPane = hovering
-                }
-                .onDisappear {
-                    isHoveringAlternateFieldsPane = false
-                }
                 .background(
                     RoundedRectangle(cornerRadius: 8)
                         .fill(Theme.grayBG.opacity(0.25))
@@ -5173,34 +5176,26 @@ struct ContentView: View {
         }
 
         private func bottomPaneContent(for pane: BottomPaneContent, activeSession: TicketSession) -> some View {
-            GeometryReader { proxy in
-                Group {
-                    switch pane {
-                    case .guideNotes:
-                        guideNotesPane
-                    case .sessionNotes:
-                        sessionNotesPane(for: activeSession)
-                            .id("session-notes-\(activeSession.rawValue)")
-                    case .savedFiles:
-                        savedFilesPane(for: activeSession)
-                            .id("saved-files-\(activeSession.rawValue)")
-                    }
+            Group {
+                switch pane {
+                case .guideNotes:
+                    guideNotesPane
+                case .sessionNotes:
+                    sessionNotesPane(for: activeSession)
+                        .id("session-notes-\(activeSession.rawValue)")
+                case .savedFiles:
+                    savedFilesPane(for: activeSession)
+                        .id("saved-files-\(activeSession.rawValue)")
                 }
-                .frame(width: proxy.size.width,
-                       height: proxy.size.height,
-                       alignment: .top)
             }
+            .frame(maxWidth: .infinity, alignment: .top)
         }
 
         @ViewBuilder
         private var guideNotesPane: some View {
-            GeometryReader { proxy in
-                guideNotesContent
-                    .frame(width: proxy.size.width, alignment: .top)
-                    .frame(minHeight: bottomPaneEditorMinHeight,
-                           maxHeight: .infinity,
-                           alignment: .top)
-            }
+            guideNotesContent
+                .frame(maxWidth: .infinity, alignment: .top)
+                .frame(minHeight: bottomPaneEditorMinHeight, alignment: .top)
         }
 
         @ViewBuilder
@@ -5222,7 +5217,7 @@ struct ContentView: View {
                             openLink(url, modifiers: modifiers)
                         }
                     )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
                 } else {
                     MarkdownEditor(
                         text: Binding(
@@ -5242,10 +5237,10 @@ struct ContentView: View {
                             handleGuideEditorImageAttachment(info)
                         }
                     )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .frame(maxWidth: .infinity, minHeight: bottomPaneEditorMinHeight, alignment: .top)
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .frame(maxWidth: .infinity, alignment: .top)
             .layoutPriority(1)
             .background(
                 RoundedRectangle(cornerRadius: 12)
@@ -5262,9 +5257,8 @@ struct ContentView: View {
                 Text("Select a template to view its troubleshooting guide")
                     .font(.system(size: fontSize - 1))
                     .foregroundStyle(.secondary)
-                Spacer()
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .frame(maxWidth: .infinity, minHeight: bottomPaneEditorMinHeight, alignment: .top)
             .layoutPriority(1)
             .background(
                 RoundedRectangle(cornerRadius: 12)
@@ -10290,33 +10284,27 @@ struct ContentView: View {
         private var isDirty: Bool { draft != savedValue }
 
         var body: some View {
-            GeometryReader { proxy in
-                let verticalPadding = showsOuterBackground ? 36.0 : 24.0
-                let stackHeight = max(proxy.size.height - verticalPadding, 0)
-
-                Group {
-                    if showsOuterBackground {
-                        contentStack(height: stackHeight)
-                            .padding(.horizontal, 18)
-                            .padding(.vertical, 18)
-                            .background(
-                                RoundedRectangle(cornerRadius: 14)
-                                    .fill(Theme.grayBG.opacity(0.22))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 14)
-                                            .stroke(Theme.purple.opacity(0.2), lineWidth: 1)
-                                    )
+            Group {
+                if showsOuterBackground {
+                    contentStack
+                        .padding(.horizontal, 18)
+                        .padding(.vertical, 18)
+                        .background(
+                            RoundedRectangle(cornerRadius: 14)
+                                .fill(Theme.grayBG.opacity(0.22))
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 14)
+                                        .stroke(Theme.purple.opacity(0.2), lineWidth: 1)
+                                )
                             )
-                    } else {
-                        contentStack(height: stackHeight)
-                            .padding(.vertical, 12)
-                    }
+                } else {
+                    contentStack
+                        .padding(.vertical, 12)
                 }
-                .frame(width: proxy.size.width, height: proxy.size.height, alignment: .top)
             }
         }
 
-        private func contentStack(height: CGFloat) -> some View {
+        private var contentStack: some View {
             VStack(alignment: .leading, spacing: 16) {
                 if showsModePicker {
                     Picker("Notes Mode", selection: $mode) {
@@ -10331,9 +10319,7 @@ struct ContentView: View {
                     modeToolbar
                 }
 
-                GeometryReader { innerProxy in
-                    contentBody(height: innerProxy.size.height)
-                }
+                contentBody
             }
             .onChange(of: mode) { previous, newValue in
                 if newValue != .savedFiles {
@@ -10341,23 +10327,19 @@ struct ContentView: View {
                     onSavedFilesModeExit()
                 }
             }
-            .frame(height: height, alignment: .top)
+            .frame(maxWidth: .infinity, alignment: .top)
             .layoutPriority(1)
         }
 
         @ViewBuilder
-        private func contentBody(height: CGFloat) -> some View {
+        private var contentBody: some View {
             if mode == .notes {
                 let topPadding = showsContentBackground ? 4.0 : 12.0
-                let contentHeight = max(height - topPadding, 0)
-                notesPane(height: contentHeight)
+                notesPane
                     .padding(.top, topPadding)
-                    .frame(minHeight: max(editorMinHeight, contentHeight),
-                           maxHeight: .infinity,
-                           alignment: .top)
+                    .frame(minHeight: editorMinHeight, alignment: .top)
             } else {
                 let topPadding: CGFloat = 2.0
-                let contentHeight = max(height - topPadding, 0)
                 SavedFilesWorkspace(
                     fontSize: fontSize,
                     files: savedFiles,
@@ -10374,9 +10356,7 @@ struct ContentView: View {
                     editorMinHeight: editorMinHeight
                 )
                 .padding(.top, topPadding)
-                .frame(minHeight: max(editorMinHeight, contentHeight),
-                       maxHeight: .infinity,
-                       alignment: .top)
+                .frame(minHeight: editorMinHeight, alignment: .top)
             }
         }
 
@@ -10426,7 +10406,7 @@ struct ContentView: View {
         }
 
         @ViewBuilder
-        private func notesPane(height: CGFloat) -> some View {
+        private var notesPane: some View {
             let base = Group {
                 if isPreview {
                     MarkdownPreviewView(
@@ -10434,7 +10414,7 @@ struct ContentView: View {
                         fontSize: fontSize * 1.5,
                         onLinkOpen: onLinkOpen
                     )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
                 } else {
                     MarkdownEditor(
                         text: $draft,
@@ -10445,10 +10425,10 @@ struct ContentView: View {
                             onImageAttachment(info)
                         }
                     )
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+                    .frame(maxWidth: .infinity, minHeight: editorMinHeight, alignment: .top)
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .frame(maxWidth: .infinity, alignment: .top)
             .layoutPriority(1)
 
             if showsContentBackground {
@@ -10461,14 +10441,10 @@ struct ContentView: View {
                                     .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
                             )
                     )
-                    .frame(minHeight: editorMinHeight,
-                           maxHeight: .infinity,
-                           alignment: .top)
+                    .frame(minHeight: editorMinHeight, alignment: .top)
             } else {
                 base
-                    .frame(minHeight: editorMinHeight,
-                           maxHeight: .infinity,
-                           alignment: .top)
+                    .frame(minHeight: editorMinHeight, alignment: .top)
             }
         }
 

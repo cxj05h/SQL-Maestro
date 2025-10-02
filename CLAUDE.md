@@ -30,12 +30,13 @@
 - "AFP" = Alternate Fields Pane
 - "CBV" = copy block values
 - "CI" = copy all individual 
+- "DFP" = dynamic field pane--where all the dynamic fields reside
 - "DFN" = the dynamic field name that appears in the UI under the Dynamic fields which is pulled from the active query template's placeholders
 - "DFV" = the dynamic field value that is inserted into the text field by the user under a specific DFN and can be replaced by double-clicking a locked value from the AFP
 - "output sql" = the text pane that appears when "populate query" is run
 - "TSN" = ticket session name. either the default #1, #2, #3 names or the name that has replaced those default names for the ticket session done by right-click on the ticket session button > rename
 - "image preview" = the window that appears when cmd+click in the STP or from any of the 
-- "3 panes" = refers to GNP, SNP SFP
+- "3 panes" = refers to GNP, SNP, SFP
 - "3 pop out panes" = refers to any of the GNP, SNP or SFP in popout mode
 - "kb shortcut menu" = refers to the menu item under: menu bar > help > keyboard shortcuts
 
