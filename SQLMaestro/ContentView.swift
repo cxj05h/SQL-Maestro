@@ -5558,31 +5558,59 @@ struct ContentView: View {
         
         // Helper to copy all static, template, and alternate field values as a single block to clipboard
         private func copyBlockValuesToClipboard() {
+            let export = buildCopyBlock()
+            let pb = NSPasteboard.general
+            pb.clearContents()
+            // Add each raw value as a separate clipboard entry
+            for v in export.values {
+                pb.setString(v, forType: .string)
+            }
+            // Add the formatted block as a single clipboard entry
+            pb.setString(export.block, forType: .string)
+            LOG("Copied all values to clipboard", ctx: ["count": "\(export.values.count)"])
+            withAnimation { toastCopied = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+                withAnimation { toastCopied = false }
+            }
+        }
+
+        private struct CopyBlockExport {
+            let values: [String]
+            let block: String
+            let header: String
+        }
+
+        private func buildCopyBlock(templateOverride: TemplateItem? = nil,
+                                    allowSelectedTemplateFallback: Bool = true) -> CopyBlockExport {
             var values: [String] = []
             values.append(orgId)
             values.append(acctId)
             values.append(mysqlDb)
-            var blockLines: [String] = []
+
             let sessionName = sessions.sessionNames[sessions.current] ?? "Session #\(sessions.current.rawValue)"
-            let formattedSessionName: String
-            if sessionName.isEmpty {
-                formattedSessionName = sessionName
-            } else {
-                formattedSessionName = "**\(sessionName)**"
-            }
+            let formattedSessionName = sessionName.isEmpty ? sessionName : "**\(sessionName)**"
+
+            var blockLines: [String] = []
             blockLines.append(formattedSessionName)
-            blockLines.append("Org-ID: \(orgId)")
-            blockLines.append("Acct-ID: \(acctId)")
-            blockLines.append("mysqlDb: \(mysqlDb)")
-            if let t = selectedTemplate {
+            blockLines.append("Org-ID: `\(orgId)`")
+            blockLines.append("Acct-ID: `\(acctId)`")
+            blockLines.append("mysqlDb: `\(mysqlDb)`")
+
+            let templateForBlock: TemplateItem? = {
+                if let override = templateOverride {
+                    return override
+                }
+                return allowSelectedTemplateFallback ? selectedTemplate : nil
+            }()
+            if let t = templateForBlock {
                 let staticKeys = ["Org-ID", "Acct-ID", "mysqlDb"]
                 for ph in t.placeholders where !staticKeys.contains(ph) {
-                    let val = sessions.value(for: ph) ?? ""
+                    let val = sessions.value(for: ph)
                     values.append(val)
-                    blockLines.append("\(ph): \(val)")
+                    blockLines.append("\(ph): `\(val)`")
                 }
             }
-            // Also include alternate fields for this session
+
             if let alternates = sessions.sessionAlternateFields[sessions.current] {
                 for alt in alternates {
                     values.append(alt.value)
@@ -5594,25 +5622,45 @@ struct ContentView: View {
                     } else {
                         formattedName = alt.name
                     }
-                    blockLines.append("\(formattedName): \(alt.value)")
+                    blockLines.append("\(formattedName): `\(alt.value)`")
                 }
             }
-            let pb = NSPasteboard.general
-            pb.clearContents()
-            // Add each value as a separate clipboard entry
-            for v in values {
-                pb.setString(v, forType: .string)
-            }
-            // Add the block string as a single clipboard entry
-            let block = blockLines.joined(separator: "\n")
-            pb.setString(block, forType: .string)
-            LOG("Copied all values to clipboard", ctx: ["count": "\(values.count)"])
-            withAnimation { toastCopied = true }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
-                withAnimation { toastCopied = false }
-            }
+
+            return CopyBlockExport(
+                values: values,
+                block: blockLines.joined(separator: "\n"),
+                header: formattedSessionName
+            )
         }
-        
+
+        private func shouldAutoPrependCopyBlock(for source: String) -> Bool {
+            source == "loadTicketSession" || source == "importSharedSession"
+        }
+
+        private func notesWithCopyBlockPrependedIfNeeded(_ original: String,
+                                                         export: CopyBlockExport,
+                                                         source: String) -> String {
+            guard shouldAutoPrependCopyBlock(for: source) else { return original }
+            let header = export.header.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !header.isEmpty else { return original }
+
+            let firstLine = original
+                .components(separatedBy: .newlines)
+                .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }?
+                .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            if firstLine == header {
+                return original
+            }
+
+            let remainder = String(original.drop(while: { ch in
+                ch == "\n" || ch == "\r" || ch == "\t" || ch == " "
+            }))
+            if remainder.isEmpty {
+                return export.block
+            }
+            return export.block + "\n\n" + remainder
+        }
+
         private func copyIndividualValuesToClipboard() {
             var values: [String] = []
             
@@ -6825,10 +6873,6 @@ struct ContentView: View {
             }
 
             isLoadingTicketSession = true
-            sessions.sessionNotes[sessions.current] = snapshot.notes
-            setSessionNotesDraft(snapshot.notes,
-                                 for: sessions.current,
-                                 source: source)
 
             let baseAlternateFields = snapshot.alternateFields.map { AlternateField(name: $0.key, value: $0.value) }
             let combinedAlternateFields = buildCombinedAlternateFields(
@@ -6836,6 +6880,16 @@ struct ContentView: View {
                 usedTemplates: snapshot.usedTemplates
             )
             sessions.sessionAlternateFields[sessions.current] = Array(combinedAlternateFields.prefix(200))
+
+            let copyBlockExport = buildCopyBlock(templateOverride: resolvedTemplate,
+                                                 allowSelectedTemplateFallback: false)
+            let preparedNotes = notesWithCopyBlockPrependedIfNeeded(snapshot.notes,
+                                                                    export: copyBlockExport,
+                                                                    source: source)
+            sessions.sessionNotes[sessions.current] = preparedNotes
+            setSessionNotesDraft(preparedNotes,
+                                 for: sessions.current,
+                                 source: source)
 
             sessions.sessionImages[sessions.current] = snapshot.sessionImages
 
