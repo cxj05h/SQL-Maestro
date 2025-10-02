@@ -4889,8 +4889,6 @@ struct ContentView: View {
                 .font(.system(size: fontSize - 1))
                 .disabled(pane == .guideNotes && selectedTemplate == nil)
 
-                Spacer(minLength: 12)
-
                 switch pane {
                 case .guideNotes:
                     MarkdownToolbar(iconSize: fontSize + 2, isEnabled: !isPreviewMode, controller: guideNotesEditor)
@@ -4898,6 +4896,9 @@ struct ContentView: View {
                         get: { isPreviewMode },
                         set: { setPreviewMode($0) }
                     ))
+
+                    Spacer(minLength: 12)
+
                     if guideDirty {
                         Button("Save Guide") {
                             guard let template = selectedTemplate else { return }
@@ -4924,6 +4925,8 @@ struct ContentView: View {
                         get: { isPreviewMode },
                         set: { setPreviewMode($0) }
                     ))
+
+                    Spacer(minLength: 12)
                     if (sessionNotesDrafts[activeSession] ?? "") != (sessions.sessionNotes[activeSession] ?? "") {
                         Button("Save Notes") {
                             saveSessionNotes()
@@ -7190,7 +7193,7 @@ struct ContentView: View {
             panel.canCreateDirectories = true
             panel.nameFieldStringValue = "SharedSession-\(sanitizedName.isEmpty ? "Ticket" : sanitizedName).zip"
             panel.allowedContentTypes = [UTType.zip]
-            panel.directoryURL = AppPaths.sessions
+            panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
 
             guard panel.runModal() == .OK, let destination = panel.url else { return }
 
@@ -7754,7 +7757,7 @@ struct ContentView: View {
             panel.canChooseDirectories = false
             panel.canChooseFiles = true
             panel.allowsMultipleSelection = false
-            panel.directoryURL = AppPaths.sessions
+            panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
 
             guard panel.runModal() == .OK, let archiveURL = panel.url else { return }
 
