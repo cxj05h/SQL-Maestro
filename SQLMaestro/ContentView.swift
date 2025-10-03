@@ -2390,10 +2390,9 @@ struct ContentView: View {
     )
     .contentShape(Rectangle())
     .contextMenu {
+    Button("Edit") { editTemplateInline(template) }
     Button("Open in VS Code") { openInVSCode(template.url) }
-    Button("Edit in App") { editTemplateInline(template) }
     Button("Add Tags") { startAddTags(for: template) }
-    Button("Open JSON") { openTemplateJSON(template) }
     Button("Show in Finder") { revealTemplateInFinder(template) }
     Divider()
     Button("Export Template…") { exportTemplate(template) }
@@ -8846,8 +8845,12 @@ struct ContentView: View {
             let onSave: ([String]) -> Void
             let onCancel: () -> Void
 
+            @EnvironmentObject private var templatesManager: TemplateManager
+            @ObservedObject private var tagsStore = TemplateTagsStore.shared
             @State private var inputText: String = ""
             @State private var draftTags: [String]
+            @State private var availableTags: [String] = []
+            @State private var highlightedSuggestionIndex: Int? = nil
             @State private var errorMessage: String? = nil
             @FocusState private var isFieldFocused: Bool
 
@@ -8870,6 +8873,36 @@ struct ContentView: View {
                 )
             }
 
+            private var trimmedInput: String {
+                inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+
+            private var matchingTags: [String] {
+                let query = trimmedInput
+                guard !query.isEmpty else { return [] }
+                return availableTags.filter { tag in
+                    tag.range(of: query, options: .caseInsensitive) != nil
+                }
+            }
+
+            private var highlightedSuggestionTag: String? {
+                guard let index = highlightedSuggestionIndex,
+                      index >= 0,
+                      index < matchingTags.count else { return nil }
+                return matchingTags[index]
+            }
+
+            private var suggestionsListHeight: CGFloat {
+                let visible = min(matchingTags.count, 8)
+                guard visible > 0 else { return 0 }
+                let rowHeight: CGFloat = 32
+                let spacing: CGFloat = 6
+                let padding: CGFloat = 8 // LazyVStack vertical padding (4 top + 4 bottom)
+                let rowsHeight = CGFloat(visible) * rowHeight
+                let spacingHeight = CGFloat(max(visible - 1, 0)) * spacing
+                return rowsHeight + spacingHeight + padding
+            }
+
             var body: some View {
                 VStack(alignment: .leading, spacing: 16) {
                     VStack(alignment: .leading, spacing: 4) {
@@ -8887,6 +8920,12 @@ struct ContentView: View {
                             .font(.system(size: 14))
                             .focused($isFieldFocused)
                             .onSubmit(commitCurrentEntry)
+                            .onKeyPress(.downArrow) { moveHighlight(1) }
+                            .onKeyPress(.upArrow) { moveHighlight(-1) }
+                            .onKeyPress(.space) { handleSpaceKey() }
+                            .onChange(of: inputText) { _ in
+                                updateHighlightForCurrentMatches(resetToFirst: true)
+                            }
                             .overlay(alignment: .trailing) {
                                 if !inputText.isEmpty {
                                     Button(action: { inputText = "" }) {
@@ -8898,6 +8937,9 @@ struct ContentView: View {
                                 }
                             }
                             .tint(Theme.pink)
+                            .onChange(of: availableTags) { _ in
+                                updateHighlightForCurrentMatches(resetToFirst: false)
+                            }
 
                         if let message = errorMessage {
                             Text(message)
@@ -8905,46 +8947,8 @@ struct ContentView: View {
                                 .foregroundStyle(Color.red)
                         }
 
-                        if draftTags.isEmpty {
-                            Text("No tags yet. Type a name and hit comma or return to confirm the tag.")
-                                .font(.footnote)
-                                .foregroundStyle(.secondary)
-                                .padding(.vertical, 12)
-                                .frame(maxWidth: .infinity, alignment: .center)
-                                .background(Theme.pink.opacity(0.08))
-                                .clipShape(RoundedRectangle(cornerRadius: 8))
-                        } else {
-                            ScrollView {
-                                LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], alignment: .leading, spacing: 8) {
-                                    ForEach(draftTags, id: \.self) { tag in
-                                        HStack(spacing: 6) {
-                                            Text("#\(tag)")
-                                                .font(.system(size: 13, weight: .semibold))
-                                                .foregroundStyle(Theme.pink)
-                                            Button {
-                                                removeTag(tag)
-                                            } label: {
-                                                Image(systemName: "xmark.circle.fill")
-                                                    .font(.system(size: 12, weight: .semibold))
-                                                    .foregroundStyle(.secondary)
-                                            }
-                                            .buttonStyle(.plain)
-                                            .accessibilityLabel("Remove tag #\(tag)")
-                                        }
-                                        .padding(.horizontal, 12)
-                                        .padding(.vertical, 8)
-                                        .background(Theme.pink.opacity(0.15))
-                                        .clipShape(Capsule())
-                                        .overlay(
-                                            Capsule()
-                                                .stroke(Theme.pink.opacity(0.25), lineWidth: 1)
-                                        )
-                                    }
-                                }
-                                .padding(.vertical, 4)
-                            }
-                            .frame(minHeight: 80, maxHeight: 200)
-                        }
+                        suggestionsSection
+                        selectedTagsSection
                     }
 
                     Spacer(minLength: 8)
@@ -8972,6 +8976,10 @@ struct ContentView: View {
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
                         isFieldFocused = true
                     }
+                    refreshAvailableTags()
+                }
+                .onChange(of: templatesManager.templates) { _ in
+                    refreshAvailableTags()
                 }
             }
 
@@ -9005,11 +9013,289 @@ struct ContentView: View {
                 errorMessage = nil
                 if !draftTags.contains(normalized) {
                     draftTags.append(normalized)
+                    includeInAvailable(normalized)
                 }
             }
 
             private func removeTag(_ tag: String) {
                 draftTags.removeAll { $0 == tag }
+            }
+
+            private func includeInAvailable(_ tag: String) {
+                if !availableTags.contains(tag) {
+                    availableTags.append(tag)
+                    availableTags.sort { lhs, rhs in
+                        lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
+                    }
+                    updateHighlightForCurrentMatches(resetToFirst: false)
+                }
+            }
+
+            @discardableResult
+            private func moveHighlight(_ delta: Int) -> KeyPress.Result {
+                let count = matchingTags.count
+                guard count > 0 else { return .ignored }
+                let startingIndex: Int
+                if let current = highlightedSuggestionIndex {
+                    startingIndex = current
+                } else {
+                    startingIndex = delta > 0 ? -1 : count
+                }
+                var next = startingIndex + delta
+                if next < 0 { next = count - 1 }
+                if next >= count { next = 0 }
+                highlightedSuggestionIndex = next
+                return .handled
+            }
+
+            private func handleSpaceKey() -> KeyPress.Result {
+                guard let tag = highlightedSuggestionTag else { return .ignored }
+                acceptSuggestion(tag)
+                return .handled
+            }
+
+            private func acceptSuggestion(_ tag: String) {
+                guard !draftTags.contains(tag) else { return }
+                addTag(tag)
+                highlightedSuggestionIndex = nil
+                inputText = ""
+                DispatchQueue.main.async {
+                    isFieldFocused = true
+                }
+            }
+
+            private func updateHighlightForCurrentMatches(resetToFirst: Bool) {
+                let count = matchingTags.count
+                guard count > 0 else {
+                    highlightedSuggestionIndex = nil
+                    return
+                }
+                if resetToFirst || highlightedSuggestionIndex == nil || highlightedSuggestionIndex! >= count {
+                    highlightedSuggestionIndex = 0
+                }
+            }
+
+            @ViewBuilder
+            private var selectedTagsSection: some View {
+                if draftTags.isEmpty {
+                    if matchingTags.isEmpty {
+                        Text("No tags yet. Type a name and hit comma or return to confirm the tag.")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                            .padding(.vertical, 12)
+                            .frame(maxWidth: .infinity, alignment: .center)
+                            .background(Theme.pink.opacity(0.08))
+                            .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
+                } else {
+                    ScrollView {
+                        TagWrap(draftTags, spacing: 8) { tag in
+                            HStack(spacing: 6) {
+                                Text("#\(tag)")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(Theme.pink)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.85)
+                                Button {
+                                    removeTag(tag)
+                                } label: {
+                                    Image(systemName: "xmark.circle.fill")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .buttonStyle(.plain)
+                                .accessibilityLabel("Remove tag #\(tag)")
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 8)
+                            .background(Theme.pink.opacity(0.15))
+                            .clipShape(Capsule())
+                            .overlay(
+                                Capsule()
+                                    .stroke(Theme.pink.opacity(0.25), lineWidth: 1)
+                            )
+                        }
+                        .padding(.vertical, 4)
+                    }
+                    .frame(minHeight: 80, maxHeight: 200)
+                }
+            }
+
+            @ViewBuilder
+            private var suggestionsSection: some View {
+                if !matchingTags.isEmpty {
+                    VStack(alignment: .leading, spacing: 6) {
+                        Text("Matching tags")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        let height = max(suggestionsListHeight, 44)
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 6) {
+                                ForEach(Array(matchingTags.enumerated()), id: \.element) { index, tag in
+                                    let isHighlighted = highlightedSuggestionIndex == index
+                                    Button {
+                                        acceptSuggestion(tag)
+                                    } label: {
+                                        HStack {
+                                            Text("#\(tag)")
+                                                .font(.system(size: 13, weight: .semibold))
+                                                .foregroundStyle(.primary)
+                                            Spacer()
+                                            if draftTags.contains(tag) {
+                                                HStack(spacing: 4) {
+                                                    Image(systemName: "checkmark.circle.fill")
+                                                        .font(.system(size: 12, weight: .semibold))
+                                                        .foregroundStyle(Theme.pink)
+                                                    Text("Added")
+                                                        .font(.caption)
+                                                        .foregroundStyle(.secondary)
+                                                }
+                                            } else {
+                                                Image(systemName: "plus.circle")
+                                                    .font(.system(size: 14, weight: .semibold))
+                                                    .foregroundStyle(Theme.pink)
+                                            }
+                                        }
+                                        .padding(.vertical, 6)
+                                        .padding(.horizontal, 10)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .background(
+                                            RoundedRectangle(cornerRadius: 10)
+                                                .fill(isHighlighted ? Theme.pink.opacity(0.2) : Theme.pink.opacity(0.08))
+                                        )
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 10)
+                                                .stroke(isHighlighted ? Theme.pink.opacity(0.5) : Theme.pink.opacity(0.25), lineWidth: isHighlighted ? 1.5 : 1)
+                                        )
+                                    }
+                                    .buttonStyle(.plain)
+                                    .disabled(draftTags.contains(tag))
+                                }
+                            }
+                            .padding(.vertical, 4)
+                        }
+                        .frame(height: height)
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity)
+                    .background(Theme.pink.opacity(0.08))
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(Theme.pink.opacity(0.2), lineWidth: 1)
+                    )
+                } else if !trimmedInput.isEmpty {
+                    Text("No matching existing tags.")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 10)
+                        .background(Theme.pink.opacity(0.08))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .stroke(Theme.pink.opacity(0.2), lineWidth: 1)
+                        )
+                }
+            }
+
+            private func refreshAvailableTags() {
+                var set = Set<String>()
+                for template in templatesManager.templates {
+                    tagsStore.ensureLoaded(template)
+                    for tag in tagsStore.tags(for: template) {
+                        set.insert(tag)
+                    }
+                }
+                for tag in draftTags {
+                    set.insert(tag)
+                }
+                availableTags = set.sorted { lhs, rhs in
+                    lhs.localizedCaseInsensitiveCompare(rhs) == .orderedAscending
+                }
+                updateHighlightForCurrentMatches(resetToFirst: true)
+            }
+        }
+
+        private struct TagWrap<Data: RandomAccessCollection, Content: View>: View where Data.Element: Hashable {
+            private let items: [Data.Element]
+            private let spacing: CGFloat
+            private let content: (Data.Element) -> Content
+
+            init(_ data: Data, spacing: CGFloat = 8, @ViewBuilder content: @escaping (Data.Element) -> Content) {
+                self.items = Array(data)
+                self.spacing = spacing
+                self.content = content
+            }
+
+            var body: some View {
+                FlowLayout(spacing: spacing) {
+                    ForEach(Array(items.enumerated()), id: \.offset) { _, item in
+                        content(item)
+                    }
+                }
+            }
+        }
+
+        private struct FlowLayout: Layout {
+            var spacing: CGFloat = 8
+
+            func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+                let rows = computeRows(proposal: proposal, subviews: subviews)
+                let width = proposal.replacingUnspecifiedDimensions().width
+                let height = rows.last?.maxY ?? 0
+                return CGSize(width: width, height: height)
+            }
+
+            func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+                let rows = computeRows(proposal: proposal, subviews: subviews)
+                for (index, subview) in subviews.enumerated() {
+                    if let position = rows.flatMap({ $0.positions }).first(where: { $0.index == index }) {
+                        subview.place(at: CGPoint(x: bounds.minX + position.x, y: bounds.minY + position.y),
+                                     proposal: .unspecified)
+                    }
+                }
+            }
+
+            private func computeRows(proposal: ProposedViewSize, subviews: Subviews) -> [Row] {
+                let containerWidth = proposal.replacingUnspecifiedDimensions().width
+                var rows: [Row] = []
+                var currentRow = Row(positions: [], maxY: 0)
+                var x: CGFloat = 0
+                var y: CGFloat = 0
+
+                for (index, subview) in subviews.enumerated() {
+                    let size = subview.sizeThatFits(.unspecified)
+
+                    if x + size.width > containerWidth && !currentRow.positions.isEmpty {
+                        y = currentRow.maxY + spacing
+                        rows.append(currentRow)
+                        currentRow = Row(positions: [], maxY: 0)
+                        x = 0
+                    }
+
+                    currentRow.positions.append(Position(index: index, x: x, y: y))
+                    currentRow.maxY = max(currentRow.maxY, y + size.height)
+                    x += size.width + spacing
+                }
+
+                if !currentRow.positions.isEmpty {
+                    rows.append(currentRow)
+                }
+
+                return rows
+            }
+
+            private struct Row {
+                var positions: [Position]
+                var maxY: CGFloat
+            }
+
+            private struct Position {
+                let index: Int
+                let x: CGFloat
+                let y: CGFloat
             }
         }
 
