@@ -72,6 +72,7 @@
 				"images/Maestro-Screenshots/Guide-Image-Rename.png",
 				"images/Maestro-Screenshots/importhostorg.png",
 				"images/Maestro-Screenshots/importqueries.png",
+				"images/Maestro-Screenshots/importquerybutton.png",
 				"images/Maestro-Screenshots/jsonstructure.png",
 				"images/Maestro-Screenshots/Quick-capture1.png",
 				"images/Maestro-Screenshots/Quick-capture2.png",
