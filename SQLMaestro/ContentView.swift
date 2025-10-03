@@ -2242,6 +2242,15 @@ struct ContentView: View {
     .textFieldStyle(.roundedBorder)
     .font(.system(size: fontSize))
     .focused($isSearchFocused)
+    .onSubmit { _ = focusTemplates(direction: 1) }
+    .onKeyPress(.downArrow) {
+        _ = focusTemplates(direction: 1)
+        return .handled
+    }
+    .onKeyPress(.upArrow) {
+        _ = focusTemplates(direction: -1)
+        return .handled
+    }
     if !searchText.isEmpty {
     Button("Clear") {
     searchText = ""
@@ -11864,4 +11873,13 @@ struct ContentView: View {
         }
     }
 
+    private func focusTemplates(direction: Int) -> KeyPress.Result {
+        guard !filteredTemplates.isEmpty else { return .ignored }
+        if selectedTemplate == nil {
+            let index = direction > 0 ? 0 : filteredTemplates.count - 1
+            selectTemplate(filteredTemplates[index])
+        }
+        isListFocused = true
+        return .handled
+    }
 }
