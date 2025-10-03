@@ -261,6 +261,7 @@ Steps:
 
 **File Structure**
 
+```
 ~.../Library/Application Support/SQLMaestro/
 └── backups/
   ├── query_history_checkpoints/    # Automatic template history
@@ -270,6 +271,7 @@ Steps:
   └── query_template_backups/        # Manual full backups
 	  ├── templates-20251003_150000.zip
 	  └── ...
+```
 
 **Best Practices**
 - Regular Full Backups: Create manual full backups before major changes or periodically for peace of mind
