@@ -226,12 +226,12 @@ final class TemplateManager: ObservableObject {
         // Extract template name from filename (everything before the last dash)
         let filename = archiveURL.deletingPathExtension().lastPathComponent
         let components = filename.split(separator: "-")
-        guard components.count >= 2 else {
+        guard components.count >= 1 else {
             throw NSError(domain: "TemplateManager", code: 1, userInfo: [NSLocalizedDescriptionKey: "Invalid backup filename format"])
         }
 
-        // Join all components except the last one (timestamp)
-        let templateName = components.dropLast().joined(separator: "-")
+        // Join all components except the last one (timestamp) for timestamped backups, or use full name for simple backups
+        let templateName = components.count >= 2 ? components.dropLast().joined(separator: "-") : filename
 
         // Find the template.sql file in the extracted content
         guard let sqlURL = try? fm.contentsOfDirectory(at: tempRoot, includingPropertiesForKeys: nil)
