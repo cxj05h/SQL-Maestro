@@ -4,6 +4,19 @@ Having a helper like Maestro provides a kind of "wokrstation" for organizing the
 
 Instead of needing to hold everything in your mind, on Clipy, on a sticky note, etc., this Maestro becomes the AIO for any information about any ticket at any time. 
 
+## Getting Started: Import Org and Host Files
+
+- In order to connect to Querious DBs to the right database and MySQL server, you need to have the Organization IDs and their mapped Host Names.
+- This requires importing two files I will provide you upon installing the software
+- These files are `org_mysql_map.json` ("Import Orgs") and `mysql_hosts_map.json` ("Import Hosts")
+- After downloading the files I provide, select the file to import with its corresponding import button. Both need to be imported.
+
+ ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/importhostorg.png)
+
+
+# UI & Features
+
+
 ## Quick Begin Capture (Org/Acct + ad-hoc IDs)
 
 Use the new **Begin** button in the Static Info header – or press **⌃⇧B** from anywhere on macOS – to pop open a lightweight capture window without picking a query template first. Paste the customer’s **Org ID** and **Account ID** into the first two fields, press **Tab** to move between them. **To add additional rows for Alternate Fields** for other identifiers, hit **Cmd+Return**. When you’re done, press **Enter** to **Save**.
@@ -24,7 +37,6 @@ The "Additional Value" values will populate the Alternate Field pane with howeve
 
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/quickcapture-value-entered.png)
 
-# UI & Features
 ## **Query Templates**
 
 **This is the centerpiece of SQL Maestro**: predefined SQL query structures that use Placeholders. Reusable across tickets. Can be linked to DB tables and "Links".
@@ -169,13 +181,28 @@ Templates can now carry one or more tags saved in separate .tags.json sidecar 
 
 - **Cleanup** – Deleting a template removes its tag sidecar file automatically; renaming a template migrates its tags to the new filename.
 
+### Importing / Exporting Query Templates
+
+- You can share templates with others using this tool.
+- Each template is actually a package of a few file,s so it's not as simple as just "click-and-drag" to the receiving party
+- "Export" will zip these files and it's this zip folder you share.
+
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/ExportQueries.png)
+
+- "Import" button/menu item will take the above zipped folder and will unzip it into the correct place, adding the query to your personal directory
+
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/importqueries.png)
+
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/importquerybutton.png)
+
+
 ### Query Template Change History
 
 Each time you make a change to an existing Query Template, **that change is recorded in the 'backups' folder in the Application Support for SQL Maestro**:
 
 `'/Users/xxxxx/Library/Application Support/SQLMaestro/backups'`
 
-This is an important feature that will allow you to retrieve any previous change you made that might have broken a query that no longer works, and you don't know what change you made, or even if you accidentally deleted a query, and you need to restore the changes. 
+This is an important feature that allows you to retrieve any previous change you made that might have broken a query that no longer works. If you're unsure of the change or if you accidentally deleted a query, you can use this feature to restore the changes. 
 
 These files can pile up quickly if you make a lot of changes, so feel free to "prune" the garbage files that are unnecessary. 
 
