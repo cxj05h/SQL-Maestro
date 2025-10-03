@@ -11023,7 +11023,7 @@ struct ContentView: View {
         }
 
         private var contentStack: some View {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 8) {
                 if showsModePicker {
                     Picker("Notes Mode", selection: $mode) {
                         Text("Session Notes").tag(SessionNotesPaneMode.notes)
@@ -11299,7 +11299,7 @@ struct ContentView: View {
             @FocusState private var isSearchFieldFocused: Bool
 
             var body: some View {
-                VStack(alignment: .leading, spacing: 12) {
+                VStack(alignment: .leading, spacing: 4) {
                     searchControls
 
                     if let selectedID, files.contains(where: { $0.id == selectedID }) {
