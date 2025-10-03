@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		3CE5C49E2E8E9BEE007A7FEB /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = 3CE5C49D2E8E9BEE007A7FEB /* MarkdownUI */; };
 		3CE5C6D72E8FE7AF007A7FEB /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = 3CE5C6D62E8FE7AF007A7FEB /* MarkdownUI */; };
+		3CE5C8E42E8FE9D1007A7FEB /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = 3CE5C8E32E8FE9D1007A7FEB /* MarkdownUI */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -113,6 +114,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				3CE5C8E42E8FE9D1007A7FEB /* MarkdownUI in Frameworks */,
 				3CE5C6D72E8FE7AF007A7FEB /* MarkdownUI in Frameworks */,
 				3CE5C49E2E8E9BEE007A7FEB /* MarkdownUI in Frameworks */,
 			);
@@ -167,6 +169,7 @@
 			packageProductDependencies = (
 				3CE5C49D2E8E9BEE007A7FEB /* MarkdownUI */,
 				3CE5C6D62E8FE7AF007A7FEB /* MarkdownUI */,
+				3CE5C8E32E8FE9D1007A7FEB /* MarkdownUI */,
 			);
 			productName = SQLMaestro;
 			productReference = 3CE5BBF82E8E94A5007A7FEB /* SQLMaestro.app */;
@@ -197,7 +200,7 @@
 			mainGroup = 3C3149B72E744E3F00762156;
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
-				3CE5C6D52E8FE7AF007A7FEB /* XCLocalSwiftPackageReference "SQLMaestro/ThirdParty/MarkdownUI/swift-markdown-ui-main" */,
+				3CE5C8E22E8FE9D1007A7FEB /* XCLocalSwiftPackageReference "SQLMaestro/ThirdParty/MarkdownUI/swift-markdown-ui-main" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 3C3149C12E744E3F00762156 /* Products */;
@@ -437,7 +440,7 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		3CE5C6D52E8FE7AF007A7FEB /* XCLocalSwiftPackageReference "SQLMaestro/ThirdParty/MarkdownUI/swift-markdown-ui-main" */ = {
+		3CE5C8E22E8FE9D1007A7FEB /* XCLocalSwiftPackageReference "SQLMaestro/ThirdParty/MarkdownUI/swift-markdown-ui-main" */ = {
 			isa = XCLocalSwiftPackageReference;
 			relativePath = "SQLMaestro/ThirdParty/MarkdownUI/swift-markdown-ui-main";
 		};
@@ -449,6 +452,10 @@
 			productName = MarkdownUI;
 		};
 		3CE5C6D62E8FE7AF007A7FEB /* MarkdownUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = MarkdownUI;
+		};
+		3CE5C8E32E8FE9D1007A7FEB /* MarkdownUI */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = MarkdownUI;
 		};
