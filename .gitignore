@@ -13,6 +13,6 @@ SQLMaestroTests/
 SQLMaestroUITest/
 
 # SwiftPM / misc (if you ever add these)
-.swiftpm/
+#.swiftpm/
 .idea/
 
