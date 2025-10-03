@@ -198,21 +198,84 @@ Templates can now carry one or more tags saved in separate .tags.json sidecar 
 
 ### Query Template Change History
 
-Each time you make a change to an existing Query Template, **that change is recorded in the 'backups' folder in the Application Support for SQL Maestro**:
+Each time you make a change to an existing Query Template, **those changes are recorded in the `query_history_checkpoints` folder in the Application Support for SQL Maestro**:
 
-`'/Users/xxxxx/Library/Application Support/SQLMaestro/backups'`
+`/Users/<username>/Library/Application Support/SQLMaestro/backups/query_history_checkpoints`
 
-This is an important feature that allows you to retrieve any previous change you made that might have broken a query that no longer works. If you're unsure of the change or if you accidentally deleted a query, you can use this feature to restore the changes. 
+This is an important feature that allows you to retrieve any previous change you made that might have broken a query that no longer works, you accidently deleted a Guide Image or Link or removed a tag on accident. If you're unsure of the change or if you accidentally deleted a query, you can use this feature to restore the changes. The query history stores everything associated with a query template, such as links, guide images, guide notes, tags, and SQL templates. 
 
-These files can pile up quickly if you make a lot of changes, so feel free to "prune" the garbage files that are unnecessary. 
+Automatic backups are created after making a change to an active Query Template and reach a "checkpoint" action:
+- Populate query
+- Load another template
+- Switch ticket sessions
+- Clear session
+- Copy block/individual values
+- Connect to database
+- Quit application
 
-### Query Template Backups
+**Features:**
+- Each backup is a complete snapshot including SQL text, links, guide notes, images, tags, and metadata
+- Backups are throttled (1 second minimum between saves) to prevent duplicates
+- Automatically pruned after 30 days
+- Naming format: templatename-YYYYMMDD_HHmmss.zip
 
-This will create a snapshot zip file containing **ALL** queries in your app. Useful to use before version updates that could potentially (hopefully not) delete those queries or in general, periodically run this especially if you've invested a good amount of time building them.
+#### Restoring Templates
+Restore Single Template from History
 
-`/Users/xxxxx/Library/Application Support/SQLMaestro/backups/zips`
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/restorequerytemplate.png)
+
+Restore a specific template from its automatic checkpoint history.
+
+**Steps:**
+1. Menu: Queries > Restore Query Template…
+2. Select the checkpoint zip file you want to restore
+3. The template will be restored with all its assets (SQL, links, notes, images, etc.)
+
+Note: This restores a single template without affecting others. 
+
+### Query Template Backups (Full Backup)
+
+This will create a snapshot zip file containing **ALL** queries in your app. Each backed-up query is its own zip file inside the parent zip.
+
+Useful to use before version updates that could potentially (hopefully not) delete those queries, or in general, periodically run this, especially if you've invested a good amount of time building them.
+
+`/Users/<username>/Library/Application Support/SQLMaestro/backups/query_template_backups`
 
 Navigate to the top menu item "Queries" > "Backup Queries"
+
+- Naming format: templates-YYYYMMDD_HHmmss.zip
+
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/querybackupzip.png)
+
+#### Restore All Templates from Full Backup
+
+Restore your entire template library from a manual full backup.
+
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/restorequerybackups.png)
+
+Steps:
+1. Menu: Queries > Restore Query Backups…
+2. Select the full backup archive (templates-*.zip)
+3. ⚠️ Warning: This is a destructive operation that replaces all current templates. 
+4. All templates will be restored from the backup
+
+**File Structure**
+
+~.../Library/Application Support/SQLMaestro/
+└── backups/
+  ├── query_history_checkpoints/    # Automatic template history
+  │   ├── example-20251003_143022.zip
+  │   ├── demo-20251003_145530.zip
+  │   └── ...
+  └── query_template_backups/        # Manual full backups
+	  ├── templates-20251003_150000.zip
+	  └── ...
+
+**Best Practices**
+- Regular Full Backups: Create manual full backups before major changes or periodically for peace of mind
+- History Checkpoints: Rely on automatic checkpoints during normal work - they happen automatically at key actions
+- 30-Day Retention: History checkpoints are automatically cleaned up after 30 days, so restore older versions before they expire if needed
+
 
 ### Query Template Indicator Per Ticket Session
 
