@@ -9080,21 +9080,11 @@ struct ContentView: View {
             @State private var deleteSelection: Set<String> = []
             @State private var editListVersion: Int = 0
             @State private var detectedFromFile: [String] = []
+            @StateObject private var sqlEditorController = SQLEditorController()
             
             // Find the NSTextView that backs the SwiftUI TextEditor so we can insert at caret / replace selection.
             private func activeEditorTextView() -> NSTextView? {
-                if let tv = NSApp.keyWindow?.firstResponder as? NSTextView {
-                    return tv
-                }
-                guard let contentView = NSApp.keyWindow?.contentView else { return nil }
-                return findTextView(in: contentView)
-            }
-            private func findTextView(in view: NSView) -> NSTextView? {
-                if let tv = view as? NSTextView { return tv }
-                for sub in view.subviews {
-                    if let found = findTextView(in: sub) { return found }
-                }
-                return nil
+                sqlEditorController.attachedTextView()
             }
             
             // Insert {{placeholder}} at the current caret or replace the current selection.
@@ -9114,15 +9104,13 @@ struct ContentView: View {
                 let safeLoc = max(0, min(sel.location, ns.length))
                 let safeLen = max(0, min(sel.length, ns.length - safeLoc))
                 let safeRange = NSRange(location: safeLoc, length: safeLen)
-                let updated = ns.replacingCharacters(in: safeRange, with: token)
-                self.localText = updated
-                self.text = updated
-                DispatchQueue.main.async {
-                    tv.string = updated
-                    let newCaret = NSRange(location: safeRange.location + (token as NSString).length, length: 0)
-                    tv.setSelectedRange(newCaret)
-                    tv.scrollRangeToVisible(newCaret)
-                }
+                let insertionLength = (token as NSString).length
+                let newCaret = NSRange(location: safeRange.location + insertionLength, length: 0)
+                applyTextChange(textView: tv,
+                                 range: safeRange,
+                                 replacement: token,
+                                 newSelection: newCaret,
+                                 actionName: "Insert Placeholder")
                 LOG("Inserted placeholder", ctx: ["ph": name, "mode": safeLen > 0 ? "replace" : "insert"])
             }
             
@@ -9334,15 +9322,13 @@ struct ContentView: View {
                 let newString = ns.replacingCharacters(in: lineRange, with: updatedSegment)
                 
                 // Update SwiftUI and the NSTextView
-                self.localText = newString
-                self.text = newString
-                tv.string = newString
-                
-                // Keep selection over the transformed block
                 let newRange = NSRange(location: lineRange.location, length: (updatedSegment as NSString).length)
-                tv.setSelectedRange(newRange)
-                tv.scrollRangeToVisible(newRange)
-                
+                applyTextChange(textView: tv,
+                                 range: lineRange,
+                                 replacement: updatedSegment,
+                                 newSelection: newRange,
+                                 actionName: allAlreadyCommented ? "Uncomment" : "Comment")
+
                 LOG("Toggle comment", ctx: [
                     "action": allAlreadyCommented ? "uncomment" : "comment",
                     "lines": "\(lines.count)",
@@ -9370,18 +9356,15 @@ struct ContentView: View {
                 
                 // Add newlines around the divider for better formatting
                 let insertText = "\n" + dividerText + "\n"
-                let updated = ns.replacingCharacters(in: safeRange, with: insertText)
-                self.localText = updated
-                self.text = updated
-                DispatchQueue.main.async {
-                    tv.string = updated
-                    let newCaret = NSRange(location: safeRange.location + (insertText as NSString).length, length: 0)
-                    tv.setSelectedRange(newCaret)
-                    tv.scrollRangeToVisible(newCaret)
-                }
+                let newCaret = NSRange(location: safeRange.location + (insertText as NSString).length, length: 0)
+                applyTextChange(textView: tv,
+                                 range: safeRange,
+                                 replacement: insertText,
+                                 newSelection: newCaret,
+                                 actionName: "Insert Divider")
                 LOG("Inserted visual divider", ctx: ["mode": safeLen > 0 ? "replace" : "insert"])
             }
-            
+
             var body: some View {
                 VStack(alignment: .leading, spacing: 0) {
                     HStack {
@@ -9474,17 +9457,21 @@ struct ContentView: View {
                         }
                     }
                     Divider()
-                    TextEditor(text: $localText)
-                        .font(.system(size: fontSize, design: .monospaced))
+                    SQLEditor(text: $localText,
+                              fontSize: fontSize,
+                              controller: sqlEditorController,
+                              onTextChange: { newVal in
+                                  self.text = newVal
+                              })
                         .frame(minHeight: 340)
                         .padding()
+                        .background(Color.clear)
                         .onAppear {
                             localText = text
                             let found = detectedPlaceholders(from: localText)
                             detectedFromFile = found
                             LOG("Detected placeholders in file", ctx: ["detected": "\(found.count)"])
                         }
-                        .onChange(of: localText) { _, newVal in text = newVal }
                     HStack {
                         Spacer()
                         Text("Tip: ⌘S to save, ⎋ to cancel")
@@ -9615,9 +9602,47 @@ struct ContentView: View {
                     .frame(minWidth: 520, minHeight: 360)
                 }
                 .frame(minWidth: 760, minHeight: 520)
+                .onAppear {
+                    let sizeString: String
+                    if let window = NSApp.keyWindow {
+                        let size = window.contentView?.bounds.size ?? .zero
+                        sizeString = String(format: "%.0fx%.0f", size.width, size.height)
+                    } else {
+                        sizeString = "unknown"
+                    }
+                    LOG("Inline editor appeared", ctx: [
+                        "template": template.name,
+                        "window": sizeString
+                    ])
+                }
+            }
+
+            private func applyTextChange(textView: NSTextView,
+                                         range: NSRange,
+                                         replacement: String,
+                                         newSelection: NSRange,
+                                         actionName: String) {
+                let undoManager = textView.undoManager
+                undoManager?.beginUndoGrouping()
+                defer { undoManager?.endUndoGrouping() }
+
+                guard textView.shouldChangeText(in: range, replacementString: replacement) else { return }
+                textView.textStorage?.replaceCharacters(in: range, with: replacement)
+                textView.didChangeText()
+                textView.setSelectedRange(newSelection)
+                textView.scrollRangeToVisible(newSelection)
+                undoManager?.setActionName(actionName)
+
+                let updated = textView.string
+                self.localText = updated
+                self.text = updated
+                LOG("SQL editor text change applied", ctx: [
+                    "action": actionName,
+                    "length": "\(replacement.count)"
+                ])
             }
         }
-        
+
         // Database Connection Settings Sheet
         struct DatabaseSettingsSheet: View {
             @ObservedObject var userConfig: UserConfigStore
@@ -11188,7 +11213,9 @@ struct ContentView: View {
             private let minSize: CGSize
             private let preferredSize: CGSize
             private let storageKey: String
-            private var didApplyInitialSize = false
+            private var lastAppliedSize: CGSize?
+            private var isUserResizing: Bool = false
+            private let sizeTolerance: CGFloat = 0.5
 
             init(minSize: CGSize, preferredSize: CGSize, storageKey: String) {
                 self.minSize = minSize
@@ -11205,44 +11232,121 @@ struct ContentView: View {
                 window.styleMask.insert([.titled, .resizable])
                 window.minSize = minSize
 
-                if let saved = savedSize {
-                    window.setContentSize(saved)
-                } else if !didApplyInitialSize {
-                    window.setContentSize(preferredSize)
+                let autosaveName = "SQLMaestro.\(storageKey)"
+                window.setFrameAutosaveName(autosaveName)
+                let restored = window.setFrameUsingName(autosaveName)
+                LOG("Sheet window attached", ctx: [
+                    "key": storageKey,
+                    "restored": restored ? "1" : "0",
+                    "initialFrame": format(window.frame.size)
+                ])
+
+                if let savedSize = loadSavedSize() {
+                    apply(size: savedSize, to: window)
+                } else {
+                    apply(size: preferredSize, to: window)
                 }
-                didApplyInitialSize = true
 
                 window.makeKeyAndOrderFront(nil)
                 NSApp.activate(ignoringOtherApps: true)
             }
 
+            func windowWillStartLiveResize(_ notification: Notification) {
+                isUserResizing = true
+            }
+
+            func windowDidResize(_ notification: Notification) {
+                guard let window else { return }
+                guard !isUserResizing else { return }
+                guard let current = window.contentView?.frame.size,
+                      let saved = loadSavedSize() else { return }
+
+                if shouldRestore(current: current, saved: saved) {
+                    LOG("Sheet size restore triggered", ctx: [
+                        "key": storageKey,
+                        "current": format(current),
+                        "target": format(saved)
+                    ])
+                    apply(size: saved, to: window)
+                }
+            }
+
             func windowDidEndLiveResize(_ notification: Notification) {
-                saveCurrentSize()
+                isUserResizing = false
+                persistCurrentSize(reason: "liveResizeEnd")
             }
 
             func windowDidMove(_ notification: Notification) {
-                saveCurrentSize()
+                guard isUserResizing else { return }
+                persistCurrentSize(reason: "move")
             }
 
             func windowWillClose(_ notification: Notification) {
-                saveCurrentSize()
+                persistCurrentSize(reason: "close")
                 window = nil
             }
 
-            private var savedSize: CGSize? {
+            private func apply(size: CGSize, to window: NSWindow) {
+                let clipped = CGSize(width: max(minSize.width, size.width),
+                                     height: max(minSize.height, size.height))
+                window.setContentSize(clipped)
+                lastAppliedSize = clipped
+                LOG("Sheet size applied", ctx: [
+                    "key": storageKey,
+                    "size": format(clipped)
+                ])
+            }
+
+            private func persistCurrentSize(reason: String) {
+                guard let current = window?.contentView?.frame.size else { return }
+                let clipped = CGSize(width: max(minSize.width, current.width),
+                                     height: max(minSize.height, current.height))
+                guard !approximatelyEqual(clipped, lastAppliedSize, tolerance: sizeTolerance) else { return }
+                lastAppliedSize = clipped
+
+                let defaults = UserDefaults.standard
+                defaults.set(Double(clipped.width), forKey: "\(storageKey).width")
+                defaults.set(Double(clipped.height), forKey: "\(storageKey).height")
+                LOG("Sheet size persisted", ctx: [
+                    "key": storageKey,
+                    "size": format(clipped),
+                    "reason": reason
+                ])
+            }
+
+            private func loadSavedSize() -> CGSize? {
                 let defaults = UserDefaults.standard
                 let width = defaults.double(forKey: "\(storageKey).width")
                 let height = defaults.double(forKey: "\(storageKey).height")
                 guard width > 0, height > 0 else { return nil }
-                return CGSize(width: max(minSize.width, width),
-                              height: max(minSize.height, height))
+                let size = CGSize(width: width, height: height)
+                LOG("Sheet size loaded", ctx: [
+                    "key": storageKey,
+                    "size": format(size)
+                ])
+                return size
             }
 
-            private func saveCurrentSize() {
-                guard let size = window?.contentView?.frame.size else { return }
-                let defaults = UserDefaults.standard
-                defaults.set(Double(size.width), forKey: "\(storageKey).width")
-                defaults.set(Double(size.height), forKey: "\(storageKey).height")
+            private func format(_ size: CGSize) -> String {
+                String(format: "%.0fx%.0f", size.width, size.height)
+            }
+
+            private func shouldRestore(current: CGSize, saved: CGSize) -> Bool {
+                guard !approximatelyEqual(current, saved, tolerance: sizeTolerance) else { return false }
+                // Only restore when the saved size is larger than the current programmatic shrink.
+                if saved.width >= current.width + sizeTolerance || saved.height >= current.height + sizeTolerance {
+                    return true
+                }
+                return false
+            }
+
+            private func approximatelyEqual(_ lhs: CGSize, _ rhs: CGSize, tolerance: CGFloat) -> Bool {
+                return abs(lhs.width - rhs.width) <= tolerance && abs(lhs.height - rhs.height) <= tolerance
+            }
+
+            private func approximatelyEqual(_ lhs: CGSize, _ rhs: CGSize?, tolerance: CGFloat) -> Bool {
+                guard let rhs else { return false }
+                return abs(lhs.width - rhs.width) <= tolerance && abs(lhs.height - rhs.height) <= tolerance
             }
         }
     }
