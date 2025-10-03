@@ -284,32 +284,37 @@ These are fields that remain available per ticket session that hold important va
 
 The sidebar provides quick access to three main panels containing project and session information:
 
-  **Panels**
+**Panels**
 
-  - Guide Notes - Project documentation and guides
-  - Session Notes - Notes for the current ticket session
-  - Saved Files - Saved query templates and session files
-  - Ticket Session 1
-  - Ticket Session 2
-  - Ticket Session 3
+- Guide Notes - Project documentation and guides
+- Session Notes - Notes for the current ticket session
+- Saved Files - Saved query templates and session files
+- Ticket Session 1
+- Ticket Session 2
+- Ticket Session 3
 
-  Each panel can be accessed via the Sidebar or KB shortcuts:
+Each panel can be accessed via the Sidebar or KB shortcuts:
 
-   Keyboard Shortcuts
-    - Cmd+1 - Toggle Guide Notes
-    - Cmd+2 - Toggle Session Notes
-    - Cmd+3 - Toggle Saved Files
-    - Ctrl+1 - Go to ticket session 1
-    - Ctrl+2 - Go to ticket session 2
-    - Ctrl+3 - Go to ticket session 3
+**Keyboard Shortcuts**
+- Cmd+1 - Toggle Guide Notes
+- Cmd+2 - Toggle Session Notes
+- Cmd+3 - Toggle Saved Files
+- Ctrl+1 - Go to ticket session 1
+- Ctrl+2 - Go to ticket session 2
+- Ctrl+3 - Go to ticket session 3
 
-  Panel Features
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/guidenotespanel.png)
 
-  - Panels open inline by default in the main window
-  - Each panel can be popped out into a separate window 
-  - Panels include a markdown toolbar for formatting
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/sessionnotespanel.png)
 
-  ---
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/savefilespanel.png)
+
+**Panel Features**
+- Panels open inline by default in the main window
+- Each panel can be popped out into a separate window 
+- Panels include a [an almost] complete markdown toolbar for formatting, including `inline code` , ``` code block ```, **bold** , _italics_ , [Links](google.com) ,  bullets / numbering and Headers
+
+---
   
   ### **Share & Import Sessions**
 
