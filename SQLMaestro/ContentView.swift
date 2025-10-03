@@ -1371,6 +1371,15 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .importQueryTemplatesRequested)) { _ in
             importTemplatesFlow()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .restoreQueryTemplateRequested)) { _ in
+            restoreTemplateFlow()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .restoreQueryBackupsRequested)) { _ in
+            restoreAllTemplatesFlow()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .queriesBackedUp)) { _ in
+            showTemplateToast("All queries backed up successfully")
+        }
         .onReceive(NotificationCenter.default.publisher(for: .beginQuickCaptureRequested)) { _ in
             startBeginCapture()
         }
@@ -1983,6 +1992,72 @@ struct ContentView: View {
         if !failures.isEmpty {
             NSSound.beep()
             showAlert(title: "Some imports failed", message: failures.joined(separator: "\n"))
+        }
+    }
+
+    private func restoreTemplateFlow() {
+        let panel = NSOpenPanel()
+        panel.title = "Restore Query Template"
+        panel.prompt = "Restore"
+        panel.message = "Select a template history backup to restore"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedFileTypes = ["zip"]
+        panel.allowedContentTypes = [UTType.zip]
+        panel.directoryURL = AppPaths.queryHistoryCheckpoints
+
+        guard panel.runModal() == .OK, let archiveURL = panel.url else {
+            LOG("Template restore cancelled", ctx: ["reason": "panel dismissed"])
+            return
+        }
+
+        do {
+            try templates.restoreTemplateFromHistory(archiveURL: archiveURL)
+            showTemplateToast("Template restored successfully")
+        } catch {
+            NSSound.beep()
+            showAlert(title: "Restore Failed", message: error.localizedDescription)
+            WARN("Template restore failed", ctx: ["archive": archiveURL.lastPathComponent, "error": error.localizedDescription])
+        }
+    }
+
+    private func restoreAllTemplatesFlow() {
+        let panel = NSOpenPanel()
+        panel.title = "Restore Query Backups"
+        panel.prompt = "Restore"
+        panel.message = "Select a full backup archive to restore"
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedFileTypes = ["zip"]
+        panel.allowedContentTypes = [UTType.zip]
+        panel.directoryURL = AppPaths.queryTemplateBackups
+
+        guard panel.runModal() == .OK, let archiveURL = panel.url else {
+            LOG("Restore all templates cancelled", ctx: ["reason": "panel dismissed"])
+            return
+        }
+
+        let alert = NSAlert()
+        alert.messageText = "Restore All Query Templates?"
+        alert.informativeText = "This will overwrite all existing query templates with the templates from the selected backup. This action cannot be undone.\n\nAre you sure you want to continue?"
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "Restore All")
+        alert.addButton(withTitle: "Cancel")
+
+        guard alert.runModal() == .alertFirstButtonReturn else {
+            LOG("Restore all templates cancelled", ctx: ["reason": "user cancelled warning"])
+            return
+        }
+
+        do {
+            try templates.restoreAllTemplatesFromBackup(archiveURL: archiveURL)
+            showTemplateToast("All templates restored successfully")
+        } catch {
+            NSSound.beep()
+            showAlert(title: "Restore Failed", message: error.localizedDescription)
+            WARN("Restore all templates failed", ctx: ["archive": archiveURL.lastPathComponent, "error": error.localizedDescription])
         }
     }
 
@@ -5083,6 +5158,11 @@ struct ContentView: View {
                 normalized = pane
             }
 
+            // Backup template when switching panes
+            if let template = selectedTemplate, normalized != activeBottomPane {
+                templates.backupTemplateIfNeeded(template, reason: "pane_switch")
+            }
+
             if activeBottomPane == .savedFiles && normalized != .savedFiles {
                 commitSavedFileDrafts(for: sessions.current)
             }
@@ -5878,6 +5958,11 @@ struct ContentView: View {
         
         // Helper to copy all static, template, and alternate field values as a single block to clipboard
         private func copyBlockValuesToClipboard() {
+            // Backup template before copying values
+            if let template = selectedTemplate {
+                templates.backupTemplateIfNeeded(template, reason: "copy_block_values")
+            }
+
             let export = buildCopyBlock()
             let pb = NSPasteboard.general
             pb.clearContents()
@@ -5982,9 +6067,14 @@ struct ContentView: View {
         }
 
         private func copyIndividualValuesToClipboard() {
+            // Backup template before copying values
+            if let template = selectedTemplate {
+                templates.backupTemplateIfNeeded(template, reason: "copy_individual_values")
+            }
+
             var values: [String] = []
-            
-            // Always include static fields first (ensures orgId isn’t dropped)
+
+            // Always include static fields first (ensures orgId isn't dropped)
             if !orgId.isEmpty { values.append(orgId) }
             if !acctId.isEmpty { values.append(acctId) }
             if !mysqlDb.isEmpty { values.append(mysqlDb) }
@@ -6383,6 +6473,11 @@ struct ContentView: View {
             // Save current session's static fields
             sessionStaticFields[sessions.current] = (orgId, acctId, mysqlDb, companyLabel)
 
+            // Backup template before switching sessions
+            if let template = selectedTemplate {
+                templates.backupTemplateIfNeeded(template, reason: "session_switch")
+            }
+
             // Switch to new session
             sessions.setCurrent(newSession)
 
@@ -6458,6 +6553,9 @@ struct ContentView: View {
             commitDraftsForCurrentSession()
             if let previous = selectedTemplate, previous.id != t.id {
                 finalizeGuideNotesAutosave(for: previous, reason: "template-load")
+
+                // Backup previous template when switching to a new one
+                templates.backupTemplateIfNeeded(previous, reason: "template_switch")
             }
             selectedTemplate = t
             currentSQL = t.rawSQL
@@ -6493,46 +6591,27 @@ struct ContentView: View {
         }
         
         private func saveTemplateEdits(template: TemplateItem, newText: String) {
-            let fm = FileManager.default
             let url = template.url
             do {
-                // 1) Create a time-stamped backup BEFORE overwriting
-                let original = (try? Data(contentsOf: url)) ?? Data()
-                let appSupport = try fm.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
-                let backupsDir = appSupport
-                    .appendingPathComponent("SQLMaestro", isDirectory: true)
-                    .appendingPathComponent("backups", isDirectory: true)
-                try? fm.createDirectory(at: backupsDir, withIntermediateDirectories: true)
-                
-                let ext = url.pathExtension.isEmpty ? "sql" : url.pathExtension
-                let df = DateFormatter()
-                df.locale = Locale(identifier: "en_US_POSIX")
-                df.dateFormat = "yyyyMMdd-HHmmss"
-                let stamp = df.string(from: Date())
-                let backupName = "\(template.name)-\(stamp).\(ext)"
-                let backupURL = backupsDir.appendingPathComponent(backupName)
-                try original.write(to: backupURL, options: .atomic)
-                LOG("Template backup created", ctx: ["file": backupName])
-                
-                // 2) Save new contents
+                // Save new contents
                 try newText.data(using: .utf8)?.write(to: url, options: .atomic)
                 LOG("Template saved", ctx: ["template": template.name, "bytes": "\(newText.utf8.count)"])
-                
-                // 3) Reload templates so UI reflects latest
+
+                // Reload templates so UI reflects latest
                 templates.loadTemplates()
-                
-                // 4) STREAMLINED WORKFLOW: Auto re-select the saved template and populate query
+
+                // STREAMLINED WORKFLOW: Auto re-select the saved template and populate query
                 DispatchQueue.main.async {
                     // Find the updated template in the reloaded list by matching URL
                     if let updatedTemplate = self.templates.templates.first(where: { $0.url == url }) {
                         // Re-select the template
                         self.selectTemplate(updatedTemplate)
                         self.loadTemplate(updatedTemplate)
-                        
+
                         // Auto-populate the query for convenience
                         self.populateQuery()
                         UsedTemplatesStore.shared.touch(session: self.sessions.current, templateId: updatedTemplate.id)
-                        
+
                         LOG("Template editing workflow completed", ctx: [
                             "template": updatedTemplate.name,
                             "auto_reselected": "true",
@@ -6624,6 +6703,10 @@ struct ContentView: View {
         private func populateQuery() {
             commitDraftsForCurrentSession()
             guard let t = selectedTemplate else { return }
+
+            // Backup template before populating query
+            templates.backupTemplateIfNeeded(t, reason: "populate_query")
+
             setActivePane(nil)
             isOutputVisible = true
             var sql = t.rawSQL
@@ -8414,6 +8497,11 @@ struct ContentView: View {
 
         private func attemptAppExit() {
 #if canImport(AppKit)
+            // Backup template before quitting
+            if let template = selectedTemplate {
+                templates.backupTemplateIfNeeded(template, reason: "app_quit")
+            }
+
             let flags = currentUnsavedFlags()
             guard flags.any else {
                 NSApp.terminate(nil)
@@ -8478,6 +8566,12 @@ struct ContentView: View {
 
         private func clearCurrentSessionState() {
             commitDraftsForCurrentSession()
+
+            // Backup template before clearing session
+            if let template = selectedTemplate {
+                templates.backupTemplateIfNeeded(template, reason: "clear_session")
+            }
+
             sessions.clearAllFieldsForCurrentSession()
             orgId = ""
             acctId = ""
@@ -8801,7 +8895,12 @@ struct ContentView: View {
         
         private func connectToQuerious() {
             LOG("Connect to Database button clicked", ctx: ["orgId": orgId, "mysqlDb": mysqlDb])
-            
+
+            // Backup template before connecting to database
+            if let template = selectedTemplate {
+                templates.backupTemplateIfNeeded(template, reason: "connect_database")
+            }
+
             // Show the "Opening in Querious..." toast
             withAnimation { toastOpenDB = true }
             DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {

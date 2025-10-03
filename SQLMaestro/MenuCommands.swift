@@ -14,15 +14,30 @@ struct AppMenuCommands: Commands {
                 do {
                     let url = try tmpl.zipAllTemplates()
                     NSWorkspace.shared.activateFileViewerSelecting([url])
+                    NotificationCenter.default.post(name: .queriesBackedUp, object: nil)
                 } catch {
                     NSSound.beep()
                 }
             }
 
+            Button("Query Template History") {
+                NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: AppPaths.queryHistoryCheckpoints.path)
+            }
+
             Divider()
 
-            Button("Import Query Template…") {
+            Button("Import Shared Query Template…") {
                 NotificationCenter.default.post(name: .importQueryTemplatesRequested, object: nil)
+            }
+
+            Divider()
+
+            Button("Restore Query Template…") {
+                NotificationCenter.default.post(name: .restoreQueryTemplateRequested, object: nil)
+            }
+
+            Button("Restore Query Backups…") {
+                NotificationCenter.default.post(name: .restoreQueryBackupsRequested, object: nil)
             }
         }
 
@@ -247,4 +262,7 @@ extension Notification.Name {
     static let orgMappingsDidImport = Notification.Name("OrgMappingsDidImport")
     static let mysqlHostsDidImport = Notification.Name("MysqlHostsDidImport")
     static let importQueryTemplatesRequested = Notification.Name("ImportQueryTemplatesRequested")
+    static let restoreQueryTemplateRequested = Notification.Name("RestoreQueryTemplateRequested")
+    static let restoreQueryBackupsRequested = Notification.Name("RestoreQueryBackupsRequested")
+    static let queriesBackedUp = Notification.Name("QueriesBackedUp")
 }
