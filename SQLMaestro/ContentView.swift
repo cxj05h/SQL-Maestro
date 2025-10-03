@@ -2294,15 +2294,17 @@ struct ContentView: View {
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
         .onKeyPress(.return) {
-            if !filteredTemplates.isEmpty {
-                if selectedTemplate == nil { selectTemplate(filteredTemplates.first) }
-                if let selected = selectedTemplate {
-                    loadTemplate(selected)
-                    return .handled
-                }
-                return .handled
+            guard !filteredTemplates.isEmpty else { return .ignored }
+            if selectedTemplate == nil { selectTemplate(filteredTemplates.first) }
+            guard let selected = selectedTemplate else { return .handled }
+
+            if let event = NSApp.currentEvent, event.modifierFlags.contains(.command) {
+                loadTemplate(selected)
+            } else {
+                editTemplateInline(selected)
             }
-            return .ignored
+
+            return .handled
         }
         .onKeyPress(.upArrow) { navigateTemplate(direction: -1); return .handled }
         .onKeyPress(.downArrow) { navigateTemplate(direction: 1); return .handled }
