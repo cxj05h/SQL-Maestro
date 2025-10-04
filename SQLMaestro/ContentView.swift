@@ -3,6 +3,38 @@ import MarkdownUI
 import AppKit
 import UniformTypeIdentifiers
 
+// Workaround for macOS 26 (Tahoe) NSAlert button rendering bug
+// where default buttons don't show blue highlight until window loses/regains focus
+fileprivate func runAlertWithFix(_ alert: NSAlert) -> NSApplication.ModalResponse {
+    // Use asyncAfter with minimal delay to ensure window is shown
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.01) {
+        // Style the default button (first button with return key equivalent)
+        for button in alert.buttons {
+            if button.keyEquivalent == "\r" {
+                button.wantsLayer = true
+                button.layer?.backgroundColor = NSColor.controlAccentColor.cgColor
+                button.layer?.cornerRadius = 6
+                button.layer?.borderWidth = 0
+
+                // Force white text color
+                let title = button.title
+                let attrTitle = NSAttributedString(string: title, attributes: [
+                    .foregroundColor: NSColor.white
+                ])
+                button.attributedTitle = attrTitle
+
+                // Force redraw
+                button.needsDisplay = true
+                button.layer?.setNeedsDisplay()
+                alert.window.displayIfNeeded()
+                break
+            }
+        }
+    }
+
+    return alert.runModal()
+}
+
 private let markdownFileLinkRegex: NSRegularExpression = {
     let pattern = #"!?\[([^\]]*)\]\(([^)]+)\)"#
     return try! NSRegularExpression(pattern: pattern, options: [])
@@ -2046,7 +2078,7 @@ struct ContentView: View {
         alert.addButton(withTitle: "Restore All")
         alert.addButton(withTitle: "Cancel")
 
-        guard alert.runModal() == .alertFirstButtonReturn else {
+        guard runAlertWithFix(alert) == .alertFirstButtonReturn else {
             LOG("Restore all templates cancelled", ctx: ["reason": "user cancelled warning"])
             return
         }
@@ -2497,8 +2529,8 @@ struct ContentView: View {
             alert.accessoryView = input
             alert.addButton(withTitle: "Rename")
             alert.addButton(withTitle: "Cancel")
-            
-            if alert.runModal() == .alertFirstButtonReturn {
+
+            if runAlertWithFix(alert) == .alertFirstButtonReturn {
                 let newName = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
                 if !newName.isEmpty {
                     sessions.renameSessionImage(imageId: image.id, newName: newName, for: sessions.current)
@@ -2531,11 +2563,11 @@ struct ContentView: View {
             alert.accessoryView = inputContainer
             alert.addButton(withTitle: "Add")
             alert.addButton(withTitle: "Cancel")
-            
-            if alert.runModal() == .alertFirstButtonReturn {
+
+            if runAlertWithFix(alert) == .alertFirstButtonReturn {
                 let title = titleField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
                 let url = urlField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-                
+
                 guard !title.isEmpty, !url.isEmpty else { return }
                 
                 templateLinksStore.addLink(title: title, url: url, for: template)
@@ -2566,11 +2598,11 @@ struct ContentView: View {
             alert.accessoryView = inputContainer
             alert.addButton(withTitle: "Update")
             alert.addButton(withTitle: "Cancel")
-            
-            if alert.runModal() == .alertFirstButtonReturn {
+
+            if runAlertWithFix(alert) == .alertFirstButtonReturn {
                 let newTitle = titleField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
                 let newUrl = urlField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-                
+
                 guard !newTitle.isEmpty, !newUrl.isEmpty else { return }
                 
                 // Update the link in the store
@@ -2609,7 +2641,7 @@ struct ContentView: View {
                 alert.informativeText = "The URL '\(link.url)' is not valid. Please edit the link and ensure it's a proper web address."
                 alert.alertStyle = .warning
                 alert.addButton(withTitle: "OK")
-                alert.runModal()
+                runAlertWithFix(alert)
                 return
             }
             
@@ -2623,7 +2655,7 @@ struct ContentView: View {
                 alert.informativeText = "Only web URLs (http/https) are supported."
                 alert.alertStyle = .warning
                 alert.addButton(withTitle: "OK")
-                alert.runModal()
+                runAlertWithFix(alert)
                 return
             }
             
@@ -2897,7 +2929,7 @@ struct ContentView: View {
             alert.accessoryView = input
             alert.addButton(withTitle: "Rename")
             alert.addButton(withTitle: "Cancel")
-            if alert.runModal() == .alertFirstButtonReturn {
+            if runAlertWithFix(alert) == .alertFirstButtonReturn {
                 let newName = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !newName.isEmpty else { return }
                 if templateGuideStore.renameImage(image, to: newName, for: template) {
@@ -3268,7 +3300,7 @@ struct ContentView: View {
             alert.alertStyle = .warning
             alert.addButton(withTitle: "Delete")
             alert.addButton(withTitle: "Cancel")
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            guard runAlertWithFix(alert) == .alertFirstButtonReturn else { return }
 #endif
             savedFileAutosave.cancel(session: session, fileId: fileId)
             sessions.removeSavedFile(id: fileId, from: session)
@@ -3924,8 +3956,8 @@ struct ContentView: View {
             alert.alertStyle = .warning
             alert.addButton(withTitle: "Delete")
             alert.addButton(withTitle: "Cancel")
-            
-            if alert.runModal() == .alertFirstButtonReturn {
+
+            if runAlertWithFix(alert) == .alertFirstButtonReturn {
                 do {
                     // Delete the file from disk
                     try FileManager.default.removeItem(at: item.url)
@@ -5123,10 +5155,10 @@ struct ContentView: View {
                 }
                 
                 alert.addButton(withTitle: "Cancel")
-                
+
                 // Show the modal and get the result
-                let result = alert.runModal()
-                
+                let result = runAlertWithFix(alert)
+
                 // Calculate which button was clicked based on the modal response
                 let clickedIndex = Int(result.rawValue) - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
                 
@@ -6331,7 +6363,7 @@ struct ContentView: View {
             alert.addButton(withTitle: "Insert")
             alert.addButton(withTitle: "Cancel")
 
-            let response = alert.runModal()
+            let response = runAlertWithFix(alert)
             guard response == .alertFirstButtonReturn else {
                 completion(nil)
                 return
@@ -6385,7 +6417,7 @@ struct ContentView: View {
             alert.addButton(withTitle: "Insert")
             alert.addButton(withTitle: "Cancel")
 
-            let response = alert.runModal()
+            let response = runAlertWithFix(alert)
             guard response == .alertFirstButtonReturn else {
                 completion(nil)
                 return
@@ -6772,11 +6804,11 @@ struct ContentView: View {
         
         alert.addButton(withTitle: "OK")
         alert.addButton(withTitle: "Cancel")
-        
-        if alert.runModal() == .alertFirstButtonReturn {
+
+        if runAlertWithFix(alert) == .alertFirstButtonReturn {
             let newName = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !newName.isEmpty else { return }
-            
+
             sessions.setCurrent(s)
             sessions.renameCurrent(to: newName)
             
@@ -6797,7 +6829,7 @@ struct ContentView: View {
             alert.accessoryView = input
             alert.addButton(withTitle: "OK")
             alert.addButton(withTitle: "Cancel")
-            let result = alert.runModal()
+            let result = runAlertWithFix(alert)
             return result == .alertFirstButtonReturn ? input.stringValue : nil
         }
         
@@ -6813,7 +6845,7 @@ struct ContentView: View {
             alert.accessoryView = input
             alert.addButton(withTitle: "Save Link")
             alert.addButton(withTitle: "Cancel")
-            let result = alert.runModal()
+            let result = runAlertWithFix(alert)
             guard result == .alertFirstButtonReturn else { return }
             let value = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             if value.isEmpty {
@@ -8466,7 +8498,7 @@ struct ContentView: View {
             alert.addButton(withTitle: "Cancel")
             actions.append(.cancel)
 
-            let response = alert.runModal()
+            let response = runAlertWithFix(alert)
             let index = Int(response.rawValue) - NSApplication.ModalResponse.alertFirstButtonReturn.rawValue
             guard index >= 0 && index < actions.count else { return }
 
@@ -8535,7 +8567,7 @@ struct ContentView: View {
             alert.addButton(withTitle: "Save All")
             alert.addButton(withTitle: "Cancel")
 
-            let response = alert.runModal()
+            let response = runAlertWithFix(alert)
             switch response {
             case .alertFirstButtonReturn:
                 NSApp.terminate(nil)
@@ -8792,12 +8824,12 @@ struct ContentView: View {
             
             alert.addButton(withTitle: "Save Mapping")
             alert.addButton(withTitle: "Cancel")
-            
+
             repeat {
-                let response = alert.runModal()
+                let response = runAlertWithFix(alert)
                 if response == .alertFirstButtonReturn {
                     let companyName = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-                    
+
                     if companyName.isEmpty {
                         let errorAlert = NSAlert()
                         errorAlert.messageText = "Company Name Required"
@@ -8840,14 +8872,14 @@ struct ContentView: View {
                 }
             } while true
         }
-        
+
         private func showAlert(title: String, message: String) {
             let alert = NSAlert()
             alert.messageText = title
             alert.informativeText = message
             alert.alertStyle = .informational
             alert.addButton(withTitle: "OK")
-            alert.runModal()
+            runAlertWithFix(alert)
         }
         
         // Rewrites the org→mysql mapping JSON with pretty formatting so each entry
@@ -9543,7 +9575,7 @@ struct ContentView: View {
                 alert.accessoryView = input
                 alert.addButton(withTitle: "OK")
                 alert.addButton(withTitle: "Cancel")
-                return alert.runModal() == .alertFirstButtonReturn
+                return runAlertWithFix(alert) == .alertFirstButtonReturn
                 ? input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
                 : nil
             }
@@ -9637,7 +9669,7 @@ struct ContentView: View {
                 alert.alertStyle = .warning
                 alert.addButton(withTitle: "Delete")
                 alert.addButton(withTitle: "Cancel")
-                guard alert.runModal() == .alertFirstButtonReturn else {
+                guard runAlertWithFix(alert) == .alertFirstButtonReturn else {
                     LOG("Delete placeholders aborted at confirm")
                     return
                 }
@@ -10787,7 +10819,7 @@ struct ContentView: View {
             alert.accessoryView = input
             alert.addButton(withTitle: "Insert")
             alert.addButton(withTitle: "Cancel")
-            guard alert.runModal() == .alertFirstButtonReturn else { return }
+            guard runAlertWithFix(alert) == .alertFirstButtonReturn else { return }
             let url = input.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
             let replacement = "[\(textLabel)](\(url))"
             let updated = ns.replacingCharacters(in: sel, with: replacement)
