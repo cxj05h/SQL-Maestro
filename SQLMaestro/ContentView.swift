@@ -5057,7 +5057,8 @@ struct ContentView: View {
                         Text(editingValue.isEmpty ? "empty" : editingValue)
                             .font(.system(size: fontSize))
                             .foregroundStyle(editingValue.isEmpty ? .secondary : .primary)
-                            .textSelection(.enabled)
+                            .lineLimit(nil) // Allow multiple lines
+                            .fixedSize(horizontal: false, vertical: true) // Auto-expand vertically
                             .padding(.vertical, 6)
                             .padding(.horizontal, 8)
                             .frame(maxWidth: .infinity, alignment: .leading)
