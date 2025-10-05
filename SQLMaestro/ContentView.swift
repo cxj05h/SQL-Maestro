@@ -1244,6 +1244,7 @@ struct ContentView: View {
     @State private var tagExplorerContext: TagExplorerContext?
     @State private var activePopoutPane: PopoutPaneContext? = nil
     @State private var isSidebarVisible: Bool = false
+    @State private var navigationVisibility: NavigationSplitViewVisibility = .all
     struct TagExplorerContext: Identifiable {
         let tag: String
         var id: String { tag }
@@ -1342,7 +1343,7 @@ struct ContentView: View {
     
     
         var body: some View {
-        NavigationSplitView {
+        NavigationSplitView(columnVisibility: $navigationVisibility) {
             templatesPane
         } detail: {
             detailContent
@@ -10522,6 +10523,7 @@ struct ContentView: View {
                         Button("Open") {
                             NSWorkspace.shared.open(imageURL)
                             LOG("Session image preview open", ctx: ["fileName": sessionImage.fileName])
+                            dismiss()
                         }
                         .disabled(!imageExists)
 
@@ -10655,6 +10657,7 @@ struct ContentView: View {
 
                         Button("Open") {
                             NSWorkspace.shared.open(imageURL)
+                            dismiss()
                         }
                         .disabled(!imageExists)
 
