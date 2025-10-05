@@ -1244,7 +1244,6 @@ struct ContentView: View {
     @State private var tagExplorerContext: TagExplorerContext?
     @State private var activePopoutPane: PopoutPaneContext? = nil
     @State private var isSidebarVisible: Bool = false
-    @State private var navigationVisibility: NavigationSplitViewVisibility = .all
     struct TagExplorerContext: Identifiable {
         let tag: String
         var id: String { tag }
@@ -1343,11 +1342,14 @@ struct ContentView: View {
     
     
         var body: some View {
-        NavigationSplitView(columnVisibility: $navigationVisibility) {
+        NavigationSplitView(columnVisibility: .constant(.all)) {
             templatesPane
+                .navigationSplitViewColumnWidth(min: 200, ideal: 280, max: 400)
         } detail: {
             detailContent
         }
+        .navigationSplitViewStyle(.balanced)
+        .toolbar(removing: .sidebarToggle)
         .onAppear {
             // Initialize session notes drafts from saved values on first load
             for session in [TicketSession.one, .two, .three] {
