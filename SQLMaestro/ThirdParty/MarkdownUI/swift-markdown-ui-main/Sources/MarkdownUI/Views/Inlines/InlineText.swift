@@ -99,7 +99,7 @@ struct InlineText: View {
     attributes: AttributeContainer,
     codeAttributes: AttributeContainer
   ) -> some View {
-    let groups = self.groupInlineNodes(inlines)
+    let groups = self.groupInlineNodes(inlines, softBreakMode: self.softBreakMode)
 
     ForEach(Array(groups.enumerated()), id: \.offset) { _, group in
       switch group {
@@ -120,14 +120,16 @@ struct InlineText: View {
           softBreakMode: self.softBreakMode,
           attributes: attributes
         )
-      case .softBreak:
+      case .softBreak(let needsExtraLine):
         if self.softBreakMode == .lineBreak {
-          LineBreakPlaceholder(height: self.lineHeight(from: attributes), mode: .soft)
+          let height = needsExtraLine ? self.lineHeight(from: attributes) : 0
+          LineBreakPlaceholder(height: height, mode: .soft)
         } else {
           Text(AttributedString(" ", attributes: attributes))
         }
-      case .lineBreak:
-        LineBreakPlaceholder(height: self.lineHeight(from: attributes), mode: .hard)
+      case .lineBreak(let needsExtraLine):
+        let height = needsExtraLine ? self.lineHeight(from: attributes) : 0
+        LineBreakPlaceholder(height: height, mode: .hard)
       }
     }
   }
@@ -153,18 +155,23 @@ struct InlineText: View {
   private enum InlineGroup {
     case text([InlineNode])
     case styled(String)
-    case softBreak
-    case lineBreak
+    case softBreak(needsExtraLine: Bool)
+    case lineBreak(needsExtraLine: Bool)
   }
 
-  private func groupInlineNodes(_ nodes: [InlineNode]) -> [InlineGroup] {
+  private func groupInlineNodes(
+    _ nodes: [InlineNode],
+    softBreakMode: SoftBreak.Mode
+  ) -> [InlineGroup] {
     var groups: [InlineGroup] = []
     var currentText: [InlineNode] = []
+    var consecutiveBreaks = 0
 
     func flushText() {
       guard !currentText.isEmpty else { return }
       groups.append(.text(currentText))
       currentText.removeAll(keepingCapacity: true)
+      consecutiveBreaks = 0
     }
 
     for node in nodes {
@@ -172,14 +179,25 @@ struct InlineText: View {
       case .styledCode(let text):
         flushText()
         groups.append(.styled(text))
+        consecutiveBreaks = 0
       case .softBreak:
-        flushText()
-        groups.append(.softBreak)
+        if softBreakMode == .lineBreak {
+          flushText()
+          let needsExtraLine = consecutiveBreaks > 0
+          groups.append(.softBreak(needsExtraLine: needsExtraLine))
+          consecutiveBreaks += 1
+        } else {
+          currentText.append(node)
+          consecutiveBreaks = 0
+        }
       case .lineBreak:
         flushText()
-        groups.append(.lineBreak)
+        let needsExtraLine = consecutiveBreaks > 0
+        groups.append(.lineBreak(needsExtraLine: needsExtraLine))
+        consecutiveBreaks += 1
       default:
         currentText.append(node)
+        consecutiveBreaks = 0
       }
     }
 
@@ -188,7 +206,7 @@ struct InlineText: View {
   }
 
   private func lineHeight(from attributes: AttributeContainer) -> CGFloat {
-    attributes.fontProperties?.scaledSize ?? FontProperties.defaultSize * 1.2
+    attributes.fontProperties?.scaledSize ?? FontProperties.defaultSize
   }
 
   private func loadInlineImages() async throws -> [String: Image] {
