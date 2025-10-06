@@ -152,6 +152,17 @@ private final class MainWindowConfigurator {
         window.title = "SQL Maestro"
         window.isMovableByWindowBackground = true
         window.titlebarSeparatorStyle = .line
+
+        // Hide native sidebar toggle buttons
+        if let toolbar = window.toolbar {
+            let sidebarItems = toolbar.items.filter { item in
+                item.itemIdentifier.rawValue.contains("sidebar") ||
+                item.itemIdentifier.rawValue.contains("Sidebar")
+            }
+            for item in sidebarItems {
+                toolbar.removeItem(at: toolbar.items.firstIndex(of: item) ?? 0)
+            }
+        }
     }
 
     private func shouldConfigure(window: NSWindow) -> Bool {

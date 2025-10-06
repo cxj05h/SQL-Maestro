@@ -1907,6 +1907,16 @@ struct ContentView: View {
         .padding(EdgeInsets(top: 5, leading: 16, bottom: 16, trailing: 16))
         .background(Theme.grayBG)
         .frame(minWidth: 300, idealWidth: 320)
+        .toolbar {
+            ToolbarItemGroup(placement: .automatic) {
+                Button(action: {
+                    toggleSidebar()
+                }) {
+                    Image(systemName: "sidebar.right")
+                }
+                .help("Toggle Sidebar (⌘T)")
+            }
+        }
     }
 
     @ViewBuilder
