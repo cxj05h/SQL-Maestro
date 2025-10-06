@@ -132,6 +132,7 @@ struct MarkdownEditor: NSViewRepresentable {
 
         context.coordinator.textView = textView
         controller.coordinator = context.coordinator
+        textView.coordinator = context.coordinator
         textView.string = text
 
         return scrollView
@@ -151,6 +152,11 @@ struct MarkdownEditor: NSViewRepresentable {
         var parent: MarkdownEditor
         weak var textView: NSTextView?
         var suppressTextDidChange = false
+
+        // Backtick tracking for inline code / code block
+        private var backtickCount = 0
+        private var backtickTimer: Timer?
+        private let backtickTimeWindow: TimeInterval = 0.5 // Time window for multiple presses
 
         private static let bulletRegex = try! NSRegularExpression(pattern: "^(\\s*)([-*+])\\s+", options: [.anchorsMatchLines])
         private static let numberedRegex = try! NSRegularExpression(pattern: "^(\\s*)(\\d+)([\\.)])\\s+", options: [.anchorsMatchLines])
@@ -440,6 +446,41 @@ struct MarkdownEditor: NSViewRepresentable {
             }
         }
 
+        // MARK: - Backtick handling
+
+        func handleBacktickPress() -> Bool {
+            guard let textView else { return false }
+            let range = textView.selectedRange()
+
+            // Only handle if there's a selection
+            guard range.length > 0 else { return false }
+
+            backtickTimer?.invalidate()
+            backtickCount += 1
+
+            backtickTimer = Timer.scheduledTimer(withTimeInterval: backtickTimeWindow, repeats: false) { [weak self] _ in
+                self?.applyBacktickFormatting()
+            }
+
+            // Prevent default backtick insertion
+            return true
+        }
+
+        private func applyBacktickFormatting() {
+            guard let textView else { return }
+
+            if backtickCount == 1 {
+                // Single backtick = inline code
+                wrapSelection(prefix: "`", suffix: "`")
+            } else if backtickCount == 3 {
+                // Triple backtick = code block
+                wrapSelection(prefix: "\n```\n", suffix: "\n```\n")
+            }
+            // Two backticks do nothing (as per requirements)
+
+            backtickCount = 0
+        }
+
         // MARK: - Text operations
 
        private func insert(text: String) {
@@ -714,6 +755,8 @@ private final class MarkdownLayoutManager: NSLayoutManager {
     }
 
     final class MarkdownTextView: NSTextView {
+        weak var coordinator: MarkdownEditor.Coordinator?
+
         convenience init() {
             self.init(frame: .zero, textContainer: nil)
         }
@@ -811,6 +854,17 @@ private final class MarkdownLayoutManager: NSLayoutManager {
         }
 
         override func keyDown(with event: NSEvent) {
+            // Handle backtick for inline code / code block formatting
+            if let characters = event.characters,
+               characters == "`",
+               !event.modifierFlags.contains(.command),
+               !event.modifierFlags.contains(.control),
+               !event.modifierFlags.contains(.option) {
+                if coordinator?.handleBacktickPress() == true {
+                    return
+                }
+            }
+
             // Handle Option+Arrow keys for word/paragraph navigation
             if event.modifierFlags.contains(.option) {
                 let shift = event.modifierFlags.contains(.shift)
