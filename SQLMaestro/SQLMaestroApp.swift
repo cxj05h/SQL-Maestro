@@ -150,7 +150,7 @@ private final class MainWindowConfigurator {
         window.titleVisibility = .visible
         window.titlebarAppearsTransparent = false
         window.title = "SQL Maestro"
-        window.isMovableByWindowBackground = true
+        window.isMovableByWindowBackground = false
         window.titlebarSeparatorStyle = .line
 
         // Hide native sidebar toggle buttons

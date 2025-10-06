@@ -6040,13 +6040,13 @@ struct ContentView: View {
             values.append(mysqlDb)
 
             let sessionName = sessions.sessionNames[sessions.current] ?? "Session #\(sessions.current.rawValue)"
-            let formattedSessionName = sessionName.isEmpty ? sessionName : "**\(sessionName)**"
+            let formattedSessionName = sessionName.isEmpty ? sessionName : "## \(sessionName)"
 
             var blockLines: [String] = []
             blockLines.append(formattedSessionName)
-            blockLines.append("Org-ID: `\(orgId)`")
-            blockLines.append("Acct-ID: `\(acctId)`")
-            blockLines.append("mysqlDb: `\(mysqlDb)`")
+            blockLines.append("**Org-ID:** ``\(orgId)``")
+            blockLines.append("**Acct-ID:** ``\(acctId)``")
+            blockLines.append("**mysqlDb:** ``\(mysqlDb)``")
 
             let templateForBlock: TemplateItem? = {
                 if let override = templateOverride {
@@ -6059,7 +6059,7 @@ struct ContentView: View {
                 for ph in t.placeholders where !staticKeys.contains(ph) {
                     let val = sessions.value(for: ph)
                     values.append(val)
-                    blockLines.append("\(ph): `\(val)`")
+                    blockLines.append("**\(ph):** ``\(val)``")
                 }
             }
 
@@ -6070,11 +6070,11 @@ struct ContentView: View {
                     if let separatorRange = alt.name.range(of: " • ") {
                         let templateName = alt.name[..<separatorRange.lowerBound]
                         let fieldName = alt.name[separatorRange.upperBound...]
-                        formattedName = "*\(templateName)* • \(fieldName)"
+                        formattedName = "*\(templateName)* • **\(fieldName):**"
                     } else {
-                        formattedName = alt.name
+                        formattedName = "**\(alt.name):**"
                     }
-                    blockLines.append("\(formattedName): `\(alt.value)`")
+                    blockLines.append("\(formattedName) ``\(alt.value)``")
                 }
             }
 
@@ -6100,6 +6100,7 @@ struct ContentView: View {
                 .components(separatedBy: .newlines)
                 .first { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }?
                 .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            // Check for header 2 format (## SessionName)
             if firstLine == header {
                 return original
             }
