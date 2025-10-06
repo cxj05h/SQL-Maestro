@@ -67,6 +67,8 @@ struct MarkdownEditor: NSViewRepresentable {
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
         scrollView.documentView = textView
+        scrollView.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
+        scrollView.automaticallyAdjustsContentInsets = false
 
         textView.minSize = NSSize(width: 0, height: 0)
         textView.maxSize = NSSize(width: CGFloat.greatestFiniteMagnitude, height: CGFloat.greatestFiniteMagnitude)
@@ -74,7 +76,7 @@ struct MarkdownEditor: NSViewRepresentable {
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = [.width]
         textView.textContainer?.widthTracksTextView = true
-        textView.textContainerInset = NSSize(width: 8, height: 10)
+        textView.textContainerInset = NSSize(width: 8, height: 2)
 
         textView.delegate = context.coordinator
         textView.isRichText = false
@@ -85,7 +87,7 @@ struct MarkdownEditor: NSViewRepresentable {
         textView.isAutomaticLinkDetectionEnabled = true
         textView.allowsUndo = true
         textView.font = NSFont.systemFont(ofSize: fontSize)
-        textView.textContainerInset = NSSize(width: 8, height: 10)
+        textView.textContainerInset = NSSize(width: 8, height: 2)
         textView.isVerticallyResizable = true
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = [.width]

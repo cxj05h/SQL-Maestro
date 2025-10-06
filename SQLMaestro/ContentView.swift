@@ -871,7 +871,7 @@ struct MarkdownPreviewView: View {
             .markdownMargin(top: 0, bottom: 0)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 8)
-            .padding(.vertical, 10)
+            .padding(.vertical, 2)
             .textSelection(.enabled)
     }
 
@@ -5706,6 +5706,7 @@ struct ContentView: View {
             }
             .frame(maxWidth: .infinity, alignment: .top)
             .layoutPriority(1)
+            .clipShape(RoundedRectangle(cornerRadius: 12))
             .background(
                 RoundedRectangle(cornerRadius: 12)
                     .fill(Color(hex: "#2A2A35"))
@@ -5797,8 +5798,8 @@ struct ContentView: View {
                 },
                 showsModePicker: false,
                 showsModeToolbar: false,
-                showsOuterBackground: true,
-                showsContentBackground: false
+                showsOuterBackground: false,
+                showsContentBackground: true
             )
         }
 
@@ -11199,7 +11200,7 @@ struct ContentView: View {
         @ViewBuilder
         private var contentBody: some View {
             if mode == .notes {
-                let topPadding = showsContentBackground ? 4.0 : 12.0
+                let topPadding = showsContentBackground ? 0.0 : 12.0
                 notesPane
                     .padding(.top, topPadding)
                     .frame(minHeight: editorMinHeight, alignment: .top)
@@ -11298,11 +11299,12 @@ struct ContentView: View {
 
             if showsContentBackground {
                 base
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
                     .background(
-                        RoundedRectangle(cornerRadius: 10)
+                        RoundedRectangle(cornerRadius: 12)
                             .fill(Color(hex: "#2A2A35"))
                             .overlay(
-                                RoundedRectangle(cornerRadius: 10)
+                                RoundedRectangle(cornerRadius: 12)
                                     .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
                             )
                     )
