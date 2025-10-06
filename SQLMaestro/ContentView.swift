@@ -11470,7 +11470,7 @@ struct ContentView: View {
                                 }
                             }
                         )
-                        .padding(.top, -15)
+                        .padding(.top, -8)
                         .frame(maxWidth: .infinity, minHeight: editorMinHeight, maxHeight: .infinity, alignment: .top)
                         .layoutPriority(1)
                         .background(
