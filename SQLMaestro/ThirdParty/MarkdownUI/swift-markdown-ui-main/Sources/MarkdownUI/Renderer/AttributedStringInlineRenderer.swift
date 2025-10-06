@@ -49,6 +49,8 @@ private struct AttributedStringInlineRenderer {
       self.renderLineBreak()
     case .code(let content):
       self.renderCode(content)
+    case .styledCode(let content):
+      self.renderCode(content) // For now, render same as code in AttributedString
     case .html(let content):
       self.renderHTML(content)
     case .emphasis(let children):

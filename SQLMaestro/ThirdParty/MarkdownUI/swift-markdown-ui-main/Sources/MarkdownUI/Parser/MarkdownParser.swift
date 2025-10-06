@@ -4,10 +4,29 @@ import Foundation
 
 extension Array where Element == BlockNode {
   init(markdown: String) {
-    let blocks = UnsafeNode.parseMarkdown(markdown) { document in
+    // Preprocess markdown to handle double backtick syntax for styled code
+    let preprocessed = Self.preprocessStyledCode(markdown)
+    let blocks = UnsafeNode.parseMarkdown(preprocessed) { document in
       document.children.compactMap(BlockNode.init(unsafeNode:))
     }
     self.init(blocks ?? .init())
+  }
+
+  private static func preprocessStyledCode(_ markdown: String) -> String {
+    // Replace ``code`` with ⟪STYLED⟪code⟫STYLED⟫ marker for parsing
+    // Using special Unicode characters that are unlikely to appear in normal text
+    // This uses a negative lookbehind/lookahead to avoid matching triple backticks
+    let pattern = "(?<!`)``(?!`)([^`]+)``(?!`)"
+    guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
+      return markdown
+    }
+    let range = NSRange(markdown.startIndex..., in: markdown)
+    return regex.stringByReplacingMatches(
+      in: markdown,
+      options: [],
+      range: range,
+      withTemplate: "⟪STYLED⟪$1⟫STYLED⟫"
+    )
   }
 
   func renderMarkdown() -> String {
@@ -125,7 +144,20 @@ extension InlineNode {
   fileprivate init?(unsafeNode: UnsafeNode) {
     switch unsafeNode.nodeType {
     case .text:
-      self = .text(unsafeNode.literal ?? "")
+      let text = unsafeNode.literal ?? ""
+      // Check if this is our styled code marker in text nodes
+      if text.hasPrefix("⟪STYLED⟪"), text.hasSuffix("⟫STYLED⟫") {
+        let startIndex = text.index(text.startIndex, offsetBy: 8) // length of "⟪STYLED⟪"
+        let endIndex = text.index(text.endIndex, offsetBy: -8) // length of "⟫STYLED⟫"
+        if startIndex < endIndex {
+          let content = String(text[startIndex..<endIndex])
+          self = .styledCode(content)
+        } else {
+          self = .text(text)
+        }
+      } else {
+        self = .text(text)
+      }
     case .softBreak:
       self = .softBreak
     case .lineBreak:
@@ -386,6 +418,11 @@ extension UnsafeNode {
     case .code(let content):
       guard let node = cmark_node_new(CMARK_NODE_CODE) else { return nil }
       cmark_node_set_literal(node, content)
+      return node
+    case .styledCode(let content):
+      // Convert styledCode back to marker format
+      guard let node = cmark_node_new(CMARK_NODE_TEXT) else { return nil }
+      cmark_node_set_literal(node, "⟪STYLED⟪\(content)⟫STYLED⟫")
       return node
     case .html(let content):
       guard let node = cmark_node_new(CMARK_NODE_HTML_INLINE) else { return nil }
