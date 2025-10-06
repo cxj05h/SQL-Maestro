@@ -11165,7 +11165,7 @@ struct ContentView: View {
                             )
                 } else {
                     contentStack
-                        .padding(.vertical, 12)
+                        .padding(.vertical, 0)
                 }
             }
         }
@@ -11450,6 +11450,7 @@ struct ContentView: View {
             var body: some View {
                 VStack(alignment: .leading, spacing: 0) {
                     searchControls
+                        .padding(.top, -20)
 
                     if let selectedID, files.contains(where: { $0.id == selectedID }) {
                         let binding = Binding<String>(
@@ -11469,6 +11470,7 @@ struct ContentView: View {
                                 }
                             }
                         )
+                        .padding(.top, -15)
                         .frame(maxWidth: .infinity, minHeight: editorMinHeight, maxHeight: .infinity, alignment: .top)
                         .layoutPriority(1)
                         .background(
