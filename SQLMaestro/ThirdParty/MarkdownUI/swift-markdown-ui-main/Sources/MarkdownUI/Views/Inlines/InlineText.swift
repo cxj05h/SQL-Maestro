@@ -2,20 +2,45 @@ import SwiftUI
 
 private struct StyledCodeView: View {
   let content: String
-  let fontSize: CGFloat
+  let attributes: AttributeContainer
 
   var body: some View {
-    Text(content)
-      .font(.system(size: fontSize, design: .monospaced))
-      .foregroundColor(.black)
+    Text(self.content)
+      .font(self.font)
+      .foregroundColor(self.foregroundColor)
       .padding(.horizontal, 6)
       .padding(.vertical, 2)
-      .background(Color(white: 0.85))
-      .clipShape(RoundedRectangle(cornerRadius: 4))
+      .background(self.backgroundColor)
+      .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
       .overlay(
-        RoundedRectangle(cornerRadius: 4)
-          .stroke(Color.purple.opacity(0.2), lineWidth: 1)
+        RoundedRectangle(cornerRadius: 4, style: .continuous)
+          .stroke(self.borderColor, lineWidth: 1)
       )
+      .alignmentGuide(.firstTextBaseline) { dimensions in
+        dimensions[VerticalAlignment.firstTextBaseline]
+      }
+  }
+
+  private var font: Font {
+    if let fontProperties = self.attributes.fontProperties {
+      return .withProperties(fontProperties)
+    }
+    return .system(size: FontProperties.defaultSize, design: .monospaced)
+  }
+
+  private var foregroundColor: Color {
+    self.attributes.foregroundColor ?? .primary
+  }
+
+  private var backgroundColor: Color {
+    self.attributes.backgroundColor ?? Color(white: 0.9)
+  }
+
+  private var borderColor: Color {
+    if let background = self.attributes.backgroundColor {
+      return background.opacity(0.35)
+    }
+    return Color.accentColor.opacity(0.2)
   }
 }
 
@@ -47,8 +72,42 @@ struct InlineText: View {
           self.inlineImages = (try? await self.loadInlineImages()) ?? [:]
         }
     } else {
+      defaultInlineContent
+        .task(id: self.inlines) {
+          self.inlineImages = (try? await self.loadInlineImages()) ?? [:]
+        }
+    }
+  }
+
+  @ViewBuilder
+  private var styledInlineContent: some View {
+    if #available(iOS 16.0, macOS 13.0, tvOS 16.0, watchOS 9.0, *) {
       TextStyleAttributesReader { attributes in
-        self.inlines.renderText(
+        let codeAttributes = attributes.applying(self.theme.code)
+        InlineFlowLayout(spacing: 0) {
+          renderInlineSegments(attributes: attributes, codeAttributes: codeAttributes)
+        }
+      }
+    } else {
+      defaultInlineContent
+    }
+  }
+
+  @ViewBuilder
+  @available(iOS 16.0, macOS 13.0, tvOS 16.0, watchOS 9.0, *)
+  private func renderInlineSegments(
+    attributes: AttributeContainer,
+    codeAttributes: AttributeContainer
+  ) -> some View {
+    let groups = self.groupInlineNodes(inlines)
+
+    ForEach(Array(groups.enumerated()), id: \.offset) { _, group in
+      switch group {
+      case .styled(let text):
+        StyledCodeView(content: text, attributes: codeAttributes)
+          .fixedSize()
+      case .text(let nodes):
+        nodes.renderText(
           baseURL: self.baseURL,
           textStyles: .init(
             code: self.theme.code,
@@ -61,77 +120,75 @@ struct InlineText: View {
           softBreakMode: self.softBreakMode,
           attributes: attributes
         )
-      }
-      .task(id: self.inlines) {
-        self.inlineImages = (try? await self.loadInlineImages()) ?? [:]
-      }
-    }
-  }
-
-  @ViewBuilder
-  private var styledInlineContent: some View {
-    TextStyleAttributesReader { attributes in
-      // Group consecutive non-styledCode nodes together for proper text rendering
-      let groups = groupInlineNodes(inlines)
-
-      HStack(spacing: 0) {
-        ForEach(0..<groups.count, id: \.self) { index in
-          let group = groups[index]
-          if group.isStyledCode, case .styledCode(let content) = group.nodes.first {
-            StyledCodeView(content: content, fontSize: 14)
-          } else {
-            group.nodes.renderText(
-              baseURL: self.baseURL,
-              textStyles: .init(
-                code: self.theme.code,
-                emphasis: self.theme.emphasis,
-                strong: self.theme.strong,
-                strikethrough: self.theme.strikethrough,
-                link: self.theme.link
-              ),
-              images: self.inlineImages,
-              softBreakMode: self.softBreakMode,
-              attributes: attributes
-            )
-          }
+      case .softBreak:
+        if self.softBreakMode == .lineBreak {
+          LineBreakPlaceholder(height: self.lineHeight(from: attributes), mode: .soft)
+        } else {
+          Text(AttributedString(" ", attributes: attributes))
         }
+      case .lineBreak:
+        LineBreakPlaceholder(height: self.lineHeight(from: attributes), mode: .hard)
       }
     }
   }
 
-  private struct InlineGroup {
-    let nodes: [InlineNode]
-    let isStyledCode: Bool
+  private var defaultInlineContent: some View {
+    TextStyleAttributesReader { attributes in
+      self.inlines.renderText(
+        baseURL: self.baseURL,
+        textStyles: .init(
+          code: self.theme.code,
+          emphasis: self.theme.emphasis,
+          strong: self.theme.strong,
+          strikethrough: self.theme.strikethrough,
+          link: self.theme.link
+        ),
+        images: self.inlineImages,
+        softBreakMode: self.softBreakMode,
+        attributes: attributes
+      )
+    }
+  }
+
+  private enum InlineGroup {
+    case text([InlineNode])
+    case styled(String)
+    case softBreak
+    case lineBreak
   }
 
   private func groupInlineNodes(_ nodes: [InlineNode]) -> [InlineGroup] {
     var groups: [InlineGroup] = []
-    var currentGroup: [InlineNode] = []
-    var isCurrentStyledCode = false
+    var currentText: [InlineNode] = []
+
+    func flushText() {
+      guard !currentText.isEmpty else { return }
+      groups.append(.text(currentText))
+      currentText.removeAll(keepingCapacity: true)
+    }
 
     for node in nodes {
-      if case .styledCode = node {
-        // Flush current group if exists
-        if !currentGroup.isEmpty {
-          groups.append(InlineGroup(nodes: currentGroup, isStyledCode: isCurrentStyledCode))
-          currentGroup = []
-        }
-        // Add styledCode as its own group
-        groups.append(InlineGroup(nodes: [node], isStyledCode: true))
-        isCurrentStyledCode = false
-      } else {
-        // Add to current group
-        currentGroup.append(node)
-        isCurrentStyledCode = false
+      switch node {
+      case .styledCode(let text):
+        flushText()
+        groups.append(.styled(text))
+      case .softBreak:
+        flushText()
+        groups.append(.softBreak)
+      case .lineBreak:
+        flushText()
+        groups.append(.lineBreak)
+      default:
+        currentText.append(node)
       }
     }
 
-    // Flush remaining group
-    if !currentGroup.isEmpty {
-      groups.append(InlineGroup(nodes: currentGroup, isStyledCode: isCurrentStyledCode))
-    }
-
+    flushText()
     return groups
+  }
+
+  private func lineHeight(from attributes: AttributeContainer) -> CGFloat {
+    attributes.fontProperties?.scaledSize ?? FontProperties.defaultSize * 1.2
   }
 
   private func loadInlineImages() async throws -> [String: Image] {
@@ -157,5 +214,214 @@ struct InlineText: View {
 
       return inlineImages
     }
+  }
+}
+
+@available(iOS 16.0, macOS 13.0, tvOS 16.0, watchOS 9.0, *)
+private struct InlineFlowLayout: Layout {
+  var spacing: CGFloat = 0
+
+  struct LineMetrics {
+    var items: [Item]
+    var lineWidth: CGFloat
+    var lineHeight: CGFloat
+    var baseline: CGFloat
+  }
+
+  struct Item {
+    let index: Int
+    let size: CGSize
+    let baseline: CGFloat?
+    let isLineBreak: Bool
+  }
+
+  struct Cache {
+    var lines: [LineMetrics] = []
+  }
+
+  func makeCache(subviews: Subviews) -> Cache { Cache() }
+
+  func sizeThatFits(
+    proposal: ProposedViewSize,
+    subviews: Subviews,
+    cache: inout Cache
+  ) -> CGSize {
+    let lines = self.computeLines(for: subviews, proposal: proposal)
+    cache.lines = lines
+
+    let width = lines.map(\.lineWidth).max() ?? 0
+    let height = lines.reduce(into: 0) { $0 += $1.lineHeight }
+
+    return CGSize(width: width, height: height)
+  }
+
+  func placeSubviews(
+    in bounds: CGRect,
+    proposal: ProposedViewSize,
+    subviews: Subviews,
+    cache: inout Cache
+  ) {
+    let lines = cache.lines.isEmpty ? self.computeLines(for: subviews, proposal: proposal) : cache.lines
+
+    var currentY = bounds.minY
+
+    for line in lines {
+      var currentX = bounds.minX
+
+      for item in line.items {
+        let subview = subviews[item.index]
+        let itemProposal = ProposedViewSize(width: item.size.width, height: item.size.height)
+        let baseline = item.baseline ?? item.size.height
+        let yOffset = line.baseline - baseline
+
+        subview.place(
+          at: CGPoint(x: currentX, y: currentY + yOffset),
+          proposal: itemProposal
+        )
+
+        if !item.isLineBreak {
+          currentX += item.size.width + self.spacing
+        }
+      }
+
+      currentY += line.lineHeight
+    }
+  }
+
+  private func computeLines(for subviews: Subviews, proposal: ProposedViewSize) -> [LineMetrics] {
+    let maxWidth = proposal.width ?? .infinity
+    var lines: [LineMetrics] = []
+
+    var currentItems: [Item] = []
+    var currentWidth: CGFloat = 0
+    var currentHeight: CGFloat = 0
+    var currentBaseline: CGFloat = 0
+
+    func flushLine() {
+      guard !currentItems.isEmpty else { return }
+      lines.append(
+        LineMetrics(
+          items: currentItems,
+          lineWidth: currentWidth,
+          lineHeight: currentHeight,
+          baseline: currentBaseline
+        )
+      )
+      currentItems.removeAll(keepingCapacity: true)
+      currentWidth = 0
+      currentHeight = 0
+      currentBaseline = 0
+    }
+
+    for index in subviews.indices {
+      if let breakInfo = subviews[index][LineBreakValueKey.self] {
+        flushLine()
+        let breakItem = Item(
+          index: index,
+          size: CGSize(width: 0, height: breakInfo.height),
+          baseline: breakInfo.height,
+          isLineBreak: true
+        )
+        lines.append(
+          LineMetrics(
+            items: [breakItem],
+            lineWidth: 0,
+            lineHeight: breakInfo.height,
+            baseline: breakInfo.height
+          )
+        )
+        continue
+      }
+
+      var spacingBefore = currentItems.isEmpty ? 0 : self.spacing
+      if maxWidth.isFinite,
+         currentWidth + spacingBefore >= maxWidth,
+         !currentItems.isEmpty {
+        flushLine()
+        spacingBefore = 0
+      }
+
+      var availableWidth: CGFloat?
+      if maxWidth.isFinite {
+        availableWidth = max(maxWidth - currentWidth - spacingBefore, 0)
+      }
+
+      if let width = availableWidth, width == 0, !currentItems.isEmpty {
+        flushLine()
+        spacingBefore = 0
+        availableWidth = maxWidth.isFinite ? maxWidth : nil
+      }
+
+      var proposalWidth = availableWidth
+      if let width = proposalWidth, !width.isFinite {
+        proposalWidth = nil
+      }
+
+      var dimensions = subviews[index].dimensions(
+        in: ProposedViewSize(width: proposalWidth, height: nil)
+      )
+
+      if maxWidth.isFinite && !currentItems.isEmpty {
+        let requiredWidth = currentWidth + spacingBefore + dimensions.width
+        if requiredWidth - maxWidth > .ulpOfOne {
+          flushLine()
+          spacingBefore = 0
+          dimensions = subviews[index].dimensions(
+            in: ProposedViewSize(width: maxWidth, height: nil)
+          )
+        }
+      }
+
+      let size = CGSize(width: dimensions.width, height: dimensions.height)
+      let baseline = dimensions[VerticalAlignment.firstTextBaseline]
+
+      currentItems.append(Item(index: index, size: size, baseline: baseline, isLineBreak: false))
+      currentWidth += spacingBefore + size.width
+      currentHeight = max(currentHeight, size.height)
+      currentBaseline = max(currentBaseline, baseline ?? size.height)
+    }
+
+    flushLine()
+
+    return lines
+  }
+}
+
+@available(iOS 16.0, macOS 13.0, tvOS 16.0, watchOS 9.0, *)
+private struct LineBreakPlaceholder: View {
+  enum Mode {
+    case soft
+    case hard
+  }
+
+  let height: CGFloat
+  let mode: Mode
+
+  var body: some View {
+    Color.clear
+      .frame(width: 0, height: self.height)
+      .layoutValue(
+        key: LineBreakValueKey.self,
+        value: .init(mode: self.mode, height: max(self.height, 1))
+      )
+  }
+}
+
+@available(iOS 16.0, macOS 13.0, tvOS 16.0, watchOS 9.0, *)
+private struct LineBreakValue: Equatable {
+  let mode: LineBreakPlaceholder.Mode
+  let height: CGFloat
+}
+
+@available(iOS 16.0, macOS 13.0, tvOS 16.0, watchOS 9.0, *)
+private struct LineBreakValueKey: LayoutValueKey {
+  static let defaultValue: LineBreakValue? = nil
+}
+
+private extension AttributeContainer {
+  func applying(_ textStyle: TextStyle) -> AttributeContainer {
+    var container = self
+    textStyle._collectAttributes(in: &container)
+    return container
   }
 }

@@ -21,12 +21,14 @@ extension Array where Element == BlockNode {
       return markdown
     }
     let range = NSRange(markdown.startIndex..., in: markdown)
-    return regex.stringByReplacingMatches(
+    let result = regex.stringByReplacingMatches(
       in: markdown,
       options: [],
       range: range,
       withTemplate: "⟪STYLED⟪$1⟫STYLED⟫"
     )
+
+    return result
   }
 
   func renderMarkdown() -> String {
@@ -81,11 +83,11 @@ extension BlockNode {
     case .htmlBlock:
       self = .htmlBlock(content: unsafeNode.literal ?? "")
     case .paragraph:
-      self = .paragraph(content: unsafeNode.children.compactMap(InlineNode.init(unsafeNode:)))
+      self = .paragraph(content: unsafeNode.children.flatMap(InlineNode.inlineNodes(from:)))
     case .heading:
       self = .heading(
         level: unsafeNode.headingLevel,
-        content: unsafeNode.children.compactMap(InlineNode.init(unsafeNode:))
+        content: unsafeNode.children.flatMap(InlineNode.inlineNodes(from:))
       )
     case .table:
       self = .table(
@@ -136,56 +138,97 @@ extension RawTableCell {
     guard unsafeNode.nodeType == .tableCell else {
       fatalError("Expected a table cell but got a '\(unsafeNode.nodeType)' instead.")
     }
-    self.init(content: unsafeNode.children.compactMap(InlineNode.init(unsafeNode:)))
+    self.init(content: unsafeNode.children.flatMap(InlineNode.inlineNodes(from:)))
   }
 }
 
 extension InlineNode {
-  fileprivate init?(unsafeNode: UnsafeNode) {
+  fileprivate static func inlineNodes(from unsafeNode: UnsafeNode) -> [InlineNode] {
     switch unsafeNode.nodeType {
     case .text:
       let text = unsafeNode.literal ?? ""
-      // Check if this is our styled code marker in text nodes
-      if text.hasPrefix("⟪STYLED⟪"), text.hasSuffix("⟫STYLED⟫") {
-        let startIndex = text.index(text.startIndex, offsetBy: 8) // length of "⟪STYLED⟪"
-        let endIndex = text.index(text.endIndex, offsetBy: -8) // length of "⟫STYLED⟫"
-        if startIndex < endIndex {
-          let content = String(text[startIndex..<endIndex])
-          self = .styledCode(content)
-        } else {
-          self = .text(text)
-        }
-      } else {
-        self = .text(text)
-      }
+      return Self.splitStyledCodeSegments(from: text)
     case .softBreak:
-      self = .softBreak
+      return [.softBreak]
     case .lineBreak:
-      self = .lineBreak
+      return [.lineBreak]
     case .code:
-      self = .code(unsafeNode.literal ?? "")
+      return [.code(unsafeNode.literal ?? "")]
     case .html:
-      self = .html(unsafeNode.literal ?? "")
+      return [.html(unsafeNode.literal ?? "")]
     case .emphasis:
-      self = .emphasis(children: unsafeNode.children.compactMap(InlineNode.init(unsafeNode:)))
+      let children = unsafeNode.children.flatMap(Self.inlineNodes(from:))
+      return [.emphasis(children: children)]
     case .strong:
-      self = .strong(children: unsafeNode.children.compactMap(InlineNode.init(unsafeNode:)))
+      let children = unsafeNode.children.flatMap(Self.inlineNodes(from:))
+      return [.strong(children: children)]
     case .strikethrough:
-      self = .strikethrough(children: unsafeNode.children.compactMap(InlineNode.init(unsafeNode:)))
+      let children = unsafeNode.children.flatMap(Self.inlineNodes(from:))
+      return [.strikethrough(children: children)]
     case .link:
-      self = .link(
-        destination: unsafeNode.url ?? "",
-        children: unsafeNode.children.compactMap(InlineNode.init(unsafeNode:))
-      )
+      let children = unsafeNode.children.flatMap(Self.inlineNodes(from:))
+      return [
+        .link(
+          destination: unsafeNode.url ?? "",
+          children: children
+        )
+      ]
     case .image:
-      self = .image(
-        source: unsafeNode.url ?? "",
-        children: unsafeNode.children.compactMap(InlineNode.init(unsafeNode:))
-      )
+      let children = unsafeNode.children.flatMap(Self.inlineNodes(from:))
+      return [
+        .image(
+          source: unsafeNode.url ?? "",
+          children: children
+        )
+      ]
     default:
       assertionFailure("Unhandled node type '\(unsafeNode.nodeType)' in InlineNode.")
-      return nil
+      return []
     }
+  }
+
+  private static func splitStyledCodeSegments(from text: String) -> [InlineNode] {
+    let startMarker = "⟪STYLED⟪"
+    let endMarker = "⟫STYLED⟫"
+
+    guard text.contains(startMarker) else {
+      return [.text(text)]
+    }
+
+    var nodes: [InlineNode] = []
+    var searchStart = text.startIndex
+
+    while let startRange = text.range(of: startMarker, range: searchStart..<text.endIndex) {
+      if startRange.lowerBound > searchStart {
+        let prefix = text[searchStart..<startRange.lowerBound]
+        if !prefix.isEmpty {
+          nodes.append(.text(String(prefix)))
+        }
+      }
+
+      guard let endRange = text.range(of: endMarker, range: startRange.upperBound..<text.endIndex) else {
+        // Unmatched start marker; treat the rest as plain text
+        let remainder = text[startRange.lowerBound..<text.endIndex]
+        if !remainder.isEmpty {
+          nodes.append(.text(String(remainder)))
+        }
+        return nodes
+      }
+
+      let content = text[startRange.upperBound..<endRange.lowerBound]
+      nodes.append(.styledCode(String(content)))
+
+      searchStart = endRange.upperBound
+    }
+
+    if searchStart < text.endIndex {
+      let suffix = text[searchStart..<text.endIndex]
+      if !suffix.isEmpty {
+        nodes.append(.text(String(suffix)))
+      }
+    }
+
+    return nodes
   }
 }
 
