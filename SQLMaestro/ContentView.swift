@@ -5860,7 +5860,7 @@ struct ContentView: View {
                 },
                 showsModePicker: false,
                 showsModeToolbar: false,
-                showsOuterBackground: true,
+                showsOuterBackground: false,
                 showsContentBackground: false
             )
         }
@@ -11205,7 +11205,7 @@ struct ContentView: View {
                     .padding(.top, topPadding)
                     .frame(minHeight: editorMinHeight, alignment: .top)
             } else {
-                let topPadding: CGFloat = 2.0
+                let topPadding: CGFloat = 0.0
                 SavedFilesWorkspace(
                     fontSize: fontSize,
                     files: savedFiles,
@@ -11448,7 +11448,7 @@ struct ContentView: View {
             @FocusState private var isSearchFieldFocused: Bool
 
             var body: some View {
-                VStack(alignment: .leading, spacing: 4) {
+                VStack(alignment: .leading, spacing: 0) {
                     searchControls
 
                     if let selectedID, files.contains(where: { $0.id == selectedID }) {
@@ -11486,7 +11486,7 @@ struct ContentView: View {
                             emptyState
                     }
                 }
-                .padding(.top, 4)
+                .padding(.top, 0)
                 .onChange(of: selectedID) { _, newValue in
                     searchStatus = .idle
                     searchQuery = ""
