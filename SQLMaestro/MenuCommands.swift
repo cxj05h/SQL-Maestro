@@ -4,7 +4,6 @@ import AppKit
 struct AppMenuCommands: Commands {
     @Environment(\.openURL) private var openURL
     @ObservedObject var tmpl: TemplateManager
-    @ObservedObject var sessions: SessionManager
 
     @State private var fontScale: Double = 1.0
 

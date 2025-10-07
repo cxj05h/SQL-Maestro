@@ -137,7 +137,7 @@ private final class MainWindowConfigurator {
         observers.removeAll()
     }
 
-    private func applyToAllWindows() {
+    func applyToAllWindows() {
         for window in NSApplication.shared.windows {
             apply(to: window)
         }
@@ -186,7 +186,6 @@ private final class MainWindowConfigurator {
 @main
 struct SQLMaestroApp: App {
     @StateObject private var templates = TemplateManager()
-    @StateObject private var sessions = SessionManager()
     init() {
         AppPaths.ensureAll()
             AppPaths.copyBundledAssets() // Add this line
@@ -202,9 +201,8 @@ struct SQLMaestroApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            TabContainerView()
                 .environmentObject(templates)
-                .environmentObject(sessions)
         }
         .commands {
             CommandGroup(replacing: .appInfo) {
@@ -212,7 +210,7 @@ struct SQLMaestroApp: App {
                     AboutWindowController.shared.show()
                 }
             }
-            AppMenuCommands(tmpl: templates, sessions: sessions)
+            AppMenuCommands(tmpl: templates)
             CommandGroup(after: .help) {
                 Button("Keyboard Shortcuts…") {
                     NotificationCenter.default.post(name: .showKeyboardShortcuts, object: nil)

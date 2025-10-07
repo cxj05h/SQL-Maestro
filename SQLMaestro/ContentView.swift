@@ -1212,7 +1212,11 @@ private final class MenuBridge: NSObject {
 
 //MARK: Content View
 struct ContentView: View {
+    @Environment(\.tabID) var tabID
+    @Environment(\.isActiveTab) var isActiveTab
+    @Environment(\.tabContext) var tabContext
     @EnvironmentObject var templates: TemplateManager
+    @EnvironmentObject var tabManager: TabManager
     @StateObject private var mapping = MappingStore()
     @StateObject private var mysqlHosts = MysqlHostStore()
     @StateObject private var userConfig = UserConfigStore()
@@ -1362,6 +1366,29 @@ struct ContentView: View {
                 }
             }
         }
+        .onChange(of: isActiveTab) { newValue in
+            guard newValue, let context = tabContext else { return }
+
+            // Check if templates were reloaded while this tab was inactive
+            if context.lastTemplateReload < tabManager.lastTemplateReload {
+                LOG("Tab became active with stale templates, refreshing", ctx: [
+                    "tabId": context.tabIdentifier,
+                    "lastSeen": "\(context.lastTemplateReload)",
+                    "lastReload": "\(tabManager.lastTemplateReload)"
+                ])
+
+                // Refresh selectedTemplate reference
+                if let currentTemplate = selectedTemplate {
+                    if let refreshed = templates.templates.first(where: { $0.id == currentTemplate.id }) {
+                        selectedTemplate = refreshed
+                        LOG("Template reference refreshed", ctx: ["template": refreshed.name])
+                    }
+                }
+
+                // Mark this tab as having seen the latest reload
+                context.markTemplateReloadSeen()
+            }
+        }
     }
 
 
@@ -1379,14 +1406,16 @@ struct ContentView: View {
         .background(Theme.grayBG)
         .frame(minWidth: 980, minHeight: 640)
         .toolbar {
-            ToolbarItemGroup(placement: .automatic) {
-                Spacer()
-                Button(action: {
-                    toggleSidebar()
-                }) {
-                    Image(systemName: "sidebar.right")
+            if isActiveTab {
+                ToolbarItemGroup(placement: .automatic) {
+                    Spacer()
+                    Button(action: {
+                        toggleSidebar()
+                    }) {
+                        Image(systemName: "sidebar.right")
+                    }
+                    .help("Toggle Sidebar (⌘T)")
                 }
-                .help("Toggle Sidebar (⌘T)")
             }
         }
         .overlay(alignment: .trailing) { commandSidebar }
@@ -1414,24 +1443,31 @@ struct ContentView: View {
             LOG("Date focus-scroll enabled")
         }
         .onReceive(NotificationCenter.default.publisher(for: .showKeyboardShortcuts)) { _ in
+            guard isActiveTab else { return }
             showShortcutsSheet = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .importQueryTemplatesRequested)) { _ in
+            guard isActiveTab else { return }
             importTemplatesFlow()
         }
         .onReceive(NotificationCenter.default.publisher(for: .restoreQueryTemplateRequested)) { _ in
+            guard isActiveTab else { return }
             restoreTemplateFlow()
         }
         .onReceive(NotificationCenter.default.publisher(for: .restoreQueryBackupsRequested)) { _ in
+            guard isActiveTab else { return }
             restoreAllTemplatesFlow()
         }
         .onReceive(NotificationCenter.default.publisher(for: .queriesBackedUp)) { _ in
+            guard isActiveTab else { return }
             showTemplateToast("All queries backed up successfully")
         }
         .onReceive(NotificationCenter.default.publisher(for: .beginQuickCaptureRequested)) { _ in
+            guard isActiveTab else { return }
             startBeginCapture()
         }
         .onReceive(NotificationCenter.default.publisher(for: .showDatabaseSettings)) { _ in
+            guard isActiveTab else { return }
             showDatabaseSettings = true
         }
         .overlay(
@@ -1838,7 +1874,7 @@ struct ContentView: View {
             }
             .keyboardShortcut("f", modifiers: [.command])
             .registerShortcut(name: "Search Queries", keyLabel: "F", modifiers: [.command], scope: "Global")
-            .disabled(isSavedFileEditorFocused)
+            .disabled(isSavedFileEditorFocused || !isActiveTab)
             .frame(width: 0, height: 0)
             .hidden()
 
@@ -1848,7 +1884,7 @@ struct ContentView: View {
                 EmptyView()
             }
             .keyboardShortcut("1", modifiers: [.command])
-            .disabled(selectedTemplate == nil)
+            .disabled(selectedTemplate == nil || !isActiveTab)
             .registerShortcut(name: "Show Guide Notes", keyLabel: "1", modifiers: [.command], scope: "Panes")
             .frame(width: 0, height: 0)
             .hidden()
@@ -1859,6 +1895,7 @@ struct ContentView: View {
                 EmptyView()
             }
             .keyboardShortcut("2", modifiers: [.command])
+            .disabled(!isActiveTab)
             .registerShortcut(name: "Show Session Notes", keyLabel: "2", modifiers: [.command], scope: "Panes")
             .frame(width: 0, height: 0)
             .hidden()
@@ -1869,6 +1906,7 @@ struct ContentView: View {
                 EmptyView()
             }
             .keyboardShortcut("3", modifiers: [.command])
+            .disabled(!isActiveTab)
             .registerShortcut(name: "Show Saved Files", keyLabel: "3", modifiers: [.command], scope: "Panes")
             .frame(width: 0, height: 0)
             .hidden()
@@ -1879,6 +1917,7 @@ struct ContentView: View {
                 EmptyView()
             }
             .keyboardShortcut("t", modifiers: [.command])
+            .disabled(!isActiveTab)
             .registerShortcut(name: "Toggle Sidebar", keyLabel: "T", modifiers: [.command], scope: "Layout")
             .frame(width: 0, height: 0)
             .hidden()
@@ -1927,13 +1966,15 @@ struct ContentView: View {
         .background(Theme.grayBG)
         .frame(minWidth: 300, idealWidth: 320)
         .toolbar {
-            ToolbarItemGroup(placement: .automatic) {
-                Button(action: {
-                    toggleSidebar()
-                }) {
-                    Image(systemName: "sidebar.right")
+            if isActiveTab {
+                ToolbarItemGroup(placement: .automatic) {
+                    Button(action: {
+                        toggleSidebar()
+                    }) {
+                        Image(systemName: "sidebar.right")
+                    }
+                    .help("Toggle Sidebar (⌘T)")
                 }
-                .help("Toggle Sidebar (⌘T)")
             }
         }
     }
@@ -2783,10 +2824,11 @@ struct ContentView: View {
         private func saveSessionImageAttachment(data: Data, originalName: String?) -> (image: SessionImage, url: URL)? {
             let fm = FileManager.default
             try? fm.createDirectory(at: AppPaths.sessionImages, withIntermediateDirectories: true)
+            let tabPrefix = tabID.isEmpty ? "" : "Tab\(tabID)_"
             let sessionIdentifier = "Session\(sessions.current.rawValue)"
             let existingImages = sessions.sessionImages[sessions.current] ?? []
             let sequence = existingImages.count + 1
-            let fileName = "\(sessionIdentifier)_\(String(format: "%03d", sequence)).png"
+            let fileName = "\(tabPrefix)\(sessionIdentifier)_\(String(format: "%03d", sequence)).png"
             let destination = AppPaths.sessionImages.appendingPathComponent(fileName)
 
             do {
@@ -5473,7 +5515,7 @@ struct ContentView: View {
                     .shadow(color: Color.black.opacity(0.18), radius: 18, x: -6, y: 0)
             }
             .animation(.easeInOut(duration: 0.26), value: isSidebarVisible)
-            .allowsHitTesting(isSidebarVisible)
+            .allowsHitTesting(isSidebarVisible || isActiveTab) // Allow interaction only if visible or active tab
         }
 
         private var commandSidebarContent: some View {
@@ -5953,6 +5995,11 @@ struct ContentView: View {
         // Session buttons with proper functionality
         private var sessionButtons: some View {
             HStack(spacing: 12) {
+                // Tab buttons (only show for active tab to avoid duplicates)
+                if isActiveTab && tabManager.tabs.count > 1 {
+                    tabSwitcherButtons
+                }
+
                 Text("Session:")
                     .font(.system(size: fontSize))
                     .foregroundStyle(.secondary)
@@ -6012,16 +6059,41 @@ struct ContentView: View {
                         onOpen: { openSessionsFolderFlow() },
                         onExit: { attemptAppExit() }
                     ))
-                    .background(
-                        Group {
-                            Color.clear
-                                .registerShortcut(name: "Save Ticket Session…", keyLabel: "S", modifiers: [.command], scope: "Ticket Sessions")
-                            Color.clear
-                                .registerShortcut(name: "Load Ticket Session…", keyLabel: "L", modifiers: [.command], scope: "Ticket Sessions")
-                        }
-                    )
             }
         }
+
+        private var tabSwitcherButtons: some View {
+            HStack(spacing: 6) {
+                ForEach(Array(tabManager.tabs.enumerated()), id: \.element.id) { index, _ in
+                    Button(action: {
+                        tabManager.switchToTab(at: index)
+                    }) {
+                        Text("\(index + 1)")
+                            .font(.system(size: fontSize - 2, weight: tabManager.activeTabIndex == index ? .semibold : .regular))
+                            .padding(.vertical, 5)
+                            .padding(.leading, 20)
+                            .padding(.trailing, 14)
+                            .frame(minWidth: 44, alignment: .center)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(tabManager.activeTabIndex == index ? tabManager.color(for: index) : tabManager.color(for: index).opacity(0.3))
+                    .help("Switch to Tab \(index + 1)")
+                    .overlay(alignment: .trailing) {
+                        Button(action: {
+                            tabManager.closeTab(at: index)
+                        }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .font(.system(size: fontSize - 3))
+                        }
+                        .buttonStyle(.plain)
+                        .padding(.trailing, 2)
+                        .help("Close Tab \(index + 1)")
+                    }
+                }
+            }
+        }
+
         
         // Helper to copy all static, template, and alternate field values as a single block to clipboard
         private func copyBlockValuesToClipboard() {
@@ -6667,6 +6739,12 @@ struct ContentView: View {
 
                 // Reload templates so UI reflects latest
                 templates.loadTemplates()
+
+                // Notify tab manager that templates were reloaded
+                tabManager.notifyTemplateReload()
+                if let context = tabContext {
+                    context.markTemplateReloadSeen()
+                }
 
                 // STREAMLINED WORKFLOW: Auto re-select the saved template and populate query
                 DispatchQueue.main.async {
@@ -8590,12 +8668,14 @@ struct ContentView: View {
             if linksDirty { detailLines.append("• Template links updates") }
             if dbTablesDirty { detailLines.append("• DB tables updates") }
 
+            let tabName = tabManager.displayName(for: tabManager.activeTabIndex)
             let alert = NSAlert()
-            alert.messageText = "Unsaved changes detected"
+            alert.messageText = "Unsaved changes detected in \(tabName)"
             alert.informativeText = ([
                 "Exiting now will discard these pending edits:",
                 detailLines.joined(separator: "\n"),
-                "Choose an option before quitting SQLMaestro."
+                "",
+                "Note: Only the active tab is checked. Please review other tabs before exiting."
             ].filter { !$0.isEmpty }).joined(separator: "\n")
             alert.alertStyle = .warning
 
@@ -8751,16 +8831,29 @@ struct ContentView: View {
         
         // A tiny invisible view that listens for the menu notifications
         private struct TicketSessionNotificationBridge: View {
+            @Environment(\.isActiveTab) var isActiveTab
             var onSave: () -> Void
             var onLoad: () -> Void
             var onOpen: () -> Void
             var onExit: () -> Void
             var body: some View {
                 Color.clear
-                    .onReceive(NotificationCenter.default.publisher(for: .saveTicketSession)) { _ in onSave() }
-                    .onReceive(NotificationCenter.default.publisher(for: .loadTicketSession)) { _ in onLoad() }
-                    .onReceive(NotificationCenter.default.publisher(for: .openSessionsFolder)) { _ in onOpen() }
-                    .onReceive(NotificationCenter.default.publisher(for: .attemptAppExit)) { _ in onExit() }
+                    .onReceive(NotificationCenter.default.publisher(for: .saveTicketSession)) { _ in
+                        guard isActiveTab else { return }
+                        onSave()
+                    }
+                    .onReceive(NotificationCenter.default.publisher(for: .loadTicketSession)) { _ in
+                        guard isActiveTab else { return }
+                        onLoad()
+                    }
+                    .onReceive(NotificationCenter.default.publisher(for: .openSessionsFolder)) { _ in
+                        guard isActiveTab else { return }
+                        onOpen()
+                    }
+                    .onReceive(NotificationCenter.default.publisher(for: .attemptAppExit)) { _ in
+                        // App exit should be handled by all tabs
+                        onExit()
+                    }
             }
         }
         
