@@ -82,6 +82,35 @@ struct AppMenuCommands: Commands {
             }.keyboardShortcut("-", modifiers: [.command])
         }
 
+        CommandMenu("Workspace") {
+            Button("Focus Search") {
+                NotificationCenter.default.post(name: .focusSearchRequested, object: nil)
+            }
+            .keyboardShortcut("f", modifiers: [.command])
+
+            Button("Show Guide Notes") {
+                NotificationCenter.default.post(name: .showGuideNotesRequested, object: nil)
+            }
+            .keyboardShortcut("1", modifiers: [.command])
+
+            Button("Show Session Notes") {
+                NotificationCenter.default.post(name: .showSessionNotesRequested, object: nil)
+            }
+            .keyboardShortcut("2", modifiers: [.command])
+
+            Button("Show Saved Files") {
+                NotificationCenter.default.post(name: .showSavedFilesRequested, object: nil)
+            }
+            .keyboardShortcut("3", modifiers: [.command])
+
+            Divider()
+
+            Button("Toggle Sidebar") {
+                NotificationCenter.default.post(name: .toggleSidebarRequested, object: nil)
+            }
+            .keyboardShortcut("t", modifiers: [.command])
+        }
+
         CommandGroup(after: .saveItem) {
             Menu("Ticket Sessions") {
                 Button("Save Ticket Session…") {
@@ -264,4 +293,9 @@ extension Notification.Name {
     static let restoreQueryTemplateRequested = Notification.Name("RestoreQueryTemplateRequested")
     static let restoreQueryBackupsRequested = Notification.Name("RestoreQueryBackupsRequested")
     static let queriesBackedUp = Notification.Name("QueriesBackedUp")
+    static let focusSearchRequested = Notification.Name("FocusSearchRequested")
+    static let showGuideNotesRequested = Notification.Name("ShowGuideNotesRequested")
+    static let showSessionNotesRequested = Notification.Name("ShowSessionNotesRequested")
+    static let showSavedFilesRequested = Notification.Name("ShowSavedFilesRequested")
+    static let toggleSidebarRequested = Notification.Name("ToggleSidebarRequested")
 }

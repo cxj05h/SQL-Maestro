@@ -40,5 +40,7 @@
 - "3 pop out panes" = refers to any of the GNP, SNP or SFP in popout mode
 - "kb shortcut menu" = refers to the menu item under: menu bar > help > keyboard shortcuts
 - "MD toolbar" = the markdown editing toolbar that holds the bold, italics, inline code, codeblock, heaaders etc for the guide notes and session notes pane
+- "header bar" = the title bar that contains the 'active template' , 'company' and 'session name' at the top of the ui
+- "title bar" = the bar that is at the same y-axis as the stop light / "sql maestro" test
 
 

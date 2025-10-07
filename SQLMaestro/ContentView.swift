@@ -995,12 +995,22 @@ private struct NonBubblingScrollView<Content: View>: NSViewRepresentable {
         scrollView.scrollerStyle = .overlay
         scrollView.automaticallyAdjustsContentInsets = false
 
+        // Enable layer-backing and clipping to prevent content overflow
+        scrollView.wantsLayer = true
+        scrollView.layer?.masksToBounds = true
+
         let hosting = NSHostingView(rootView: content)
         hosting.translatesAutoresizingMaskIntoConstraints = false
+        hosting.wantsLayer = true
+        hosting.layer?.masksToBounds = true
         scrollView.documentView = hosting
         context.coordinator.hostingView = hosting
 
         if let clipView = scrollView.contentView as? NSClipView {
+            // Enable clipping on the clip view itself
+            clipView.wantsLayer = true
+            clipView.layer?.masksToBounds = true
+
             NSLayoutConstraint.activate([
                 hosting.leadingAnchor.constraint(equalTo: clipView.leadingAnchor),
                 hosting.trailingAnchor.constraint(equalTo: clipView.trailingAnchor),
@@ -1346,6 +1356,7 @@ struct ContentView: View {
     @State private var dpHour: Int = Calendar.current.component(.hour, from: Date())
     @State private var dpMinute: Int = Calendar.current.component(.minute, from: Date())
     @State private var dpSecond: Int = Calendar.current.component(.second, from: Date())
+    @State private var workspaceShortcutsRegistered = false
     
     
     
@@ -1365,8 +1376,10 @@ struct ContentView: View {
                     sessionNotesDrafts[session] = sessions.sessionNotes[session] ?? ""
                 }
             }
+            registerWorkspaceShortcutsIfNeeded()
         }
         .onChange(of: isActiveTab) { newValue in
+            LOG("Tab active state changed", ctx: ["tabId": tabID, "isActive": "\(newValue)"])
             guard newValue, let context = tabContext else { return }
 
             // Check if templates were reloaded while this tab was inactive
@@ -1389,6 +1402,21 @@ struct ContentView: View {
                 context.markTemplateReloadSeen()
             }
         }
+        .onReceive(NotificationCenter.default.publisher(for: .focusSearchRequested)) { _ in
+            handleFocusSearchShortcut()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showGuideNotesRequested)) { _ in
+            handleShowGuideNotesShortcut()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showSessionNotesRequested)) { _ in
+            handleShowSessionNotesShortcut()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .showSavedFilesRequested)) { _ in
+            handleShowSavedFilesShortcut()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .toggleSidebarRequested)) { _ in
+            handleToggleSidebarShortcut()
+        }
     }
 
 
@@ -1398,41 +1426,23 @@ struct ContentView: View {
     private var detailContent: some View {
         GeometryReader { geometry in
             ScrollView {
-                mainDetailContent(topPadding: resolvedMainContentTopPadding(for: geometry.size.height))
+                mainDetailContent(topPadding: 0)
                     .frame(maxWidth: .infinity, alignment: .top)
             }
             .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
+            .clipped()
+            .safeAreaInset(edge: .top, spacing: 0) {
+                sessionTemplateTitleBar
+                    .padding(.horizontal, 16)
+                    .padding(.top, 8)
+                    .padding(.bottom, 8)
+                    .background(Theme.grayBG)
+            }
         }
         .background(Theme.grayBG)
         .frame(minWidth: 980, minHeight: 640)
-        .toolbar {
-            if isActiveTab {
-                ToolbarItemGroup(placement: .automatic) {
-                    Spacer()
-                    Button(action: {
-                        toggleSidebar()
-                    }) {
-                        Image(systemName: "sidebar.right")
-                    }
-                    .help("Toggle Sidebar (⌘T)")
-                }
-            }
-        }
         .overlay(alignment: .trailing) { commandSidebar }
         .overlay(alignment: .top) { toastOverlay }
-        .overlay(alignment: .top) {
-            VStack {
-                GeometryReader { geo in
-                    sessionTemplateTitleBar
-                        .padding(.top, resolvedMainContentTopPadding(for: geo.size.height))
-                        .padding(.horizontal, 16)
-                }
-                .frame(height: 100)
-
-                Spacer()
-                    .allowsHitTesting(false)
-            }
-        }
         .onReceive(NotificationCenter.default.publisher(for: .fontBump)) { note in
             if let delta = note.object as? Int {
                 fontSize = max(10, min(22, fontSize + CGFloat(delta)))
@@ -1714,49 +1724,56 @@ struct ContentView: View {
     }
 
     private var toastOverlay: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 10) {
             if toastCopied {
                 Text("Copied to clipboard")
-                    .font(.system(size: fontSize))
-                    .padding(.horizontal, 12).padding(.vertical, 6)
-                    .background(Theme.aqua.opacity(0.9)).foregroundStyle(.black)
-                    .clipShape(Capsule())
-                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .font(.system(size: fontSize + 4, weight: .semibold))
+                    .padding(.horizontal, 24).padding(.vertical, 14)
+                    .background(Theme.aqua).foregroundStyle(.black)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
+                    .transition(.scale.combined(with: .opacity))
             }
             if toastOpenDB {
                 Text("Opening in Querious…")
-                    .font(.system(size: fontSize))
-                    .padding(.horizontal, 12).padding(.vertical, 6)
-                    .background(Theme.aqua.opacity(0.9)).foregroundStyle(.black)
-                    .clipShape(Capsule())
-                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .font(.system(size: fontSize + 4, weight: .semibold))
+                    .padding(.horizontal, 24).padding(.vertical, 14)
+                    .background(Theme.aqua).foregroundStyle(.black)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
+                    .transition(.scale.combined(with: .opacity))
             }
             if let templateToast = toastTemplatesMessage {
                 Text(templateToast)
-                    .font(.system(size: fontSize))
-                    .padding(.horizontal, 12).padding(.vertical, 6)
-                    .background(Theme.accent.opacity(0.9)).foregroundStyle(.black)
-                    .clipShape(Capsule())
-                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .font(.system(size: fontSize + 4, weight: .semibold))
+                    .padding(.horizontal, 24).padding(.vertical, 14)
+                    .background(Theme.accent).foregroundStyle(.black)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
+                    .transition(.scale.combined(with: .opacity))
             }
             if toastPreviewBehind {
                 Text("Close editor to view preview")
-                    .font(.system(size: fontSize))
-                    .padding(.horizontal, 12).padding(.vertical, 6)
-                    .background(Theme.purple.opacity(0.9)).foregroundStyle(.black)
-                    .clipShape(Capsule())
-                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .font(.system(size: fontSize + 4, weight: .semibold))
+                    .padding(.horizontal, 24).padding(.vertical, 14)
+                    .background(Theme.purple).foregroundStyle(.black)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
+                    .transition(.scale.combined(with: .opacity))
             }
             if let message = imageAttachmentToast {
                 Text(message)
-                    .font(.system(size: fontSize))
-                    .padding(.horizontal, 12).padding(.vertical, 6)
-                    .background(Theme.gold.opacity(0.9)).foregroundStyle(.black)
-                    .clipShape(Capsule())
-                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .font(.system(size: fontSize + 4, weight: .semibold))
+                    .padding(.horizontal, 24).padding(.vertical, 14)
+                    .background(Theme.gold).foregroundStyle(.black)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
+                    .transition(.scale.combined(with: .opacity))
             }
         }
-        .padding(.top, 4)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .allowsHitTesting(false)
+        .zIndex(10000)
     }
 
     private func showTemplateToast(_ message: String) {
@@ -1780,7 +1797,7 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Session")
                         .font(.system(size: fontSize - 2))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.titleBarLabel)
                     Text(truncateSessionName(sessions.sessionNames[sessions.current] ?? "#\(sessions.current.rawValue)"))
                         .font(.system(size: fontSize + 3, weight: .semibold))
                         .foregroundStyle(Theme.purple)
@@ -1792,7 +1809,7 @@ struct ContentView: View {
                 VStack(alignment: .trailing, spacing: 4) {
                     Text("Active Template")
                         .font(.system(size: fontSize - 2))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.titleBarLabel)
                     if let template = selectedTemplate {
                         if let displayName = activeTemplateDisplayName(for: template) {
                             Text(displayName)
@@ -1813,7 +1830,7 @@ struct ContentView: View {
                 VStack(alignment: .center, spacing: 4) {
                     Text("Company")
                         .font(.system(size: fontSize - 2))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(Theme.titleBarLabel)
                     Text(companyLabel)
                         .font(.system(size: fontSize + 3, weight: .medium))
                         .foregroundStyle(Theme.accent)
@@ -1826,7 +1843,7 @@ struct ContentView: View {
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(Color(nsColor: .unemphasizedSelectedContentBackgroundColor))
+                .fill(Theme.titleBarBG)
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
                         .stroke(Theme.purple.opacity(0.2), lineWidth: 1)
@@ -1837,10 +1854,6 @@ struct ContentView: View {
 
     private func mainDetailContent(topPadding: CGFloat) -> some View {
         VStack(spacing: 12) {
-            // Spacer for floating title bar
-            Color.clear
-                .frame(height: 72)
-
             staticFields
                 .padding(.bottom, 8)
             Divider()
@@ -1868,59 +1881,9 @@ struct ContentView: View {
 
             outputView
 
-            Button("Focus Search") {
-                isSearchFocused = true
-                LOG("Search focused via keyboard shortcut")
-            }
-            .keyboardShortcut("f", modifiers: [.command])
-            .registerShortcut(name: "Search Queries", keyLabel: "F", modifiers: [.command], scope: "Global")
-            .disabled(isSavedFileEditorFocused || !isActiveTab)
-            .frame(width: 0, height: 0)
-            .hidden()
-
-            Button(action: {
-                setActivePane(.guideNotes)
-            }) {
-                EmptyView()
-            }
-            .keyboardShortcut("1", modifiers: [.command])
-            .disabled(selectedTemplate == nil || !isActiveTab)
-            .registerShortcut(name: "Show Guide Notes", keyLabel: "1", modifiers: [.command], scope: "Panes")
-            .frame(width: 0, height: 0)
-            .hidden()
-
-            Button(action: {
-                setActivePane(.sessionNotes)
-            }) {
-                EmptyView()
-            }
-            .keyboardShortcut("2", modifiers: [.command])
-            .disabled(!isActiveTab)
-            .registerShortcut(name: "Show Session Notes", keyLabel: "2", modifiers: [.command], scope: "Panes")
-            .frame(width: 0, height: 0)
-            .hidden()
-
-            Button(action: {
-                setActivePane(.savedFiles)
-            }) {
-                EmptyView()
-            }
-            .keyboardShortcut("3", modifiers: [.command])
-            .disabled(!isActiveTab)
-            .registerShortcut(name: "Show Saved Files", keyLabel: "3", modifiers: [.command], scope: "Panes")
-            .frame(width: 0, height: 0)
-            .hidden()
-
-            Button(action: {
-                toggleSidebar()
-            }) {
-                EmptyView()
-            }
-            .keyboardShortcut("t", modifiers: [.command])
-            .disabled(!isActiveTab)
-            .registerShortcut(name: "Toggle Sidebar", keyLabel: "T", modifiers: [.command], scope: "Layout")
-            .frame(width: 0, height: 0)
-            .hidden()
+            EmptyView()
+                .frame(width: 0, height: 0)
+                .hidden()
         }
         .padding(EdgeInsets(top: topPadding, leading: 16, bottom: 16, trailing: 16))
         .frame(maxWidth: .infinity, alignment: .top)
@@ -2394,7 +2357,7 @@ struct ContentView: View {
             HStack(spacing: 8) {
                 Text("Tags:")
                     .font(.system(size: fontSize - 1))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(Theme.titleBarLabel)
                 ForEach(tags, id: \.self) { tag in
                     Button {
                         showTemplates(for: tag)
@@ -3671,8 +3634,9 @@ struct ContentView: View {
                         }
                         
                         HStack {
-                            Button("Connect to Database") {
-                                connectToQuerious()
+                            Button(action: { connectToQuerious() }) {
+                                Text("Connect to Database")
+                                    .foregroundColor(Color(hex: "#2A2A35"))
                             }
                             .buttonStyle(.borderedProminent)
                             .tint(Theme.accent)
@@ -5333,7 +5297,7 @@ struct ContentView: View {
                 HStack(spacing: 12) {
                     Text("Output SQL")
                         .font(.system(size: fontSize + 4, weight: .semibold))
-                        .foregroundStyle(Theme.aqua)
+                        .foregroundStyle(Theme.paneLabelColor)
                     Spacer(minLength: 16)
 
                     Button("Hide Output") {
@@ -5367,7 +5331,7 @@ struct ContentView: View {
                             .stroke(Theme.purple.opacity(0.18), lineWidth: 1)
                     )
             )
-            .padding(.bottom, 4)
+            .padding(.bottom, 52)
         }
 
         private func bottomPaneContainer(pane: BottomPaneContent, guideDirty: Bool, activeSession: TicketSession) -> some View {
@@ -5382,7 +5346,7 @@ struct ContentView: View {
                 bottomPaneContent(for: pane, activeSession: activeSession)
                     .padding(.top, pane == .savedFiles ? 28 : 16)
                     .padding(.horizontal, 20)
-                    .padding(.bottom, 12)
+                    .padding(.bottom, 52)
                     .frame(maxHeight: .infinity, alignment: .top)
                     .layoutPriority(1)
             }
@@ -5486,17 +5450,17 @@ struct ContentView: View {
                 return Label("Guide Notes", systemImage: "text.book.closed")
                     .labelStyle(.titleAndIcon)
                     .font(.system(size: fontSize + 2, weight: .semibold))
-                    .foregroundStyle(Theme.aqua)
+                    .foregroundStyle(Theme.paneLabelColor)
             case .sessionNotes:
                 return Label("Session Notes", systemImage: "pencil.and.list.clipboard")
                     .labelStyle(.titleAndIcon)
                     .font(.system(size: fontSize + 2, weight: .semibold))
-                    .foregroundStyle(Theme.aqua)
+                    .foregroundStyle(Theme.paneLabelColor)
             case .savedFiles:
                 return Label("Saved Files", systemImage: "doc.richtext")
                     .labelStyle(.titleAndIcon)
                     .font(.system(size: fontSize + 2, weight: .semibold))
-                    .foregroundStyle(Theme.aqua)
+                    .foregroundStyle(Theme.paneLabelColor)
             }
         }
 
@@ -5641,6 +5605,70 @@ struct ContentView: View {
                     isSidebarVisible.toggle()
                 }
             }
+        }
+
+        private func registerWorkspaceShortcutsIfNeeded() {
+            guard !workspaceShortcutsRegistered else { return }
+            let registry = ShortcutRegistry.shared
+            registry.register(name: "Search Queries", keyLabel: "F", modifiers: [.command], scope: "Global")
+            registry.register(name: "Show Guide Notes", keyLabel: "1", modifiers: [.command], scope: "Panes")
+            registry.register(name: "Show Session Notes", keyLabel: "2", modifiers: [.command], scope: "Panes")
+            registry.register(name: "Show Saved Files", keyLabel: "3", modifiers: [.command], scope: "Panes")
+            registry.register(name: "Toggle Sidebar", keyLabel: "T", modifiers: [.command], scope: "Layout")
+            workspaceShortcutsRegistered = true
+        }
+
+        private func handleFocusSearchShortcut() {
+            guard isActiveTab else {
+                LOG("Search shortcut ignored for inactive tab", ctx: ["tabId": tabID])
+                return
+            }
+            guard !isSavedFileEditorFocused else {
+                LOG("Search shortcut ignored while saved file editor focused", ctx: ["tabId": tabID])
+                return
+            }
+            isSearchFocused = true
+            LOG("Search focused via keyboard shortcut", ctx: ["tabId": tabID])
+        }
+
+        private func handleShowGuideNotesShortcut() {
+            guard isActiveTab else {
+                LOG("Guide notes shortcut ignored for inactive tab", ctx: ["tabId": tabID])
+                return
+            }
+            guard selectedTemplate != nil else {
+                LOG("Guide notes shortcut ignored without selected template", ctx: ["tabId": tabID])
+                return
+            }
+            setActivePane(.guideNotes)
+            LOG("Guide notes shortcut handled", ctx: ["tabId": tabID])
+        }
+
+        private func handleShowSessionNotesShortcut() {
+            guard isActiveTab else {
+                LOG("Session notes shortcut ignored for inactive tab", ctx: ["tabId": tabID])
+                return
+            }
+            setActivePane(.sessionNotes)
+            LOG("Session notes shortcut handled", ctx: ["tabId": tabID])
+        }
+
+        private func handleShowSavedFilesShortcut() {
+            guard isActiveTab else {
+                LOG("Saved files shortcut ignored for inactive tab", ctx: ["tabId": tabID])
+                return
+            }
+            setActivePane(.savedFiles)
+            LOG("Saved files shortcut handled", ctx: ["tabId": tabID])
+        }
+
+        private func handleToggleSidebarShortcut() {
+            guard isActiveTab else {
+                LOG("Sidebar shortcut ignored for inactive tab", ctx: ["tabId": tabID])
+                return
+            }
+            toggleSidebar()
+            LOG("Sidebar shortcut handled", ctx: ["tabId": tabID])
         }
 
         private func sidebarSessionButton(_ session: TicketSession) -> some View {
@@ -5981,11 +6009,12 @@ struct ContentView: View {
                     .font(.system(size: fontSize))
                     .registerShortcut(name: "Populate Query", key: .return, modifiers: [.command], scope: "Global")
 
-                Button("Clear Session #\(sessions.current.rawValue)") {
-                    attemptClearCurrentSession()
+                Button(action: { attemptClearCurrentSession() }) {
+                    Text("Clear Session #\(sessions.current.rawValue)")
+                        .foregroundColor(Theme.clearSessionText)
                 }
                 .buttonStyle(.bordered)
-                .tint(Theme.aqua)
+                .tint(Theme.clearSessionTint)
                 .keyboardShortcut("k", modifiers: [.command, .shift])
                 .font(.system(size: fontSize))
                 .registerShortcut(name: "Clear Session", keyLabel: "K", modifiers: [.command, .shift], scope: "Global")
@@ -6063,31 +6092,45 @@ struct ContentView: View {
         }
 
         private var tabSwitcherButtons: some View {
-            HStack(spacing: 6) {
+            HStack(spacing: 8) {
                 ForEach(Array(tabManager.tabs.enumerated()), id: \.element.id) { index, _ in
+                    let baseColor = tabManager.color(for: index)
+                    let isActive = tabManager.activeTabIndex == index
+                    let activeTint = baseColor.opacity(0.85)
+                    let inactiveTint = baseColor.opacity(0.3)
+                    let borderColor = baseColor.opacity(isActive ? 0.9 : 0.45)
                     Button(action: {
                         tabManager.switchToTab(at: index)
+                        LOG("Tab switch via button", ctx: ["targetIndex": "\(index)", "tabId": tabID])
                     }) {
                         Text("\(index + 1)")
-                            .font(.system(size: fontSize - 2, weight: tabManager.activeTabIndex == index ? .semibold : .regular))
-                            .padding(.vertical, 5)
-                            .padding(.leading, 20)
-                            .padding(.trailing, 14)
-                            .frame(minWidth: 44, alignment: .center)
+                            .font(.system(size: fontSize - 2, weight: isActive ? .semibold : .regular))
+                            .foregroundStyle(.white)
+                            .padding(.vertical, 6)
+                            .padding(.leading, 22)
+                            .padding(.trailing, 16)
+                            .frame(minWidth: 48, alignment: .center)
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(tabManager.activeTabIndex == index ? tabManager.color(for: index) : tabManager.color(for: index).opacity(0.3))
+                    .tint(isActive ? activeTint : inactiveTint)
                     .help("Switch to Tab \(index + 1)")
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(borderColor, lineWidth: 1.4)
+                    )
                     .overlay(alignment: .trailing) {
                         Button(action: {
                             tabManager.closeTab(at: index)
+                            LOG("Tab close via button", ctx: ["index": "\(index)", "tabId": tabID])
                         }) {
                             Image(systemName: "xmark.circle.fill")
                                 .font(.system(size: fontSize - 3))
+                                .foregroundStyle(.white.opacity(isActive ? 0.95 : 0.75))
+                                .padding(.vertical, 4)
+                                .padding(.trailing, 4)
                         }
                         .buttonStyle(.plain)
-                        .padding(.trailing, 2)
                         .help("Close Tab \(index + 1)")
                     }
                 }
@@ -8832,6 +8875,7 @@ struct ContentView: View {
         // A tiny invisible view that listens for the menu notifications
         private struct TicketSessionNotificationBridge: View {
             @Environment(\.isActiveTab) var isActiveTab
+            @Environment(\.tabID) var tabID
             var onSave: () -> Void
             var onLoad: () -> Void
             var onOpen: () -> Void
@@ -8839,16 +8883,28 @@ struct ContentView: View {
             var body: some View {
                 Color.clear
                     .onReceive(NotificationCenter.default.publisher(for: .saveTicketSession)) { _ in
-                        guard isActiveTab else { return }
+                        guard isActiveTab else {
+                            LOG("Save session notification ignored", ctx: ["tabId": tabID])
+                            return
+                        }
                         onSave()
+                        LOG("Save session notification handled", ctx: ["tabId": tabID])
                     }
                     .onReceive(NotificationCenter.default.publisher(for: .loadTicketSession)) { _ in
-                        guard isActiveTab else { return }
+                        guard isActiveTab else {
+                            LOG("Load session notification ignored", ctx: ["tabId": tabID])
+                            return
+                        }
                         onLoad()
+                        LOG("Load session notification handled", ctx: ["tabId": tabID])
                     }
                     .onReceive(NotificationCenter.default.publisher(for: .openSessionsFolder)) { _ in
-                        guard isActiveTab else { return }
+                        guard isActiveTab else {
+                            LOG("Open sessions folder notification ignored", ctx: ["tabId": tabID])
+                            return
+                        }
                         onOpen()
+                        LOG("Open sessions folder notification handled", ctx: ["tabId": tabID])
                     }
                     .onReceive(NotificationCenter.default.publisher(for: .attemptAppExit)) { _ in
                         // App exit should be handled by all tabs
@@ -11120,7 +11176,7 @@ struct ContentView: View {
                 HStack(spacing: 10) {
                     Text("Session Notes")
                         .font(.system(size: fontSize + 4, weight: .semibold))
-                        .foregroundStyle(Theme.aqua)
+                        .foregroundStyle(Theme.paneLabelColor)
                     Spacer()
                     Picker("Mode", selection: $isEditing) {
                         Text("Preview").tag(false)
@@ -11643,6 +11699,7 @@ struct ContentView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     searchControls
                         .padding(.top, -20)
+                        .padding(.bottom, 8)
 
                     if let selectedID, files.contains(where: { $0.id == selectedID }) {
                         let binding = Binding<String>(
@@ -11664,6 +11721,7 @@ struct ContentView: View {
                         )
                         .padding(.top, -8)
                         .frame(maxWidth: .infinity, minHeight: editorMinHeight, maxHeight: .infinity, alignment: .top)
+                        .clipped()
                         .layoutPriority(1)
                         .background(
                             RoundedRectangle(cornerRadius: 10)
@@ -11704,6 +11762,8 @@ struct ContentView: View {
                         })
                         .textFieldStyle(.plain)
                         .font(.system(size: fontSize - 2, weight: .regular, design: .monospaced))
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                         .disabled(selectedID == nil)
                         .focused($isSearchFieldFocused)
                         if !searchQuery.isEmpty {
@@ -12171,7 +12231,7 @@ struct ContentView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Session Notes")
                             .font(.system(size: fontSize + 4, weight: .semibold))
-                            .foregroundStyle(Theme.aqua)
+                            .foregroundStyle(Theme.paneLabelColor)
                         Text("Session #\(s.rawValue)")
                             .font(.system(size: fontSize - 1, weight: .medium))
                             .foregroundStyle(.secondary)
@@ -12180,7 +12240,7 @@ struct ContentView: View {
                     VStack(alignment: .leading, spacing: 2) {
                         Text("Saved Files")
                             .font(.system(size: fontSize + 4, weight: .semibold))
-                            .foregroundStyle(Theme.aqua)
+                            .foregroundStyle(Theme.paneLabelColor)
                         Text("Session #\(s.rawValue)")
                             .font(.system(size: fontSize - 1, weight: .medium))
                             .foregroundStyle(.secondary)
