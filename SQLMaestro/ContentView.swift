@@ -865,7 +865,7 @@ struct MarkdownPreviewView: View {
     }
 
     private var previewMarkdown: some View {
-        Markdown(text)
+        Markdown(processedText)
             .markdownTheme(previewTheme)
             .markdownSoftBreakMode(.lineBreak)
             .markdownMargin(top: 0, bottom: 0)
@@ -873,6 +873,10 @@ struct MarkdownPreviewView: View {
             .padding(.horizontal, 8)
             .padding(.vertical, 2)
             .textSelection(.enabled)
+    }
+
+    private var processedText: String {
+        text.replacingOccurrences(of: "=>", with: "→")
     }
 
     private var previewTheme: MarkdownUI.Theme {
@@ -4822,7 +4826,7 @@ struct ContentView: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    ScrollView {
+                    NonBubblingScrollView {
                         LazyVStack(alignment: .leading, spacing: 6) {
                             ForEach(sessionImages) { image in
                                 SessionImageRow(
@@ -4899,7 +4903,7 @@ struct ContentView: View {
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
-                        ScrollView {
+                        NonBubblingScrollView {
                             LazyVStack(alignment: .leading, spacing: 6) {
                                 ForEach(guideImages) { image in
                                     TemplateGuideImageRow(
@@ -4986,7 +4990,7 @@ struct ContentView: View {
                         }
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else {
-                        ScrollView {
+                        NonBubblingScrollView {
                             LazyVStack(alignment: .leading, spacing: 6) {
                                 ForEach(templateLinks) { link in
                                     TemplateLinkRow(
@@ -5001,7 +5005,7 @@ struct ContentView: View {
                             }
                             .padding(4)
                         }
-                        
+
                         // Save/Revert buttons
                         let isDirty = templateLinksStore.isDirty(for: template)
                         if isDirty {
