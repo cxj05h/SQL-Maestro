@@ -1388,12 +1388,17 @@ struct ContentView: View {
         .overlay(alignment: .trailing) { commandSidebar }
         .overlay(alignment: .top) { toastOverlay }
         .overlay(alignment: .top) {
-            GeometryReader { geo in
-                sessionTemplateTitleBar
-                    .padding(.top, resolvedMainContentTopPadding(for: geo.size.height))
-                    .padding(.horizontal, 16)
+            VStack {
+                GeometryReader { geo in
+                    sessionTemplateTitleBar
+                        .padding(.top, resolvedMainContentTopPadding(for: geo.size.height))
+                        .padding(.horizontal, 16)
+                }
+                .frame(height: 100)
+
+                Spacer()
+                    .allowsHitTesting(false)
             }
-            .allowsHitTesting(false)
         }
         .onReceive(NotificationCenter.default.publisher(for: .fontBump)) { note in
             if let delta = note.object as? Int {
@@ -1774,6 +1779,7 @@ struct ContentView: View {
                         .foregroundStyle(Theme.accent)
                 }
                 .frame(maxWidth: .infinity, alignment: .center)
+                .allowsHitTesting(false)
             }
         }
         .padding(.horizontal, 12)
@@ -1785,6 +1791,7 @@ struct ContentView: View {
                     RoundedRectangle(cornerRadius: 8)
                         .stroke(Theme.purple.opacity(0.2), lineWidth: 1)
                 )
+                .allowsHitTesting(false)
         )
     }
 
