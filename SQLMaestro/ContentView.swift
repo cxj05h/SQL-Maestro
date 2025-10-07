@@ -5465,6 +5465,7 @@ struct ContentView: View {
 
                 commandSidebarContent
                     .offset(x: isSidebarVisible ? 0 : 280)
+                    .padding(.top, 30)
                     .shadow(color: Color.black.opacity(0.18), radius: 18, x: -6, y: 0)
             }
             .animation(.easeInOut(duration: 0.26), value: isSidebarVisible)
