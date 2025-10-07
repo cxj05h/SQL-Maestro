@@ -10470,9 +10470,10 @@ struct ContentView: View {
                 let baseHeight: CGFloat = 360
 
                 // Get the screen size and calculate max width based on available space
-                let screenSize = NSScreen.main?.visibleFrame.size ?? CGSize(width: 1920, height: 1080)
+                let screenFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1920, height: 1080)
+                let screenSize = screenFrame.size
                 let screenPadding: CGFloat = 100 // padding from screen edges
-                let maxWidth = screenSize.width - screenPadding
+                let maxWidth = max(screenSize.width - screenPadding, baseWidth)
                 let widthRange: CGFloat = maxWidth - baseWidth
 
                 let chromeHeight: CGFloat = 220
@@ -10482,23 +10483,39 @@ struct ContentView: View {
                 let imageHeightForWidth = resolvedWidth * aspectRatio
                 let resolvedHeight = max(baseHeight, imageHeightForWidth + chromeHeight)
 
+                let verticalPadding: CGFloat = 80
+                let maxWindowHeight = max(screenSize.height - verticalPadding, baseHeight)
+
+                let finalWidth = min(resolvedWidth, maxWidth)
+                let finalHeight = min(resolvedHeight, maxWindowHeight)
+
                 return VStack(alignment: .leading, spacing: 16) {
                     Text(sessionImage.displayName)
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(Theme.purple)
 
-                    ScrollView {
+                    ScrollView([.vertical, .horizontal], showsIndicators: true) {
                         VStack(spacing: 0) {
                             if let nsImage = displayedImage {
-                                Image(nsImage: nsImage)
+                                let imageView = Image(nsImage: nsImage)
                                     .resizable()
                                     .interpolation(.high)
                                     .aspectRatio(contentMode: .fit)
-                                    .frame(maxWidth: .infinity)
+                                    .frame(width: resolvedWidth)
                                     .cornerRadius(10)
                                     .shadow(color: .black.opacity(0.12), radius: 10, x: 0, y: 6)
+
+                                if resolvedWidth <= finalWidth {
+                                    HStack(spacing: 0) {
+                                        Spacer(minLength: 0)
+                                        imageView
+                                        Spacer(minLength: 0)
+                                    }
+                                } else {
+                                    imageView
+                                }
                             } else {
-                                VStack(spacing: 8) {
+                                let placeholder = VStack(spacing: 8) {
                                     Image(systemName: "exclamationmark.triangle.fill")
                                         .font(.system(size: 30))
                                         .foregroundStyle(.orange)
@@ -10510,11 +10527,20 @@ struct ContentView: View {
                                         .multilineTextAlignment(.center)
                                         .textSelection(.enabled)
                                 }
-                                .frame(maxWidth: .infinity)
                                 .padding(.vertical, 40)
+                                .frame(width: max(resolvedWidth, finalWidth))
+
+                                if resolvedWidth <= finalWidth {
+                                    HStack(spacing: 0) {
+                                        Spacer(minLength: 0)
+                                        placeholder
+                                        Spacer(minLength: 0)
+                                    }
+                                } else {
+                                    placeholder
+                                }
                             }
                         }
-                        .frame(maxWidth: .infinity, alignment: .center)
                     }
                     .frame(maxHeight: .infinity)
 
@@ -10565,12 +10591,12 @@ struct ContentView: View {
                     }
                 }
                 .padding(20)
-                .frame(width: resolvedWidth,
-                       height: resolvedHeight,
+                .frame(width: finalWidth,
+                       height: finalHeight,
                        alignment: .topLeading)
 #if canImport(AppKit)
-                .background(WindowSizeUpdater(size: CGSize(width: resolvedWidth,
-                                                          height: resolvedHeight)))
+                .background(WindowSizeUpdater(size: CGSize(width: finalWidth,
+                                                          height: finalHeight)))
                 .background(FloatingWindowConfigurator(level: .floating))
 #endif
             }
@@ -10605,9 +10631,10 @@ struct ContentView: View {
                 let baseHeight: CGFloat = 360
 
                 // Get the screen size and calculate max width based on available space
-                let screenSize = NSScreen.main?.visibleFrame.size ?? CGSize(width: 1920, height: 1080)
+                let screenFrame = NSScreen.main?.visibleFrame ?? NSRect(x: 0, y: 0, width: 1920, height: 1080)
+                let screenSize = screenFrame.size
                 let screenPadding: CGFloat = 100 // padding from screen edges
-                let maxWidth = screenSize.width - screenPadding
+                let maxWidth = max(screenSize.width - screenPadding, baseWidth)
                 let widthRange: CGFloat = maxWidth - baseWidth
 
                 let chromeHeight: CGFloat = 220
@@ -10617,23 +10644,39 @@ struct ContentView: View {
                 let imageHeightForWidth = resolvedWidth * aspectRatio
                 let resolvedHeight = max(baseHeight, imageHeightForWidth + chromeHeight)
 
+                let verticalPadding: CGFloat = 80
+                let maxWindowHeight = max(screenSize.height - verticalPadding, baseHeight)
+
+                let finalWidth = min(resolvedWidth, maxWidth)
+                let finalHeight = min(resolvedHeight, maxWindowHeight)
+
                 return VStack(alignment: .leading, spacing: 16) {
                     Text(guideImage.displayName)
                         .font(.system(size: 17, weight: .semibold))
                         .foregroundStyle(Theme.purple)
 
-                    ScrollView {
+                    ScrollView([.vertical, .horizontal], showsIndicators: true) {
                         VStack(spacing: 0) {
                             if let nsImage = displayedImage {
-                                Image(nsImage: nsImage)
+                                let imageView = Image(nsImage: nsImage)
                                     .resizable()
                                     .interpolation(.high)
                                     .aspectRatio(contentMode: .fit)
-                                    .frame(maxWidth: .infinity)
+                                    .frame(width: resolvedWidth)
                                     .cornerRadius(10)
                                     .shadow(color: .black.opacity(0.12), radius: 10, x: 0, y: 6)
+
+                                if resolvedWidth <= finalWidth {
+                                    HStack(spacing: 0) {
+                                        Spacer(minLength: 0)
+                                        imageView
+                                        Spacer(minLength: 0)
+                                    }
+                                } else {
+                                    imageView
+                                }
                             } else {
-                                VStack(spacing: 8) {
+                                let placeholder = VStack(spacing: 8) {
                                     Image(systemName: "exclamationmark.triangle.fill")
                                         .font(.system(size: 30))
                                         .foregroundStyle(.orange)
@@ -10645,11 +10688,20 @@ struct ContentView: View {
                                         .multilineTextAlignment(.center)
                                         .textSelection(.enabled)
                                 }
-                                .frame(maxWidth: .infinity)
                                 .padding(.vertical, 40)
+                                .frame(width: max(resolvedWidth, finalWidth))
+
+                                if resolvedWidth <= finalWidth {
+                                    HStack(spacing: 0) {
+                                        Spacer(minLength: 0)
+                                        placeholder
+                                        Spacer(minLength: 0)
+                                    }
+                                } else {
+                                    placeholder
+                                }
                             }
                         }
-                        .frame(maxWidth: .infinity, alignment: .center)
                     }
                     .frame(maxHeight: .infinity)
 
@@ -10698,12 +10750,12 @@ struct ContentView: View {
                     }
                 }
                 .padding(20)
-                .frame(width: resolvedWidth,
-                       height: resolvedHeight,
+                .frame(width: finalWidth,
+                       height: finalHeight,
                        alignment: .topLeading)
 #if canImport(AppKit)
-                .background(WindowSizeUpdater(size: CGSize(width: resolvedWidth,
-                                                          height: resolvedHeight)))
+                .background(WindowSizeUpdater(size: CGSize(width: finalWidth,
+                                                          height: finalHeight)))
                 .background(FloatingWindowConfigurator(level: .floating))
 #endif
             }
