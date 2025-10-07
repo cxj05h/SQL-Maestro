@@ -2,6 +2,20 @@ import Foundation
 @_implementationOnly import cmark_gfm
 @_implementationOnly import cmark_gfm_extensions
 
+private enum StyledCodeMarker {
+  static let start = "⟪STYLED⟪"
+  static let end = "⟫STYLED⟫"
+
+  static func stripping(from content: String) -> String? {
+    guard content.hasPrefix(self.start), content.hasSuffix(self.end) else {
+      return nil
+    }
+    let startIndex = content.index(content.startIndex, offsetBy: self.start.count)
+    let endIndex = content.index(content.endIndex, offsetBy: -self.end.count)
+    return String(content[startIndex..<endIndex])
+  }
+}
+
 extension Array where Element == BlockNode {
   init(markdown: String) {
     // Preprocess markdown to handle double backtick syntax for styled code
@@ -13,7 +27,7 @@ extension Array where Element == BlockNode {
   }
 
   private static func preprocessStyledCode(_ markdown: String) -> String {
-    // Replace ``code`` with ⟪STYLED⟪code⟫STYLED⟫ marker for parsing
+    // Replace ``code`` with `⟪STYLED⟪code⟫STYLED⟫` to keep cmark from splitting on angle brackets
     // Using special Unicode characters that are unlikely to appear in normal text
     // This uses a negative lookbehind/lookahead to avoid matching triple backticks
     let pattern = "(?<!`)``(?!`)([^`]+)``(?!`)"
@@ -21,20 +35,22 @@ extension Array where Element == BlockNode {
       return markdown
     }
     let range = NSRange(markdown.startIndex..., in: markdown)
+    let replacement = "`" + StyledCodeMarker.start + "$1" + StyledCodeMarker.end + "`"
     let result = regex.stringByReplacingMatches(
       in: markdown,
       options: [],
       range: range,
-      withTemplate: "⟪STYLED⟪$1⟫STYLED⟫"
+      withTemplate: replacement
     )
 
     return result
   }
 
   func renderMarkdown() -> String {
-    UnsafeNode.makeDocument(self) { document in
+    let markdown = UnsafeNode.makeDocument(self) { document in
       String(cString: cmark_render_commonmark(document, CMARK_OPT_DEFAULT, 0))
     } ?? ""
+    return Self.postprocessStyledCode(markdown)
   }
 
   func renderPlainText() -> String {
@@ -47,6 +63,25 @@ extension Array where Element == BlockNode {
     UnsafeNode.makeDocument(self) { document in
       String(cString: cmark_render_html(document, CMARK_OPT_DEFAULT, nil))
     } ?? ""
+  }
+
+  private static func postprocessStyledCode(_ markdown: String) -> String {
+    let pattern = "`" + StyledCodeMarker.start + "(.*?)" + StyledCodeMarker.end + "`"
+    guard
+      let regex = try? NSRegularExpression(
+        pattern: pattern,
+        options: [.dotMatchesLineSeparators]
+      )
+    else {
+      return markdown
+    }
+    let range = NSRange(markdown.startIndex..., in: markdown)
+    return regex.stringByReplacingMatches(
+      in: markdown,
+      options: [],
+      range: range,
+      withTemplate: "``$1``"
+    )
   }
 }
 
@@ -153,7 +188,11 @@ extension InlineNode {
     case .lineBreak:
       return [.lineBreak]
     case .code:
-      return [.code(unsafeNode.literal ?? "")]
+      let literal = unsafeNode.literal ?? ""
+      if let styledContent = StyledCodeMarker.stripping(from: literal) {
+        return [.styledCode(styledContent)]
+      }
+      return [.code(literal)]
     case .html:
       return [.html(unsafeNode.literal ?? "")]
     case .emphasis:
@@ -188,8 +227,8 @@ extension InlineNode {
   }
 
   private static func splitStyledCodeSegments(from text: String) -> [InlineNode] {
-    let startMarker = "⟪STYLED⟪"
-    let endMarker = "⟫STYLED⟫"
+    let startMarker = StyledCodeMarker.start
+    let endMarker = StyledCodeMarker.end
 
     guard text.contains(startMarker) else {
       return [.text(text)]
@@ -463,9 +502,8 @@ extension UnsafeNode {
       cmark_node_set_literal(node, content)
       return node
     case .styledCode(let content):
-      // Convert styledCode back to marker format
-      guard let node = cmark_node_new(CMARK_NODE_TEXT) else { return nil }
-      cmark_node_set_literal(node, "⟪STYLED⟪\(content)⟫STYLED⟫")
+      guard let node = cmark_node_new(CMARK_NODE_CODE) else { return nil }
+      cmark_node_set_literal(node, StyledCodeMarker.start + content + StyledCodeMarker.end)
       return node
     case .html(let content):
       guard let node = cmark_node_new(CMARK_NODE_HTML_INLINE) else { return nil }
