@@ -1786,7 +1786,7 @@ struct ContentView: View {
         .padding(.vertical, 8)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(Theme.grayBG.opacity(0.98))
+                .fill(Color(nsColor: .unemphasizedSelectedContentBackgroundColor))
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
                         .stroke(Theme.purple.opacity(0.2), lineWidth: 1)
