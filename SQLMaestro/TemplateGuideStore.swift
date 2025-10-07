@@ -213,8 +213,10 @@ final class TemplateGuideStore: ObservableObject {
         if let notes = notesCache.removeValue(forKey: oldKey) {
             notesCache[newKey] = notes
         }
+
+        rewriteGuideNotesIfNeeded(from: oldFolder, to: newFolder, cacheKey: newKey)
     }
-    
+
     // MARK: - Private helpers
     private func key(for template: TemplateItem) -> String {
         key(for: template.url)
@@ -273,7 +275,7 @@ final class TemplateGuideStore: ObservableObject {
             LOG("Template guide manifest save failed", ctx: ["template": template.name, "error": error.localizedDescription])
         }
     }
-    
+
     private func ensureFolder(for template: TemplateItem) {
         let folder = folderURL(for: template.url)
         let imagesFolder = folder.appendingPathComponent("images", isDirectory: true)
@@ -307,7 +309,44 @@ final class TemplateGuideStore: ObservableObject {
         folderURL(for: template).appendingPathComponent("images", isDirectory: true)
             .appendingPathComponent(fileName)
     }
-    
+
+    private func rewriteGuideNotesIfNeeded(from oldFolder: URL, to newFolder: URL, cacheKey: String) {
+        if let state = notesCache[cacheKey],
+           let updated = TemplateGuideStore.rewriteGuideTextPrefix(in: state.text,
+                                                                  from: oldFolder,
+                                                                  to: newFolder) {
+            notesCache[cacheKey] = GuideNotesState(text: updated, dirty: state.dirty)
+        }
+
+        let notesURL = newFolder.appendingPathComponent("guide.json")
+        guard let data = try? Data(contentsOf: notesURL),
+              var model = try? decoder.decode(TemplateGuideNotesModel.self, from: data) else { return }
+
+        if let updated = TemplateGuideStore.rewriteGuideTextPrefix(in: model.text,
+                                                                  from: oldFolder,
+                                                                  to: newFolder) {
+            model.text = updated
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            if let encoded = try? encoder.encode(model) {
+                try? encoded.write(to: notesURL, options: .atomic)
+            }
+        }
+    }
+
+    static func rewriteGuideTextPrefix(in text: String?,
+                                       from oldFolder: URL,
+                                       to newFolder: URL) -> String? {
+        guard let text else { return nil }
+        let oldPrefix = oldFolder.absoluteString
+        let newPrefix = newFolder.absoluteString
+        guard oldPrefix != newPrefix else { return nil }
+
+        let updated = text.replacingOccurrences(of: oldPrefix, with: newPrefix)
+        guard updated != text else { return nil }
+        return updated
+    }
+
     private let encoder: JSONEncoder = {
         let enc = JSONEncoder()
         enc.outputFormatting = [.prettyPrinted, .sortedKeys]

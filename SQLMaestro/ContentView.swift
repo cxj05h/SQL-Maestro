@@ -8798,12 +8798,38 @@ struct ContentView: View {
                   !newName.isEmpty else { return }
             
             do {
+                let originalURL = item.url
                 let renamed = try templates.renameTemplate(item, to: newName)
+                rewriteSessionNotesForTemplateRename(from: originalURL, to: renamed.url)
                 if selectedTemplate?.id == item.id {
                     selectTemplate(renamed)
                 }
             } catch {
                 NSSound.beep()
+            }
+        }
+
+        private func rewriteSessionNotesForTemplateRename(from oldURL: URL, to newURL: URL) {
+            let oldFolder = AppPaths.templateGuides.appendingPathComponent(oldURL.deletingPathExtension().lastPathComponent, isDirectory: true)
+            let newFolder = AppPaths.templateGuides.appendingPathComponent(newURL.deletingPathExtension().lastPathComponent, isDirectory: true)
+            guard oldFolder != newFolder else { return }
+
+            for session in TicketSession.allCases {
+                let current = sessions.sessionNotes[session] ?? ""
+                if let updated = TemplateGuideStore.rewriteGuideTextPrefix(in: current,
+                                                                          from: oldFolder,
+                                                                          to: newFolder) {
+                    sessions.sessionNotes[session] = updated
+                }
+            }
+
+            for session in TicketSession.allCases {
+                if let draft = sessionNotesDrafts[session],
+                   let updated = TemplateGuideStore.rewriteGuideTextPrefix(in: draft,
+                                                                          from: oldFolder,
+                                                                          to: newFolder) {
+                    setSessionNotesDraft(updated, for: session, source: "template-rename", logChange: false)
+                }
             }
         }
         
