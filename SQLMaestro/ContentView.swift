@@ -1365,16 +1365,12 @@ struct ContentView: View {
 
     @ViewBuilder
     private var detailContent: some View {
-        VStack(spacing: 0) {
-            hardStopTitleRow
-            hardStopDivider
-            GeometryReader { geometry in
-                ScrollView {
-                    mainDetailContent(topPadding: resolvedMainContentTopPadding(for: geometry.size.height))
-                        .frame(maxWidth: .infinity, alignment: .top)
-                }
-                .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
+        GeometryReader { geometry in
+            ScrollView {
+                mainDetailContent(topPadding: resolvedMainContentTopPadding(for: geometry.size.height))
+                    .frame(maxWidth: .infinity, alignment: .top)
             }
+            .frame(width: geometry.size.width, height: geometry.size.height, alignment: .top)
         }
         .background(Theme.grayBG)
         .frame(minWidth: 980, minHeight: 640)
@@ -1391,6 +1387,14 @@ struct ContentView: View {
         }
         .overlay(alignment: .trailing) { commandSidebar }
         .overlay(alignment: .top) { toastOverlay }
+        .overlay(alignment: .top) {
+            GeometryReader { geo in
+                sessionTemplateTitleBar
+                    .padding(.top, resolvedMainContentTopPadding(for: geo.size.height))
+                    .padding(.horizontal, 16)
+            }
+            .allowsHitTesting(false)
+        }
         .onReceive(NotificationCenter.default.publisher(for: .fontBump)) { note in
             if let delta = note.object as? Int {
                 fontSize = max(10, min(22, fontSize + CGFloat(delta)))
@@ -1724,67 +1728,71 @@ struct ContentView: View {
         return name
     }
 
-    private func mainDetailContent(topPadding: CGFloat) -> some View {
-        VStack(spacing: 12) {
-            ZStack {
-                HStack {
-                    // Session name on the left
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text("Session")
-                            .font(.system(size: fontSize - 2))
-                            .foregroundStyle(.secondary)
-                        Text(truncateSessionName(sessions.sessionNames[sessions.current] ?? "#\(sessions.current.rawValue)"))
-                            .font(.system(size: fontSize + 3, weight: .semibold))
-                            .foregroundStyle(Theme.purple)
-                    }
+    private var sessionTemplateTitleBar: some View {
+        ZStack {
+            HStack {
+                // Session name on the left
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Session")
+                        .font(.system(size: fontSize - 2))
+                        .foregroundStyle(.secondary)
+                    Text(truncateSessionName(sessions.sessionNames[sessions.current] ?? "#\(sessions.current.rawValue)"))
+                        .font(.system(size: fontSize + 3, weight: .semibold))
+                        .foregroundStyle(Theme.purple)
+                }
 
-                    Spacer()
+                Spacer()
 
-                    // Active Template on the right
-                    VStack(alignment: .trailing, spacing: 4) {
-                        Text("Active Template")
-                            .font(.system(size: fontSize - 2))
-                            .foregroundStyle(.secondary)
-                        if let template = selectedTemplate {
-                            if let displayName = activeTemplateDisplayName(for: template) {
-                                Text(displayName)
-                                    .font(.system(size: fontSize + 3, weight: .medium))
-                                    .foregroundStyle(Theme.gold)
-                            }
-                            activeTemplateTags(for: template)
-                        } else {
-                            Text("No template loaded")
+                // Active Template on the right
+                VStack(alignment: .trailing, spacing: 4) {
+                    Text("Active Template")
+                        .font(.system(size: fontSize - 2))
+                        .foregroundStyle(.secondary)
+                    if let template = selectedTemplate {
+                        if let displayName = activeTemplateDisplayName(for: template) {
+                            Text(displayName)
                                 .font(.system(size: fontSize + 3, weight: .medium))
                                 .foregroundStyle(Theme.gold)
                         }
-                    }
-                }
-
-                // Company absolutely centered
-                if !companyLabel.isEmpty {
-                    VStack(alignment: .center, spacing: 4) {
-                        Text("Company")
-                            .font(.system(size: fontSize - 2))
-                            .foregroundStyle(.secondary)
-                        Text(companyLabel)
+                        activeTemplateTags(for: template)
+                    } else {
+                        Text("No template loaded")
                             .font(.system(size: fontSize + 3, weight: .medium))
-                            .foregroundStyle(Theme.accent)
+                            .foregroundStyle(Theme.gold)
                     }
-                    .frame(maxWidth: .infinity, alignment: .center)
                 }
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Theme.grayBG.opacity(0.5))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Theme.purple.opacity(0.2), lineWidth: 1)
-                    )
-            )
 
-            Divider()
+            // Company absolutely centered
+            if !companyLabel.isEmpty {
+                VStack(alignment: .center, spacing: 4) {
+                    Text("Company")
+                        .font(.system(size: fontSize - 2))
+                        .foregroundStyle(.secondary)
+                    Text(companyLabel)
+                        .font(.system(size: fontSize + 3, weight: .medium))
+                        .foregroundStyle(Theme.accent)
+                }
+                .frame(maxWidth: .infinity, alignment: .center)
+            }
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Theme.grayBG.opacity(0.98))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Theme.purple.opacity(0.2), lineWidth: 1)
+                )
+        )
+    }
+
+    private func mainDetailContent(topPadding: CGFloat) -> some View {
+        VStack(spacing: 12) {
+            // Spacer for floating title bar
+            Color.clear
+                .frame(height: 72)
 
             staticFields
                 .padding(.bottom, 8)
