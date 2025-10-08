@@ -183,6 +183,20 @@ Templates can now carry one or more tags saved in separate .tags.json sidecar 
 
 - **Cleanup** – Deleting a template removes its tag sidecar file automatically; renaming a template migrates its tags to the new filename.
 
+
+#### Tag Search (cmd+shift+t)
+Quickly find and filter query templates by tag Press cmd+shift+t to open the tag search dialog. This shows all tags used across your query templates with a count of how many templates use each tag. How to search:
+- Start typing to filter tags by name
+- Results update in real-time as you type
+- Each tag shows the number of templates that use it
+
+**Navigation**
+- Use arrow keys to navigate through filtered tags
+- Press Enter to select a tag and filter your templates by that tag
+- Press Escape to close the dialog without selecting
+- This is useful when you have many templates and want to quickly find all templates related to a specific category or topic.
+
+
 ### Importing / Exporting Query Templates
 
 - You can share templates with others using this tool.
@@ -196,7 +210,6 @@ Templates can now carry one or more tags saved in separate .tags.json sidecar 
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/importqueries.png)
 
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/importquerybutton.png)
-
 
 ### Query Template Change History
 
@@ -548,7 +561,9 @@ There are a few helpful KB shortcuts that work in the main screen of the app.
 | Cmd + Enter | Populates the values in Dynamic and Static Fields into the Query Template in focus/ Saves Dynamic Field values into field "recents"                                                                                                           |
 | Cmd + Left-Click | Click on an image in the "Session & Template" pane--either Ses. Images or Guide Images, or click the hyperlink in Guide Notes or in Session Notes where the image resides in those notes to view the image in "preview" mode |
 | Cmd + F     | Jumps to "Search Queries" text field                                                                                                                                                          |
+| Cmd + Shift + F    | Guide Notes keyword search                                                                                                                                                                         |
 | Cmd + T     | Toggle Sidebar                                                                                                                                                                                |
+| Cmd + Shift + T     | Tag Search                                                                                                                                                                                |
 | Cmd + E     | Toggle Ticket Session "Edit" or "Preview" mode  / Toggle locked panes                                                                                                                         |
 | Cmd + K     | Insert link into note                                                                                                                                                                         |
 | Cmd + N    | Create new tab of an addtional three ticket sessions.                                                                                                                                           |
@@ -615,6 +630,29 @@ Drag an image or paste an image into this text field and it will automatically b
 Deleting the image from the "Session and Template" pane will remove it from the text editor.
 
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/Guide-Image-Rename.png)
+
+### Guide Notes Search (cmd+shift+f)
+
+Search across all guide notes in all query templates Press cmd+shift+f to open the guide notes search dialog. This searches through the guide notes of every query template in your database, not just the current session. How to search:
+- Type keywords separated by spaces - by default, all keywords must be found (AND logic)
+- Add "or" between keywords to find templates containing any keyword: cpu or memory
+- Add "and" between keywords for explicit AND logic: cpu and memory
+- Partial word matching works automatically: typing "save" will find "saved", "savings", etc.
+- Search is case-insensitive
+
+**Results and navigation:**
+- Results show the query template name and number of matches
+- Use arrow keys to navigate through results
+- Selected results show preview snippets with one line of context before and after each match
+- Press Enter to open the selected template's guide notes with the keyword highlighted (yellow flash)
+
+Examples:
+vcpu - finds all templates with "vcpu" in guide notes
+ocean cluster - finds templates containing both words
+cpu or memory - finds templates with either "cpu" or "memory"
+saving - matches "save", "saved", "savings", etc.
+
+
 
 ## Working with Embedded Images
 

@@ -1738,11 +1738,17 @@ struct ContentView: View {
                     guideNotesSearchKeyword = keyword
                     showGuideNotesSearchDialog = false
                     selectTemplate(template)
-                    LOG("Guide notes search: selected template, now showing guide notes pane")
-                    showGuideNotesPane()
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
-                        LOG("Guide notes search: highlighting keyword", ctx: ["keyword": keyword])
-                        highlightKeywordInGuideNotes(keyword)
+
+                    // Wait for template to load, then show guide notes (simulating cmd+1)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                        LOG("Guide notes search: showing guide notes pane (cmd+1)")
+                        handleShowGuideNotesShortcut()
+
+                        // Then highlight the keyword after pane is visible
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+                            LOG("Guide notes search: highlighting keyword", ctx: ["keyword": keyword])
+                            highlightKeywordInGuideNotes(keyword)
+                        }
                     }
                 },
                 onClose: {
@@ -5489,12 +5495,8 @@ struct ContentView: View {
         // MARK: — Output area
 
         private func setActivePane(_ pane: BottomPaneContent?) {
-            let normalized: BottomPaneContent?
-            if let pane, pane == activeBottomPane {
-                normalized = nil
-            } else {
-                normalized = pane
-            }
+            // Don't toggle - if pane is already active, keep it active
+            let normalized = pane
 
             // Backup template when switching panes
             if let template = selectedTemplate, normalized != activeBottomPane {
