@@ -20,6 +20,7 @@
 		3CE5C49B2E8E99C9007A7FEB /* Exceptions for "SQLMaestro" folder in "SQLMaestro" target */ = {
 			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
 			membershipExceptions = (
+				"images/Maestro-Screenshots/autopopulate.png",
 				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-12.40.28.png",
 				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-12.41.42.png",
 				"images/Maestro-Screenshots/CleanShot-2025-09-19-at-12.45.57-1.png",
