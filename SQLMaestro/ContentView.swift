@@ -181,6 +181,58 @@ final class SavedFileAutosaveCoordinator: ObservableObject {
     }
 }
 
+@MainActor
+final class DBTablesAutosaveCoordinator: ObservableObject {
+    private struct Key: Hashable {
+        var session: TicketSession
+        var templateId: UUID
+    }
+
+    private struct Entry {
+        let workItem: DispatchWorkItem
+        let action: () -> Void
+    }
+
+    private var entries: [Key: Entry] = [:]
+
+    func schedule(session: TicketSession, templateId: UUID, delay: TimeInterval, action: @escaping () -> Void) {
+        let key = Key(session: session, templateId: templateId)
+        cancel(session: session, templateId: templateId)
+        let workItem = DispatchWorkItem { [weak self] in
+            guard let entry = self?.entries.removeValue(forKey: key) else { return }
+            entry.action()
+        }
+        entries[key] = Entry(workItem: workItem, action: action)
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: workItem)
+    }
+
+    func flush(session: TicketSession, templateId: UUID) {
+        let key = Key(session: session, templateId: templateId)
+        guard let entry = entries.removeValue(forKey: key) else { return }
+        entry.workItem.cancel()
+        DispatchQueue.main.async(execute: entry.action)
+    }
+
+    func cancel(session: TicketSession, templateId: UUID) {
+        let key = Key(session: session, templateId: templateId)
+        guard let entry = entries.removeValue(forKey: key) else { return }
+        entry.workItem.cancel()
+    }
+
+    func cancelAll(for session: TicketSession) {
+        let matches = entries.filter { $0.key.session == session }
+        for (key, entry) in matches {
+            entry.workItem.cancel()
+            entries.removeValue(forKey: key)
+        }
+    }
+
+    func cancelAll() {
+        entries.values.forEach { $0.workItem.cancel() }
+        entries.removeAll()
+    }
+}
+
 enum SessionTemplateTab {
     case sessionImages
     case guideImages
@@ -1306,6 +1358,7 @@ struct ContentView: View {
     @StateObject private var sessionNotesAutosave = SessionNotesAutosaveCoordinator()
     @StateObject private var guideNotesAutosave = GuideNotesAutosaveCoordinator()
     @StateObject private var savedFileAutosave = SavedFileAutosaveCoordinator()
+    @StateObject private var dbTablesAutosave = DBTablesAutosaveCoordinator()
     @State private var isPreviewMode: Bool = true
     @State private var sessionNotesMode: [TicketSession: SessionNotesPaneMode] = [
         .one: .notes,
@@ -3024,6 +3077,40 @@ struct ContentView: View {
         private func touchTemplateActivity(for template: TemplateItem) {
             UsedTemplatesStore.shared.touch(session: sessions.current, templateId: template.id)
         }
+
+        private func scheduleDBTablesAutosave(for session: TicketSession, template: TemplateItem, force: Bool = false) {
+            let tables = dbTablesStore.workingSet(for: session, template: template)
+            if !force {
+                let hasContent = tables.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                if !hasContent {
+                    return
+                }
+            }
+
+            dbTablesAutosave.schedule(session: session, templateId: template.id, delay: 1.0) { [self] in
+                let latest = dbTablesStore.workingSet(for: session, template: template)
+                if !force {
+                    let hasContent = latest.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+                    if !hasContent && !latest.isEmpty {
+                        scheduleDBTablesAutosave(for: session, template: template, force: force)
+                        return
+                    }
+                }
+                if dbTablesStore.saveSidecar(for: session, template: template) {
+                    touchTemplateActivity(for: template)
+                }
+            }
+        }
+
+        private func flushDBTablesAutosave(for session: TicketSession, template: TemplateItem?) {
+            guard let template else { return }
+            dbTablesAutosave.flush(session: session, templateId: template.id)
+        }
+
+        private func cancelDBTablesAutosave(for session: TicketSession, template: TemplateItem?) {
+            guard let template else { return }
+            dbTablesAutosave.cancel(session: session, templateId: template.id)
+        }
         
         private func trimTrailingWhitespace(_ string: String) -> String {
             string.replacingOccurrences(of: "\\s+$", with: "", options: .regularExpression)
@@ -4038,6 +4125,9 @@ struct ContentView: View {
                         arr.append(value)
                     }
                     dbTablesStore.setWorkingSet(arr, for: sessions.current, template: selectedTemplate)
+                    if let template = selectedTemplate {
+                        scheduleDBTablesAutosave(for: sessions.current, template: template)
+                    }
                     focusedDBTableRow = nil
                     suggestionIndexByRow[row] = nil
                     LOG("DBTables suggest selected (kbd)", ctx: ["row": "\(row)", "value": value])
@@ -4487,7 +4577,6 @@ struct ContentView: View {
                 }
                 
                 if let t = selectedTemplate {
-                    let isDirty = dbTablesStore.isDirty(for: sessions.current, template: t)
                     let rows = dbTablesStore.workingSet(for: sessions.current, template: t)
                     
                     VStack(alignment: .leading, spacing: 6) {
@@ -4521,19 +4610,23 @@ struct ContentView: View {
                                         // Editable mode: original functionality
                                         TextField("table_name_here", text: Binding(
                                             get: {
-                                                let current = dbTablesStore.workingSet(for: sessions.current, template: selectedTemplate)
+                                                let current = dbTablesStore.workingSet(for: sessions.current, template: t)
                                                 return idx < current.count ? current[idx] : ""
                                             },
                                             set: { newVal in
-                                                var current = dbTablesStore.workingSet(for: sessions.current, template: selectedTemplate)
+                                                var current = dbTablesStore.workingSet(for: sessions.current, template: t)
                                                 if idx < current.count {
                                                     current[idx] = newVal
                                                 } else if idx == current.count {
                                                     current.append(newVal)
                                                 }
-                                                dbTablesStore.setWorkingSet(current, for: sessions.current, template: selectedTemplate)
+                                                dbTablesStore.setWorkingSet(current, for: sessions.current, template: t)
                                                 // Reset keyboard highlight for this row on text change
                                                 suggestionIndexByRow[idx] = nil
+                                                let trimmed = newVal.trimmingCharacters(in: .whitespacesAndNewlines)
+                                                if !trimmed.isEmpty {
+                                                    scheduleDBTablesAutosave(for: sessions.current, template: t)
+                                                }
                                             }
                                         ))
                                         .textFieldStyle(PlainTextFieldStyle())
@@ -4549,10 +4642,11 @@ struct ContentView: View {
                                         .help("Enter a base table name (letters, numbers, underscores).")
                                         
                                         Button {
-                                            var current = dbTablesStore.workingSet(for: sessions.current, template: selectedTemplate)
+                                            var current = dbTablesStore.workingSet(for: sessions.current, template: t)
                                             if idx < current.count {
                                                 current.remove(at: idx)
-                                                dbTablesStore.setWorkingSet(current, for: sessions.current, template: selectedTemplate)
+                                                dbTablesStore.setWorkingSet(current, for: sessions.current, template: t)
+                                                scheduleDBTablesAutosave(for: sessions.current, template: t, force: true)
                                                 LOG("DBTables row removed", ctx: ["newCount": "\(current.count)"])
                                             }
                                         } label: {
@@ -4564,7 +4658,7 @@ struct ContentView: View {
                                     }
                                 }
                                 // Inline suggestions (appear when the row is focused and query has matches)
-                                let current = dbTablesStore.workingSet(for: sessions.current, template: selectedTemplate)
+                                let current = dbTablesStore.workingSet(for: sessions.current, template: t)
                                 let query = (idx < current.count ? current[idx] : "").trimmingCharacters(in: .whitespaces)
                                 if focusedDBTableRow == idx && !dbTablesLocked {
                                     let suggestions = suggestTables(query, limit: 15)
@@ -4579,7 +4673,8 @@ struct ContentView: View {
                                                     } else if idx == arr.count {
                                                         arr.append(s)
                                                     }
-                                                    dbTablesStore.setWorkingSet(arr, for: sessions.current, template: selectedTemplate)
+                                                    dbTablesStore.setWorkingSet(arr, for: sessions.current, template: t)
+                                                    scheduleDBTablesAutosave(for: sessions.current, template: t)
                                                     focusedDBTableRow = nil
                                                     suggestionIndexByRow[idx] = nil
                                                     LOG("DBTables suggest selected", ctx: ["row": "\(idx)", "value": s])
@@ -4614,9 +4709,9 @@ struct ContentView: View {
                         // Add row button
                         if !dbTablesLocked {
                             Button {
-                                var current = dbTablesStore.workingSet(for: sessions.current, template: selectedTemplate)
+                                var current = dbTablesStore.workingSet(for: sessions.current, template: t)
                                 current.append("")
-                                dbTablesStore.setWorkingSet(current, for: sessions.current, template: selectedTemplate)
+                                dbTablesStore.setWorkingSet(current, for: sessions.current, template: t)
                                 LOG("DBTables row added", ctx: ["count": "\(current.count)"])
                             } label: {
                                 HStack(spacing: 6) {
@@ -4636,26 +4731,15 @@ struct ContentView: View {
                     }
                     
                     HStack(spacing: 8) {
-                        if !dbTablesLocked {
-                            Button("Save Tables") {
-                                _ = dbTablesStore.saveSidecar(for: sessions.current, template: t)
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .tint(Theme.purple)
-                            .disabled(!isDirty)
-                            
-                            Button("Revert to Saved") {
-                                _ = dbTablesStore.loadSidecar(for: sessions.current, template: t)
-                            }
-                            .buttonStyle(.bordered)
-                            .tint(Theme.pink)
-                            .disabled(!isDirty)
-                        } else {
-                            Text("Unlock to save changes")
+                        if dbTablesLocked {
+                            Text("Unlock to edit tables")
                                 .font(.system(size: fontSize - 2))
                                 .foregroundStyle(.secondary)
+                        } else {
+                            Text("Changes are saved automatically")
+                                .font(.system(size: fontSize - 3))
+                                .foregroundStyle(.secondary)
                         }
-
                         Button("Copy Tables") {
                             copyTablesToClipboard()
                         }
@@ -5086,26 +5170,10 @@ struct ContentView: View {
                             .padding(4)
                         }
 
-                        // Save/Revert buttons
-                        let isDirty = templateLinksStore.isDirty(for: template)
-                        if isDirty {
-                            HStack {
-                                Button("Save Links") {
-                                    _ = templateLinksStore.saveSidecar(for: template)
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .tint(Theme.purple)
-                                
-                                Button("Revert") {
-                                    _ = templateLinksStore.loadSidecar(for: template)
-                                }
-                                .buttonStyle(.bordered)
-                                .tint(Theme.pink)
-                                
-                                Spacer()
-                            }
+                        Text("Changes are saved automatically")
+                            .font(.system(size: fontSize - 3))
+                            .foregroundStyle(.secondary)
                             .padding(.top, 4)
-                        }
                     }
                 } else {
                     VStack {
@@ -5305,6 +5373,7 @@ struct ContentView: View {
 
             // Backup template when switching panes
             if let template = selectedTemplate, normalized != activeBottomPane {
+                flushDBTablesAutosave(for: sessions.current, template: template)
                 templates.backupTemplateIfNeeded(template, reason: "pane_switch")
             }
 
@@ -6217,6 +6286,7 @@ struct ContentView: View {
         private func copyBlockValuesToClipboard() {
             // Backup template before copying values
             if let template = selectedTemplate {
+                flushDBTablesAutosave(for: sessions.current, template: template)
                 templates.backupTemplateIfNeeded(template, reason: "copy_block_values")
             }
 
@@ -6327,6 +6397,7 @@ struct ContentView: View {
         private func copyIndividualValuesToClipboard() {
             // Backup template before copying values
             if let template = selectedTemplate {
+                flushDBTablesAutosave(for: sessions.current, template: template)
                 templates.backupTemplateIfNeeded(template, reason: "copy_individual_values")
             }
 
@@ -6683,6 +6754,7 @@ struct ContentView: View {
         private func selectTemplate(_ t: TemplateItem?) {
             if let previous = selectedTemplate, previous.id != t?.id {
                 finalizeGuideNotesAutosave(for: previous, reason: "template-selection")
+                flushDBTablesAutosave(for: sessions.current, template: previous)
             }
 
             selectedTemplate = t
@@ -6733,6 +6805,7 @@ struct ContentView: View {
 
             // Backup template before switching sessions
             if let template = selectedTemplate {
+                flushDBTablesAutosave(for: sessions.current, template: template)
                 templates.backupTemplateIfNeeded(template, reason: "session_switch")
             }
 
@@ -6813,6 +6886,7 @@ struct ContentView: View {
                 finalizeGuideNotesAutosave(for: previous, reason: "template-load")
 
                 // Backup previous template when switching to a new one
+                flushDBTablesAutosave(for: sessions.current, template: previous)
                 templates.backupTemplateIfNeeded(previous, reason: "template_switch")
             }
             selectedTemplate = t
@@ -6969,6 +7043,7 @@ struct ContentView: View {
             guard let t = selectedTemplate else { return }
 
             // Backup template before populating query
+            flushDBTablesAutosave(for: sessions.current, template: t)
             templates.backupTemplateIfNeeded(t, reason: "populate_query")
 
             setActivePane(nil)
@@ -7902,6 +7977,9 @@ struct ContentView: View {
                 guard overwrite.runModal() == .alertFirstButtonReturn else { return false }
             }
             
+            let previousName = sessions.sessionNames[sessions.current]
+            sessions.renameCurrent(to: rawName)
+
             let snapshot = buildSessionSnapshot(for: sessions.current, template: selectedTemplate)
 
             do {
@@ -7910,6 +7988,11 @@ struct ContentView: View {
                 updateSavedSnapshot(for: sessions.current)
                 return true
             } catch {
+                if let previousName {
+                    sessions.renameCurrent(to: previousName)
+                } else {
+                    sessions.renameCurrent(to: "#\(sessions.current.rawValue)")
+                }
                 NSSound.beep()
                 showAlert(title: "Save Failed", message: error.localizedDescription)
                 LOG("Ticket session save failed", ctx: ["error": error.localizedDescription])
@@ -8537,6 +8620,7 @@ struct ContentView: View {
                                                                       importedTemplate: importedTemplate)
 
                 let rename = preparedSnapshot.sessionName.trimmingCharacters(in: .whitespacesAndNewlines)
+                cancelDBTablesAutosave(for: sessions.current, template: selectedTemplate)
                 applySessionSnapshot(preparedSnapshot,
                                      inferredName: rename.isEmpty ? "Shared Session" : rename,
                                      matchedTemplate: importedTemplate ?? selectedTemplate,
@@ -8605,6 +8689,8 @@ struct ContentView: View {
         panel.allowedContentTypes = [.json]
         panel.directoryURL = AppPaths.sessions
         guard panel.runModal() == .OK, let url = panel.url else { return }
+        
+        cancelDBTablesAutosave(for: sessions.current, template: selectedTemplate)
         
         do {
             let data = try Data(contentsOf: url)
@@ -8784,6 +8870,7 @@ struct ContentView: View {
         private func exitWorkflowPreflight() {
 #if canImport(AppKit)
             if let template = selectedTemplate {
+                flushDBTablesAutosave(for: sessions.current, template: template)
                 templates.backupTemplateIfNeeded(template, reason: "app_quit")
             }
 #endif
@@ -8829,6 +8916,7 @@ struct ContentView: View {
             }
 #if canImport(AppKit)
             if let template = selectedTemplate {
+                flushDBTablesAutosave(for: sessions.current, template: template)
                 templates.backupTemplateIfNeeded(template, reason: "app_quit")
             }
 #endif
@@ -8906,6 +8994,7 @@ struct ContentView: View {
 
             // Backup template before clearing session
             if let template = selectedTemplate {
+                flushDBTablesAutosave(for: sessions.current, template: template)
                 templates.backupTemplateIfNeeded(template, reason: "clear_session")
             }
 
@@ -8917,6 +9006,7 @@ struct ContentView: View {
             draftDynamicValues[sessions.current] = [:]
             sessionStaticFields[sessions.current] = ("", "", "", "")
             savedFileAutosave.cancelAll(for: sessions.current)
+            dbTablesAutosave.cancelAll(for: sessions.current)
             savedFileDrafts[sessions.current] = [:]
             savedFileValidation[sessions.current] = [:]
             setSavedFileSelection(nil, for: sessions.current)
@@ -9007,6 +9097,7 @@ struct ContentView: View {
         @discardableResult
         private func handleTablesSaveOnly() -> Bool {
             guard let template = selectedTemplate else { return true }
+            flushDBTablesAutosave(for: sessions.current, template: template)
             guard dbTablesStore.isDirty(for: sessions.current, template: template) else { return true }
             if dbTablesStore.saveSidecar(for: sessions.current, template: template) {
                 return true
@@ -9282,6 +9373,7 @@ struct ContentView: View {
 
             // Backup template before connecting to database
             if let template = selectedTemplate {
+                flushDBTablesAutosave(for: sessions.current, template: template)
                 templates.backupTemplateIfNeeded(template, reason: "connect_database")
             }
 

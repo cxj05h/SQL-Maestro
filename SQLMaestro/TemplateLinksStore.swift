@@ -23,6 +23,7 @@ final class TemplateLinksStore: ObservableObject {
         guard let t = template else { return }
         workingLinks[t.id] = links
         setDirty(true, for: t.id)
+        _ = saveSidecar(for: t)
     }
 
     func addLink(title: String, url: String, for template: TemplateItem?) {
@@ -31,6 +32,7 @@ final class TemplateLinksStore: ObservableObject {
         links.append(TemplateLink(title: title, url: url))
         workingLinks[t.id] = links
         setDirty(true, for: t.id)
+        _ = saveSidecar(for: t)
     }
 
     func removeLink(withId id: UUID, for template: TemplateItem?) {
@@ -39,6 +41,7 @@ final class TemplateLinksStore: ObservableObject {
         links.removeAll { $0.id == id }
         workingLinks[t.id] = links
         setDirty(true, for: t.id)
+        _ = saveSidecar(for: t)
     }
 
     func isDirty(for template: TemplateItem?) -> Bool {
