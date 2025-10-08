@@ -1731,11 +1731,17 @@ struct ContentView: View {
             GuideNotesSearchDialog(
                 templates: templates.templates,
                 onSelectTemplate: { template, keyword in
+                    LOG("Guide notes search: selecting template", ctx: [
+                        "template": template.name,
+                        "keyword": keyword
+                    ])
                     guideNotesSearchKeyword = keyword
                     showGuideNotesSearchDialog = false
                     selectTemplate(template)
+                    LOG("Guide notes search: selected template, now showing guide notes pane")
                     showGuideNotesPane()
                     DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        LOG("Guide notes search: highlighting keyword", ctx: ["keyword": keyword])
                         highlightKeywordInGuideNotes(keyword)
                     }
                 },
@@ -5957,7 +5963,9 @@ struct ContentView: View {
         }
 
         private func showGuideNotesPane() {
+            LOG("showGuideNotesPane called, current pane: \(String(describing: activeBottomPane))")
             setActivePane(.guideNotes)
+            LOG("showGuideNotesPane completed, new pane: \(String(describing: activeBottomPane))")
         }
 
         private func highlightKeywordInGuideNotes(_ keyword: String) {
