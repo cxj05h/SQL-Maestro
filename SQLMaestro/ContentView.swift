@@ -40,6 +40,16 @@ private let markdownFileLinkRegex: NSRegularExpression = {
     return try! NSRegularExpression(pattern: pattern, options: [])
 }()
 
+private let orgIdRegex: NSRegularExpression = {
+    let pattern = #"(?<!\d)(\d{12})(?!\d)"#
+    return try! NSRegularExpression(pattern: pattern, options: [])
+}()
+
+private let accountIdRegex: NSRegularExpression = {
+    let pattern = #"(?i)\b(act-[a-z0-9_-]+)\b"#
+    return try! NSRegularExpression(pattern: pattern, options: [])
+}()
+
 @MainActor
 final class SessionNotesAutosaveCoordinator: ObservableObject {
     private struct Entry {
@@ -483,9 +493,11 @@ private struct BeginCaptureSheet: View {
     @Binding var orgValue: String
     @Binding var acctValue: String
     @Binding var extraValues: [BeginCaptureEntry]
+    var onAutoPopulate: () -> Void
     var onSave: () -> Void
     var onCancel: () -> Void
 
+    @EnvironmentObject private var clipboardHistory: ClipboardHistory
     @State private var focusedField: BeginFieldFocus? = .org
     @FocusState private var focusedButton: BeginButtonFocus?
 
@@ -533,6 +545,13 @@ private struct BeginCaptureSheet: View {
             }
 
             HStack {
+                Button("Auto Populate") {
+                    onAutoPopulate()
+                }
+                .buttonStyle(.bordered)
+                .disabled(clipboardHistory.recentStrings.isEmpty)
+                .help("Fill the fields using the last copied clipboard items captured while SQL Maestro is open.")
+
                 Spacer()
                 Button("Cancel") {
                     onCancel()
@@ -1228,6 +1247,7 @@ struct ContentView: View {
     @EnvironmentObject var templates: TemplateManager
     @EnvironmentObject var tabManager: TabManager
     @EnvironmentObject var exitCoordinator: AppExitCoordinator
+    @EnvironmentObject var clipboardHistory: ClipboardHistory
     @StateObject private var mapping = MappingStore()
     @StateObject private var mysqlHosts = MysqlHostStore()
     @StateObject private var userConfig = UserConfigStore()
@@ -1505,6 +1525,9 @@ struct ContentView: View {
             BeginCaptureSheet(orgValue: $beginOrgDraft,
                               acctValue: $beginAcctDraft,
                               extraValues: $beginExtraDrafts,
+                              onAutoPopulate: {
+                                  autoPopulateQuickCaptureFromClipboard()
+                              },
                               onSave: {
                                   applyBeginCaptureValues()
                                   showBeginCaptureSheet = false
@@ -3811,6 +3834,7 @@ struct ContentView: View {
             beginOrgDraft = orgId
             beginAcctDraft = acctId
             beginExtraDrafts = [BeginCaptureEntry()]
+            clipboardHistory.refresh()
             showBeginCaptureSheet = true
             LOG("Quick capture opened", ctx: ["session": "\(sessions.current.rawValue)"])
         }
@@ -3860,6 +3884,74 @@ struct ContentView: View {
             ])
 
             beginExtraDrafts = [BeginCaptureEntry()]
+        }
+
+        private func autoPopulateQuickCaptureFromClipboard() {
+            clipboardHistory.refresh()
+            let entries = clipboardHistory.recentStrings
+            guard !entries.isEmpty else { return }
+
+            var remaining: [String] = []
+            var matchedOrg: String?
+            var matchedAcct: String?
+
+            for entry in entries {
+                let trimmedEntry = entry.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmedEntry.isEmpty else { continue }
+
+                var consumed = false
+                if matchedOrg == nil, let detectedOrg = firstMatch(in: trimmedEntry, using: orgIdRegex) {
+                    matchedOrg = detectedOrg
+                    consumed = true
+                }
+
+                if matchedAcct == nil, let detectedAcct = firstMatch(in: trimmedEntry, using: accountIdRegex) {
+                    matchedAcct = detectedAcct
+                    consumed = true
+                }
+
+                if !consumed {
+                    remaining.append(trimmedEntry)
+                }
+            }
+
+            if let org = matchedOrg {
+                beginOrgDraft = org
+            }
+            if let acct = matchedAcct {
+                beginAcctDraft = acct
+            }
+
+            let extras = remaining.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                                   .filter { !$0.isEmpty }
+
+            if extras.isEmpty {
+                beginExtraDrafts = [BeginCaptureEntry()]
+            } else {
+                beginExtraDrafts = extras.map { BeginCaptureEntry(value: $0) }
+            }
+
+            LOG("Quick capture auto populated", ctx: [
+                "session": "\(sessions.current.rawValue)",
+                "orgMatched": "\(matchedOrg != nil)",
+                "acctMatched": "\(matchedAcct != nil)",
+                "extraCount": "\(extras.count)"
+            ])
+        }
+
+        private func firstMatch(in text: String, using regex: NSRegularExpression) -> String? {
+            let range = NSRange(text.startIndex..., in: text)
+            guard let match = regex.firstMatch(in: text, options: [], range: range) else { return nil }
+
+            let targetRange: NSRange
+            if match.numberOfRanges > 1 {
+                targetRange = match.range(at: 1)
+            } else {
+                targetRange = match.range
+            }
+
+            guard let swiftRange = Range(targetRange, in: text) else { return nil }
+            return String(text[swiftRange])
         }
         
         // Suggest tables using the global catalog (substring/fuzzy provided by the catalog)

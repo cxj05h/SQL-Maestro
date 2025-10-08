@@ -4,6 +4,7 @@ import SwiftUI
 struct TabContainerView: View {
     @StateObject private var tabManager = TabManager()
     @StateObject private var exitCoordinator = AppExitCoordinator()
+    @StateObject private var clipboardHistory = ClipboardHistory()
     @EnvironmentObject var templates: TemplateManager
 
     var body: some View {
@@ -15,6 +16,7 @@ struct TabContainerView: View {
                     .environmentObject(tab.sessionManager) // Per-tab session manager
                     .environmentObject(tabManager) // Tab manager for coordination
                     .environmentObject(exitCoordinator) // Exit workflow coordinator
+                    .environmentObject(clipboardHistory) // Clipboard watcher shared across tabs
                     .environment(\.tabID, tab.tabIdentifier)
                     .environment(\.isActiveTab, index == tabManager.activeTabIndex)
                     .environment(\.tabContext, tab) // Pass tab context
