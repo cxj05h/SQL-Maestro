@@ -112,6 +112,11 @@ struct AppMenuCommands: Commands {
 
             Divider()
 
+            Button("Search Tags") {
+                NotificationCenter.default.post(name: .searchTagsRequested, object: nil)
+            }
+            .keyboardShortcut("t", modifiers: [.command, .shift])
+
             Button("Toggle Sidebar") {
                 NotificationCenter.default.post(name: .toggleSidebarRequested, object: nil)
             }
@@ -325,6 +330,7 @@ extension Notification.Name {
     static let restoreQueryBackupsRequested = Notification.Name("RestoreQueryBackupsRequested")
     static let queriesBackedUp = Notification.Name("QueriesBackedUp")
     static let focusSearchRequested = Notification.Name("FocusSearchRequested")
+    static let searchTagsRequested = Notification.Name("SearchTagsRequested")
     static let showGuideNotesRequested = Notification.Name("ShowGuideNotesRequested")
     static let showSessionNotesRequested = Notification.Name("ShowSessionNotesRequested")
     static let showSavedFilesRequested = Notification.Name("ShowSavedFilesRequested")

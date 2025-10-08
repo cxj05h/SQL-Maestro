@@ -1333,17 +1333,22 @@ struct ContentView: View {
     @State private var hoveredTemplateLinkID: UUID? = nil
     @State private var tagEditorTemplate: TemplateItem?
     @State private var tagExplorerContext: TagExplorerContext?
+    @State private var showTagSearchDialog: Bool = false
     @State private var activePopoutPane: PopoutPaneContext? = nil
     @State private var isSidebarVisible: Bool = false
     struct TagExplorerContext: Identifiable {
         let tag: String
         var id: String { tag }
     }
-    struct TagSearchResult: Identifiable {
+    struct TagSearchResult: Identifiable, Equatable {
         let tag: String
         let templates: [TemplateItem]
         var id: String { tag }
         var count: Int { templates.count }
+
+        static func == (lhs: TagSearchResult, rhs: TagSearchResult) -> Bool {
+            lhs.tag == rhs.tag && lhs.templates.map { $0.id } == rhs.templates.map { $0.id }
+        }
     }
     struct GuideImagePreviewContext: Identifiable {
         let template: TemplateItem
@@ -1401,6 +1406,7 @@ struct ContentView: View {
     @FocusState private var focusedDBTableRow: Int?
     @State private var dbTablesLocked: Bool = true
     @State private var suggestionIndexByRow: [Int: Int] = [:]
+    @State private var selectedTagIndex: Int = 0
     @State private var keyEventMonitor: Any?
     
     // Track static fields per session - but now using SessionManager for global cache too
@@ -1516,6 +1522,9 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .toggleSidebarRequested)) { _ in
             handleToggleSidebarShortcut()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .searchTagsRequested)) { _ in
+            handleSearchTagsShortcut()
         }
     }
 
@@ -1691,6 +1700,25 @@ struct ContentView: View {
                     minSize: CGSize(width: 420, height: 320),
                     preferredSize: CGSize(width: 460, height: 360),
                     sizeStorageKey: "TemplateTagExplorerSize"
+                )
+            )
+        }
+        .sheet(isPresented: $showTagSearchDialog) {
+            TagSearchDialog(
+                templates: templates.templates,
+                onSelectTag: { tag in
+                    showTemplates(for: tag)
+                    showTagSearchDialog = false
+                },
+                onClose: {
+                    showTagSearchDialog = false
+                }
+            )
+            .background(
+                SheetWindowConfigurator(
+                    minSize: CGSize(width: 500, height: 400),
+                    preferredSize: CGSize(width: 540, height: 480),
+                    sizeStorageKey: "TagSearchDialogSize"
                 )
             )
         }
@@ -2576,7 +2604,8 @@ struct ContentView: View {
     }
 
     private var tagSearchList: some View {
-        List(tagSearchResults) { result in
+        List(Array(tagSearchResults.enumerated()), id: \.element.id) { index, result in
+            let isSelected = index == selectedTagIndex
             Button {
                 showTemplates(for: result.tag)
             } label: {
@@ -2593,9 +2622,27 @@ struct ContentView: View {
             }
             .buttonStyle(.plain)
             .contentShape(Rectangle())
+            .listRowBackground(isSelected ? Color.accentColor.opacity(0.2) : Color.clear)
         }
         .listStyle(.plain)
         .scrollContentBackground(.hidden)
+        .onKeyPress(.upArrow) {
+            navigateTagSearch(direction: -1)
+            return .handled
+        }
+        .onKeyPress(.downArrow) {
+            navigateTagSearch(direction: 1)
+            return .handled
+        }
+        .onKeyPress(.return) {
+            selectCurrentTag()
+            return .handled
+        }
+        .onChange(of: tagSearchResults) { _, _ in
+            // Reset selection when search results change
+            selectedTagIndex = 0
+        }
+        .focused($isListFocused)
     }
 
     @ViewBuilder
@@ -4245,7 +4292,7 @@ struct ContentView: View {
         private func navigateTemplate(direction: Int) {
             guard !isTagSearch else { return }
             guard !filteredTemplates.isEmpty else { return }
-            
+
             if let currentIndex = filteredTemplates.firstIndex(where: { $0.id == selectedTemplate?.id }) {
                 let newIndex = currentIndex + direction
                 if newIndex >= 0 && newIndex < filteredTemplates.count {
@@ -4256,6 +4303,23 @@ struct ContentView: View {
                 selectTemplate(direction > 0 ? filteredTemplates.first : filteredTemplates.last)
                 LOG("Template navigation start", ctx: ["template": selectedTemplate?.name ?? "none"])
             }
+        }
+
+        private func navigateTagSearch(direction: Int) {
+            guard !tagSearchResults.isEmpty else { return }
+            let newIndex = selectedTagIndex + direction
+            if newIndex >= 0 && newIndex < tagSearchResults.count {
+                selectedTagIndex = newIndex
+                LOG("Tag search navigation", ctx: ["direction": "\(direction)", "tag": tagSearchResults[newIndex].tag])
+            }
+        }
+
+        private func selectCurrentTag() {
+            guard !tagSearchResults.isEmpty else { return }
+            guard selectedTagIndex >= 0 && selectedTagIndex < tagSearchResults.count else { return }
+            let tag = tagSearchResults[selectedTagIndex].tag
+            showTemplates(for: tag)
+            LOG("Tag selected via keyboard", ctx: ["tag": tag])
         }
         
         
@@ -5838,6 +5902,15 @@ struct ContentView: View {
             }
             toggleSidebar()
             LOG("Sidebar shortcut handled", ctx: ["tabId": tabID])
+        }
+
+        private func handleSearchTagsShortcut() {
+            guard isActiveTab else {
+                LOG("Search tags shortcut ignored for inactive tab", ctx: ["tabId": tabID])
+                return
+            }
+            showTagSearchDialog = true
+            LOG("Tag search dialog opened via keyboard shortcut", ctx: ["tabId": tabID])
         }
 
         private func sidebarSessionButton(_ session: TicketSession) -> some View {
@@ -9900,12 +9973,141 @@ struct ContentView: View {
             }
         }
 
+        struct TagSearchDialog: View {
+            let templates: [TemplateItem]
+            let onSelectTag: (String) -> Void
+            let onClose: () -> Void
+
+            @State private var searchQuery: String = ""
+            @State private var selectedIndex: Int = 0
+            @ObservedObject private var tagsStore = TemplateTagsStore.shared
+            @FocusState private var isSearchFocused: Bool
+
+            private var allTags: [TagResult] {
+                var tagCounts: [String: Int] = [:]
+                for template in templates {
+                    let tags = tagsStore.tags(for: template)
+                    for tag in tags {
+                        tagCounts[tag, default: 0] += 1
+                    }
+                }
+                return tagCounts.map { TagResult(tag: $0.key, count: $0.value) }
+                    .sorted { $0.tag.localizedCaseInsensitiveCompare($1.tag) == .orderedAscending }
+            }
+
+            private var filteredTags: [TagResult] {
+                let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+                if trimmed.isEmpty {
+                    return allTags
+                }
+                let normalized = TemplateTagsStore.sanitize(trimmed)
+                let fallback = trimmed.lowercased().replacingOccurrences(of: " ", with: "-")
+                return allTags.filter { result in
+                    if let normalized = normalized, !normalized.isEmpty {
+                        return result.tag.contains(normalized)
+                    } else if !fallback.isEmpty {
+                        return result.tag.contains(fallback)
+                    }
+                    return true
+                }
+            }
+
+            var body: some View {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Search Tags")
+                            .font(.title3)
+                            .fontWeight(.semibold)
+                        Text("Select a tag to view its templates")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+
+                    TextField("Type to filter tags...", text: $searchQuery)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($isSearchFocused)
+                        .onAppear {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                isSearchFocused = true
+                            }
+                        }
+                        .onChange(of: searchQuery) { _, _ in
+                            selectedIndex = 0
+                        }
+                        .onKeyPress(.upArrow) {
+                            if selectedIndex > 0 {
+                                selectedIndex -= 1
+                            }
+                            return .handled
+                        }
+                        .onKeyPress(.downArrow) {
+                            if selectedIndex < filteredTags.count - 1 {
+                                selectedIndex += 1
+                            }
+                            return .handled
+                        }
+                        .onKeyPress(.return) {
+                            guard !filteredTags.isEmpty else { return .handled }
+                            guard selectedIndex >= 0 && selectedIndex < filteredTags.count else { return .handled }
+                            onSelectTag(filteredTags[selectedIndex].tag)
+                            return .handled
+                        }
+
+                    if filteredTags.isEmpty {
+                        Text("No matching tags found.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    } else {
+                        List(Array(filteredTags.enumerated()), id: \.element.id) { index, result in
+                            let isSelected = index == selectedIndex
+                            Button {
+                                onSelectTag(result.tag)
+                            } label: {
+                                HStack(spacing: 10) {
+                                    Text("#\(result.tag)")
+                                        .font(.system(size: 14))
+                                        .foregroundStyle(Theme.pink)
+                                    Spacer()
+                                    Text("\(result.count)")
+                                        .font(.system(size: 12, weight: .semibold))
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(.vertical, 4)
+                            }
+                            .buttonStyle(.plain)
+                            .listRowBackground(isSelected ? Color.accentColor.opacity(0.2) : Color.clear)
+                        }
+                        .frame(minHeight: 280, maxHeight: 340)
+                        .listStyle(.inset)
+                    }
+
+                    HStack {
+                        Spacer()
+                        Button("Cancel") {
+                            onClose()
+                        }
+                        .keyboardShortcut(.cancelAction)
+                    }
+                }
+                .padding(24)
+                .frame(minWidth: 500, minHeight: 400)
+            }
+
+            struct TagResult: Identifiable {
+                let tag: String
+                let count: Int
+                var id: String { tag }
+            }
+        }
+
         struct TemplateTagExplorerSheet: View {
             let tag: String
             let templates: [TemplateItem]
             let onSelect: (TemplateItem) -> Void
             let onClose: () -> Void
 
+            @State private var selectedIndex: Int = 0
             @ObservedObject private var tagsStore = TemplateTagsStore.shared
 
             private var matchingTemplates: [TemplateItem] {
@@ -9931,7 +10133,8 @@ struct ContentView: View {
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
                     } else {
-                        List(matchingTemplates) { template in
+                        List(Array(matchingTemplates.enumerated()), id: \.element.id) { index, template in
+                            let isSelected = index == selectedIndex
                             Button {
                                 onSelect(template)
                             } label: {
@@ -9943,11 +10146,31 @@ struct ContentView: View {
                                         .foregroundStyle(Theme.pink)
                                 }
                                 .padding(.vertical, 4)
+                                .contentShape(Rectangle())
                             }
                             .buttonStyle(.plain)
+                            .listRowBackground(isSelected ? Color.accentColor.opacity(0.2) : Color.clear)
                         }
                         .frame(minHeight: 220, maxHeight: 260)
                         .listStyle(.inset)
+                        .onKeyPress(.upArrow) {
+                            if selectedIndex > 0 {
+                                selectedIndex -= 1
+                            }
+                            return .handled
+                        }
+                        .onKeyPress(.downArrow) {
+                            if selectedIndex < matchingTemplates.count - 1 {
+                                selectedIndex += 1
+                            }
+                            return .handled
+                        }
+                        .onKeyPress(.return) {
+                            guard !matchingTemplates.isEmpty else { return .handled }
+                            guard selectedIndex >= 0 && selectedIndex < matchingTemplates.count else { return .handled }
+                            onSelect(matchingTemplates[selectedIndex])
+                            return .handled
+                        }
                     }
 
                     HStack {
