@@ -3,6 +3,7 @@ import SwiftUI
 /// Container view that manages multiple tabs, each with its own ContentView instance
 struct TabContainerView: View {
     @StateObject private var tabManager = TabManager()
+    @StateObject private var exitCoordinator = AppExitCoordinator()
     @EnvironmentObject var templates: TemplateManager
 
     var body: some View {
@@ -13,6 +14,7 @@ struct TabContainerView: View {
                     .environmentObject(templates) // Shared template manager
                     .environmentObject(tab.sessionManager) // Per-tab session manager
                     .environmentObject(tabManager) // Tab manager for coordination
+                    .environmentObject(exitCoordinator) // Exit workflow coordinator
                     .environment(\.tabID, tab.tabIdentifier)
                     .environment(\.isActiveTab, index == tabManager.activeTabIndex)
                     .environment(\.tabContext, tab) // Pass tab context
@@ -37,5 +39,8 @@ struct TabContainerView: View {
             .opacity(0.0001)
             .allowsHitTesting(false)
         )
+        .onReceive(NotificationCenter.default.publisher(for: .attemptAppExit)) { _ in
+            exitCoordinator.beginExit(using: tabManager)
+        }
     }
 }

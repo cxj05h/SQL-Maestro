@@ -105,6 +105,13 @@ struct AppMenuCommands: Commands {
 
             Divider()
 
+            Button("Toggle Edit/Preview & Locks") {
+                NotificationCenter.default.post(name: .togglePreviewShortcutRequested, object: nil)
+            }
+            .keyboardShortcut("e", modifiers: [.command])
+
+            Divider()
+
             Button("Toggle Sidebar") {
                 NotificationCenter.default.post(name: .toggleSidebarRequested, object: nil)
             }
@@ -122,6 +129,30 @@ struct AppMenuCommands: Commands {
                     NotificationCenter.default.post(name: .loadTicketSession, object: nil)
                 }
                 .keyboardShortcut("l", modifiers: [.command])
+
+                Divider()
+
+                Button("Clear Session") {
+                    NotificationCenter.default.post(name: .clearSessionRequested, object: nil)
+                }
+                .keyboardShortcut("k", modifiers: [.command, .shift])
+
+                Divider()
+
+                Button("Switch to Session #1") {
+                    NotificationCenter.default.post(name: .switchToSession1Requested, object: nil)
+                }
+                .keyboardShortcut("1", modifiers: [.control])
+
+                Button("Switch to Session #2") {
+                    NotificationCenter.default.post(name: .switchToSession2Requested, object: nil)
+                }
+                .keyboardShortcut("2", modifiers: [.control])
+
+                Button("Switch to Session #3") {
+                    NotificationCenter.default.post(name: .switchToSession3Requested, object: nil)
+                }
+                .keyboardShortcut("3", modifiers: [.control])
 
                 Divider()
 
@@ -298,4 +329,9 @@ extension Notification.Name {
     static let showSessionNotesRequested = Notification.Name("ShowSessionNotesRequested")
     static let showSavedFilesRequested = Notification.Name("ShowSavedFilesRequested")
     static let toggleSidebarRequested = Notification.Name("ToggleSidebarRequested")
+    static let togglePreviewShortcutRequested = Notification.Name("TogglePreviewShortcutRequested")
+    static let clearSessionRequested = Notification.Name("ClearSessionRequested")
+    static let switchToSession1Requested = Notification.Name("SwitchToSession1Requested")
+    static let switchToSession2Requested = Notification.Name("SwitchToSession2Requested")
+    static let switchToSession3Requested = Notification.Name("SwitchToSession3Requested")
 }

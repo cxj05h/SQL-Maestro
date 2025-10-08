@@ -1227,6 +1227,7 @@ struct ContentView: View {
     @Environment(\.tabContext) var tabContext
     @EnvironmentObject var templates: TemplateManager
     @EnvironmentObject var tabManager: TabManager
+    @EnvironmentObject var exitCoordinator: AppExitCoordinator
     @StateObject private var mapping = MappingStore()
     @StateObject private var mysqlHosts = MysqlHostStore()
     @StateObject private var userConfig = UserConfigStore()
@@ -1480,17 +1481,26 @@ struct ContentView: View {
             guard isActiveTab else { return }
             showDatabaseSettings = true
         }
-        .overlay(
-            Button(action: togglePreviewShortcut) {
-                EmptyView()
-            }
-            .keyboardShortcut("e", modifiers: [.command])
-            .registerShortcut(name: "Toggle Edit/Preview & Locks", keyLabel: "E", modifiers: [.command], scope: "Global")
-            .frame(width: 0, height: 0)
-            .buttonStyle(.plain)
-            .opacity(0.0001)
-            .allowsHitTesting(false)
-        )
+        .onReceive(NotificationCenter.default.publisher(for: .togglePreviewShortcutRequested)) { _ in
+            guard isActiveTab else { return }
+            togglePreviewShortcut()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .clearSessionRequested)) { _ in
+            guard isActiveTab else { return }
+            attemptClearCurrentSession()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .switchToSession1Requested)) { _ in
+            guard isActiveTab else { return }
+            switchToSession(.one)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .switchToSession2Requested)) { _ in
+            guard isActiveTab else { return }
+            switchToSession(.two)
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .switchToSession3Requested)) { _ in
+            guard isActiveTab else { return }
+            switchToSession(.three)
+        }
         .sheet(isPresented: $showBeginCaptureSheet) {
             BeginCaptureSheet(orgValue: $beginOrgDraft,
                               acctValue: $beginAcctDraft,
@@ -4686,7 +4696,7 @@ struct ContentView: View {
                 .frame(maxWidth: .infinity)
             }
         }
-        
+
         // MARK: — Session & Template Tabbed Pane
         private var sessionAndTemplatePane: some View {
             let minPaneHeight = max(160, fontSize * 8)
@@ -4719,34 +4729,6 @@ struct ContentView: View {
                 .frame(minHeight: minPaneHeight, maxHeight: maxPaneHeight, alignment: .top)
             }
         }
-        //    // MARK: — Alternate Fields pane (per-session)
-        //    private var alternateFieldsPane: some View {
-        //        VStack(alignment: .leading, spacing: 6) {
-        //            HStack {
-        //                Text("Alternate Fields (per session)")
-        //                    .font(.system(size: fontSize + 1, weight: .semibold))
-        //                    .foregroundStyle(Theme.purple)
-        //
-        //                Spacer()
-        //
-        //                Toggle(isOn: $alternateFieldsLocked) {
-        //                    HStack(spacing: 4) {
-        //                        Image(systemName: alternateFieldsLocked ? "lock.fill" : "lock.open.fill")
-        //                            .font(.system(size: fontSize - 2))
-        //                        Text(alternateFieldsLocked ? "Locked" : "Unlocked")
-        //                            .font(.system(size: fontSize - 2))
-        //                    }
-        //                }
-        //                .toggleStyle(.checkbox)
-        //                .help(alternateFieldsLocked
-        //                    ? "Alternate fields are locked for copying. Uncheck to edit."
-        //                    : "Alternate fields are editable. Check to lock for easy copying.")
-        //            }
-        //
-        //            ScrollView {
-        //                VStack(alignment: .leading, spacing: 6) {
-        //                    ForEach(sessions.sessionAlternateFields[sessions.current] ?? [], id: \.id) { field in
-        //                        AlternateFieldRow(session: sessions.current,
         //                                          field: field,
         //                                          locked: $alternateFieldsLocked,
         //                                          fontSize: fontSize,
@@ -6015,9 +5997,7 @@ struct ContentView: View {
                 }
                 .buttonStyle(.bordered)
                 .tint(Theme.clearSessionTint)
-                .keyboardShortcut("k", modifiers: [.command, .shift])
                 .font(.system(size: fontSize))
-                .registerShortcut(name: "Clear Session", keyLabel: "K", modifiers: [.command, .shift], scope: "Global")
             }
         }
 
@@ -6060,8 +6040,6 @@ struct ContentView: View {
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(sessions.current == s ? Theme.purple : Theme.purple.opacity(0.3))
-                    .keyboardShortcut(KeyEquivalent(Character("\(s.rawValue)")), modifiers: [.control])
-                    .registerShortcut(name: "Switch to Session #\(s.rawValue)", keyLabel: "\(s.rawValue)", modifiers: [.control], scope: "Sessions")
                     .contextMenu {
                         Button("Rename…") { promptRename(for: s) }
                         Button("Link to Ticket…") { promptLink(for: s) }
@@ -6085,9 +6063,14 @@ struct ContentView: View {
                     .background(TicketSessionNotificationBridge(
                         onSave: { handleTicketSessionSaveShortcut() },
                         onLoad: { loadTicketSessionFlow() },
-                        onOpen: { openSessionsFolderFlow() },
-                        onExit: { attemptAppExit() }
+                        onOpen: { openSessionsFolderFlow() }
                     ))
+                    .onAppear {
+                        registerExitWorkflowProvider()
+                    }
+                    .onDisappear {
+                        unregisterExitWorkflowProvider()
+                    }
             }
         }
 
@@ -8586,17 +8569,39 @@ struct ContentView: View {
 
         private func attemptClearCurrentSession() {
             let flags = currentUnsavedFlags()
+            let snapshot = captureSnapshot(for: sessions.current)
+
+            guard flags.any else {
+                guard snapshot.hasAnyContent else {
+                    clearCurrentSessionState()
+                    return
+                }
+
+                let alert = NSAlert()
+                alert.messageText = "Clear Session #\(sessions.current.rawValue)?"
+                alert.informativeText = "Clearing will remove the current session’s data. Save before clearing or cancel to keep working."
+                alert.alertStyle = .warning
+                alert.addButton(withTitle: "Save")
+                alert.addButton(withTitle: "Clear")
+                alert.addButton(withTitle: "Cancel")
+
+                let response = runAlertWithFix(alert)
+                switch response {
+                case .alertFirstButtonReturn:
+                    _ = handleSessionSaveOnly()
+                case .alertSecondButtonReturn:
+                    clearCurrentSessionState()
+                default:
+                    return
+                }
+                return
+            }
             let guideDirty = flags.guide
             let notesDirty = flags.notes
             let sessionFieldDirty = flags.sessionData
             let sessionDirty = flags.session
             let linksDirty = flags.links
             let dbTablesDirty = flags.tables
-
-            guard flags.any else {
-                clearCurrentSessionState()
-                return
-            }
 
             var detailLines: [String] = []
             if guideDirty { detailLines.append("• Troubleshooting guide changes") }
@@ -8684,65 +8689,114 @@ struct ContentView: View {
             }
         }
 
-        private func attemptAppExit() {
+        private func exitWorkflowPreflight() {
 #if canImport(AppKit)
-            // Backup template before quitting
             if let template = selectedTemplate {
                 templates.backupTemplateIfNeeded(template, reason: "app_quit")
             }
+#endif
+        }
 
-            let flags = currentUnsavedFlags()
-            guard flags.any else {
-                NSApp.terminate(nil)
-                return
+        private func exitUnsavedComponents(for session: TicketSession) -> AppExitCoordinator.Components {
+            var components: AppExitCoordinator.Components = []
+            if hasSessionFieldData(for: session) {
+                components.insert(.session)
             }
 
-            let guideDirty = flags.guide
-            let notesDirty = flags.notes
-            let sessionFieldDirty = flags.sessionData
-            let sessionDirty = flags.session
-            let linksDirty = flags.links
-            let dbTablesDirty = flags.tables
-
-            var detailLines: [String] = []
-            if guideDirty { detailLines.append("• Troubleshooting guide changes") }
-            if notesDirty { detailLines.append("• Session notes changes") }
-            if sessionFieldDirty { detailLines.append("• Session data changes") }
-            if linksDirty { detailLines.append("• Template links updates") }
-            if dbTablesDirty { detailLines.append("• DB tables updates") }
-
-            let tabName = tabManager.displayName(for: tabManager.activeTabIndex)
-            let alert = NSAlert()
-            alert.messageText = "Unsaved changes detected in \(tabName)"
-            alert.informativeText = ([
-                "Exiting now will discard these pending edits:",
-                detailLines.joined(separator: "\n"),
-                "",
-                "Note: Only the active tab is checked. Please review other tabs before exiting."
-            ].filter { !$0.isEmpty }).joined(separator: "\n")
-            alert.alertStyle = .warning
-
-            alert.addButton(withTitle: "Exit")
-            alert.addButton(withTitle: "Save All")
-            alert.addButton(withTitle: "Cancel")
-
-            let response = runAlertWithFix(alert)
-            switch response {
-            case .alertFirstButtonReturn:
-                NSApp.terminate(nil)
-            case .alertSecondButtonReturn:
-                performSaveAll(
-                    guideDirty: guideDirty,
-                    sessionDirty: sessionDirty,
-                    linksDirty: linksDirty,
-                    dbTablesDirty: dbTablesDirty
-                ) {
-                    NSApp.terminate(nil)
+            if let template = templateForSession(session) {
+                if templateLinksStore.isDirty(for: template) {
+                    components.insert(.links)
                 }
-            default:
-                return
+                if dbTablesStore.isDirty(for: session, template: template) {
+                    components.insert(.tables)
+                }
+            }
+
+            return components
+        }
+
+        private func exitUnsavedSessions() -> [AppExitCoordinator.SessionEntry] {
+            TicketSession.allCases.compactMap { session in
+                let components = exitUnsavedComponents(for: session)
+                guard !components.isEmpty else { return nil }
+
+                let rawName = (sessions.sessionNames[session] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                let display = rawName.isEmpty ? "Session #\(session.rawValue)" : rawName
+
+                return AppExitCoordinator.SessionEntry(
+                    session: session,
+                    sessionDisplayName: display,
+                    components: components
+                )
+            }
+        }
+
+        private func focusForExitWorkflow(on session: TicketSession) {
+            if sessions.current != session {
+                switchToSession(session)
+            }
+#if canImport(AppKit)
+            if let template = selectedTemplate {
+                templates.backupTemplateIfNeeded(template, reason: "app_quit")
             }
 #endif
+        }
+
+        private func saveForExitWorkflow(session: TicketSession,
+                                         components: AppExitCoordinator.Components) -> Bool {
+            if sessions.current != session {
+                switchToSession(session)
+            }
+
+            var succeeded = true
+
+            if components.contains(.session) {
+                succeeded = handleSessionSaveOnly()
+            }
+
+            if succeeded, components.contains(.links) {
+                succeeded = handleLinksSaveOnly()
+            }
+
+            if succeeded, components.contains(.tables) {
+                succeeded = handleTablesSaveOnly()
+            }
+
+            return succeeded
+        }
+
+        private func templateForSession(_ session: TicketSession) -> TemplateItem? {
+            if session == sessions.current, let template = selectedTemplate {
+                return template
+            }
+
+            if let templateID = sessionSelectedTemplate[session],
+               let match = templates.templates.first(where: { $0.id == templateID }) {
+                return match
+            }
+
+            return nil
+        }
+
+        private func registerExitWorkflowProvider() {
+            guard let tabContext else { return }
+            let provider = AppExitCoordinator.Provider(
+                tabContextID: tabContext.id,
+                preflight: { exitWorkflowPreflight() },
+                fetchSessions: { exitUnsavedSessions() },
+                focusSession: { session in
+                    focusForExitWorkflow(on: session)
+                },
+                performSave: { session, components in
+                    saveForExitWorkflow(session: session, components: components)
+                }
+            )
+            exitCoordinator.register(tabID: tabContext.id, provider: provider)
+        }
+
+        private func unregisterExitWorkflowProvider() {
+            guard let tabContext else { return }
+            exitCoordinator.unregister(tabID: tabContext.id)
         }
 
         private func currentUnsavedFlags() -> UnsavedFlags {
@@ -8879,7 +8933,6 @@ struct ContentView: View {
             var onSave: () -> Void
             var onLoad: () -> Void
             var onOpen: () -> Void
-            var onExit: () -> Void
             var body: some View {
                 Color.clear
                     .onReceive(NotificationCenter.default.publisher(for: .saveTicketSession)) { _ in
@@ -8905,10 +8958,6 @@ struct ContentView: View {
                         }
                         onOpen()
                         LOG("Open sessions folder notification handled", ctx: ["tabId": tabID])
-                    }
-                    .onReceive(NotificationCenter.default.publisher(for: .attemptAppExit)) { _ in
-                        // App exit should be handled by all tabs
-                        onExit()
                     }
             }
         }
