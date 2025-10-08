@@ -23,6 +23,8 @@ Use the new **Begin** button in the Static Info header – or press **⌃⇧B** 
 
 This feature was added to make it easier to record important resource information before determining which troubleshooting route to take. That's why the Alternate Fields are Query Template neutral, meaning they persist across Query Template changes. Read more about Alternate Fields below. 
 
+You can use the "Auto Populate" button which will take the last 3 clipboard entries and look for the Org ID, the Account ID and place them in their respective fields on "save", while the other entry that is not either Org or Act will be added to the Alternate Fields Pane--this can be anything you captured while receiving a ticket such as the Resource ID.
+
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/Quick-capture2.png)
 
 Saving immediately fills the current session’s Org/Acct static fields and drops every additional value into the Alternate Fields list as unnamed rows you can label later. All captured values stay with the session, so they travel with you no matter which query template you decide to load next.
