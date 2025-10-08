@@ -1451,6 +1451,32 @@ struct ContentView: View {
                 }
             }
             registerWorkspaceShortcutsIfNeeded()
+
+            #if os(macOS)
+            // Install keyboard event monitoring for DB table suggestions and word-wise navigation
+            keyEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                // First try DB suggestion handler (for arrow keys in suggestions)
+                if let result = handleDBSuggestKeyEvent(event), result == nil {
+                    return nil
+                }
+
+                // Then try word-wise selection handler (for Option+Arrow in text fields)
+                if let result = handleWordwiseSelection(event), result == nil {
+                    return nil
+                }
+
+                return event
+            }
+            #endif
+        }
+        .onDisappear {
+            #if os(macOS)
+            // Clean up keyboard event monitoring
+            if let monitor = keyEventMonitor {
+                NSEvent.removeMonitor(monitor)
+                keyEventMonitor = nil
+            }
+            #endif
         }
         .onChange(of: isActiveTab) { newValue in
             LOG("Tab active state changed", ctx: ["tabId": tabID, "isActive": "\(newValue)"])
