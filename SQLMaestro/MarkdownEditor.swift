@@ -21,6 +21,12 @@ final class MarkdownEditorController: ObservableObject {
     func currentText() -> String? {
         coordinator?.currentText()
     }
+
+    /// Find and highlight a keyword in the markdown editor
+    @discardableResult
+    func find(_ query: String) -> Bool {
+        coordinator?.find(query) ?? false
+    }
 }
 
 struct MarkdownEditor: NSViewRepresentable {
@@ -180,6 +186,28 @@ struct MarkdownEditor: NSViewRepresentable {
             guard let textView else { return }
             let sanitized = sanitizeMarkdown(newValue)
             replaceEntireText(with: sanitized)
+        }
+
+        @discardableResult
+        func find(_ query: String) -> Bool {
+            guard let textView, !query.isEmpty else { return false }
+            let nsText = textView.string as NSString
+            guard nsText.length > 0 else { return false }
+
+            let options: NSString.CompareOptions = [.caseInsensitive]
+            let range = nsText.range(of: query, options: options)
+
+            guard range.location != NSNotFound else {
+                NSSound.beep()
+                return false
+            }
+
+            textView.setSelectedRange(range)
+            textView.scrollRangeToVisible(range)
+            if textView.responds(to: #selector(NSTextView.showFindIndicator(for:))) {
+                textView.showFindIndicator(for: range)
+            }
+            return true
         }
 
         // MARK: NSTextViewDelegate

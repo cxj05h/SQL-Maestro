@@ -1334,6 +1334,8 @@ struct ContentView: View {
     @State private var tagEditorTemplate: TemplateItem?
     @State private var tagExplorerContext: TagExplorerContext?
     @State private var showTagSearchDialog: Bool = false
+    @State private var showGuideNotesSearchDialog: Bool = false
+    @State private var guideNotesSearchKeyword: String = ""
     @State private var activePopoutPane: PopoutPaneContext? = nil
     @State private var isSidebarVisible: Bool = false
     struct TagExplorerContext: Identifiable {
@@ -1525,6 +1527,9 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .searchTagsRequested)) { _ in
             handleSearchTagsShortcut()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .searchGuideNotesRequested)) { _ in
+            handleSearchGuideNotesShortcut()
         }
     }
 
@@ -1719,6 +1724,30 @@ struct ContentView: View {
                     minSize: CGSize(width: 500, height: 400),
                     preferredSize: CGSize(width: 540, height: 480),
                     sizeStorageKey: "TagSearchDialogSize"
+                )
+            )
+        }
+        .sheet(isPresented: $showGuideNotesSearchDialog) {
+            GuideNotesSearchDialog(
+                templates: templates.templates,
+                onSelectTemplate: { template, keyword in
+                    guideNotesSearchKeyword = keyword
+                    showGuideNotesSearchDialog = false
+                    selectTemplate(template)
+                    showGuideNotesPane()
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                        highlightKeywordInGuideNotes(keyword)
+                    }
+                },
+                onClose: {
+                    showGuideNotesSearchDialog = false
+                }
+            )
+            .background(
+                SheetWindowConfigurator(
+                    minSize: CGSize(width: 600, height: 450),
+                    preferredSize: CGSize(width: 640, height: 520),
+                    sizeStorageKey: "GuideNotesSearchDialogSize"
                 )
             )
         }
@@ -5844,6 +5873,8 @@ struct ContentView: View {
             guard !workspaceShortcutsRegistered else { return }
             let registry = ShortcutRegistry.shared
             registry.register(name: "Search Queries", keyLabel: "F", modifiers: [.command], scope: "Global")
+            registry.register(name: "Search Tags", keyLabel: "T", modifiers: [.command, .shift], scope: "Search")
+            registry.register(name: "Search Guide Notes", keyLabel: "F", modifiers: [.command, .shift], scope: "Search")
             registry.register(name: "Show Guide Notes", keyLabel: "1", modifiers: [.command], scope: "Panes")
             registry.register(name: "Show Session Notes", keyLabel: "2", modifiers: [.command], scope: "Panes")
             registry.register(name: "Show Saved Files", keyLabel: "3", modifiers: [.command], scope: "Panes")
@@ -5911,6 +5942,26 @@ struct ContentView: View {
             }
             showTagSearchDialog = true
             LOG("Tag search dialog opened via keyboard shortcut", ctx: ["tabId": tabID])
+        }
+
+        private func handleSearchGuideNotesShortcut() {
+            guard isActiveTab else {
+                LOG("Search guide notes shortcut ignored for inactive tab", ctx: ["tabId": tabID])
+                return
+            }
+            showGuideNotesSearchDialog = true
+            LOG("Guide notes search dialog opened via keyboard shortcut", ctx: [
+                "tabId": tabID,
+                "availableTemplates": "\(templates.templates.count)"
+            ])
+        }
+
+        private func showGuideNotesPane() {
+            setActivePane(.guideNotes)
+        }
+
+        private func highlightKeywordInGuideNotes(_ keyword: String) {
+            guideNotesEditor.find(keyword)
         }
 
         private func sidebarSessionButton(_ session: TicketSession) -> some View {
@@ -10098,6 +10149,349 @@ struct ContentView: View {
                 let tag: String
                 let count: Int
                 var id: String { tag }
+            }
+        }
+
+        struct GuideNotesSearchDialog: View {
+            let templates: [TemplateItem]
+            let onSelectTemplate: (TemplateItem, String) -> Void
+            let onClose: () -> Void
+
+            @State private var searchQuery: String = ""
+            @State private var selectedIndex: Int = 0
+            @FocusState private var isSearchFocused: Bool
+            @ObservedObject private var guideStore = TemplateGuideStore.shared
+
+            private struct SearchMatch: Identifiable {
+                let id = UUID()
+                let template: TemplateItem
+                let previews: [MatchPreview]
+            }
+
+            private struct MatchPreview {
+                let keyword: String
+                let contextBefore: String
+                let matchedLine: String
+                let contextAfter: String
+                let lineNumber: Int
+            }
+
+            private enum SearchLogic {
+                case and
+                case or
+            }
+
+            private var searchResults: [SearchMatch] {
+                let trimmed = searchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else {
+                    LOG("Guide notes search: empty query")
+                    return []
+                }
+
+                let (keywords, logic) = parseSearchQuery(trimmed)
+                guard !keywords.isEmpty else {
+                    LOG("Guide notes search: no keywords parsed", ctx: ["query": trimmed])
+                    return []
+                }
+
+                LOG("Guide notes search started", ctx: [
+                    "keywords": keywords.joined(separator: ", "),
+                    "logic": logic == .and ? "AND" : "OR",
+                    "templateCount": "\(templates.count)"
+                ])
+
+                var matches: [SearchMatch] = []
+                var templatesWithNotes = 0
+                var totalNotesLength = 0
+
+                for template in templates {
+                    // IMPORTANT: Load notes from disk first - they may not be in cache
+                    guideStore.prepare(for: template)
+                    let notes = guideStore.currentNotes(for: template)
+                    if !notes.isEmpty {
+                        templatesWithNotes += 1
+                        totalNotesLength += notes.count
+                    }
+                    let strippedNotes = stripMarkdown(notes)
+
+                    if let previews = findMatches(in: strippedNotes, rawNotes: notes, keywords: keywords, logic: logic), !previews.isEmpty {
+                        LOG("Guide notes search: match found", ctx: [
+                            "template": template.name,
+                            "matchCount": "\(previews.count)"
+                        ])
+                        matches.append(SearchMatch(template: template, previews: previews))
+                    }
+                }
+
+                LOG("Guide notes search completed", ctx: [
+                    "resultsFound": "\(matches.count)",
+                    "templatesWithNotes": "\(templatesWithNotes)",
+                    "totalNotesLength": "\(totalNotesLength)"
+                ])
+
+                return matches.sorted { $0.template.name.localizedCaseInsensitiveCompare($1.template.name) == .orderedAscending }
+            }
+
+            var body: some View {
+                VStack(alignment: .leading, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text("Search Guide Notes")
+                            .font(.title3)
+                            .fontWeight(.semibold)
+                        Text("Space-separated words search with AND logic. Use or for OR logic. Partial words match.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                        Text("Examples: \"vcpu\" • \"ocean characteristics\" • \"cpu or memory\" • \"saving\"")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary.opacity(0.8))
+                    }
+
+                    TextField("Type keywords...", text: $searchQuery)
+                        .textFieldStyle(.roundedBorder)
+                        .focused($isSearchFocused)
+                        .onAppear {
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                isSearchFocused = true
+                            }
+                        }
+                        .onChange(of: searchQuery) { _, _ in
+                            selectedIndex = 0
+                        }
+                        .onKeyPress(.upArrow) {
+                            if selectedIndex > 0 {
+                                selectedIndex -= 1
+                            }
+                            return .handled
+                        }
+                        .onKeyPress(.downArrow) {
+                            if selectedIndex < searchResults.count - 1 {
+                                selectedIndex += 1
+                            }
+                            return .handled
+                        }
+                        .onKeyPress(.return) {
+                            guard !searchResults.isEmpty else { return .handled }
+                            guard selectedIndex >= 0 && selectedIndex < searchResults.count else { return .handled }
+                            let match = searchResults[selectedIndex]
+                            let firstKeyword = match.previews.first?.keyword ?? searchQuery
+                            onSelectTemplate(match.template, firstKeyword)
+                            return .handled
+                        }
+
+                    if searchResults.isEmpty && !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text("No matches found.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    } else if searchResults.isEmpty {
+                        Text("Enter keywords to search across all guide notes.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    } else {
+                        ScrollViewReader { proxy in
+                            ScrollView {
+                                LazyVStack(alignment: .leading, spacing: 12) {
+                                    ForEach(Array(searchResults.enumerated()), id: \.element.id) { index, match in
+                                        let isSelected = index == selectedIndex
+
+                                        VStack(alignment: .leading, spacing: 8) {
+                                            Button {
+                                                let firstKeyword = match.previews.first?.keyword ?? searchQuery
+                                                onSelectTemplate(match.template, firstKeyword)
+                                            } label: {
+                                                HStack {
+                                                    Text(match.template.name)
+                                                        .font(.system(size: 14, weight: .semibold))
+                                                        .foregroundStyle(Theme.pink)
+                                                    Spacer()
+                                                    Text("\(match.previews.count) match\(match.previews.count == 1 ? "" : "es")")
+                                                        .font(.system(size: 11))
+                                                        .foregroundStyle(.secondary)
+                                                }
+                                                .padding(.horizontal, 12)
+                                                .padding(.vertical, 8)
+                                                .background(isSelected ? Color.accentColor.opacity(0.2) : Color.clear)
+                                                .cornerRadius(6)
+                                            }
+                                            .buttonStyle(.plain)
+                                            .id(index)
+
+                                            if isSelected {
+                                                VStack(alignment: .leading, spacing: 8) {
+                                                    ForEach(Array(match.previews.enumerated()), id: \.offset) { _, preview in
+                                                        VStack(alignment: .leading, spacing: 2) {
+                                                            Text("Match: \"\(preview.keyword)\"")
+                                                                .font(.system(size: 10, weight: .medium))
+                                                                .foregroundStyle(.secondary)
+
+                                                            VStack(alignment: .leading, spacing: 1) {
+                                                                if !preview.contextBefore.isEmpty {
+                                                                    Text(preview.contextBefore)
+                                                                        .font(.system(size: 11))
+                                                                        .foregroundStyle(.secondary)
+                                                                }
+
+                                                                Text(preview.matchedLine)
+                                                                    .font(.system(size: 11, weight: .medium))
+                                                                    .foregroundStyle(.primary)
+
+                                                                if !preview.contextAfter.isEmpty {
+                                                                    Text(preview.contextAfter)
+                                                                        .font(.system(size: 11))
+                                                                        .foregroundStyle(.secondary)
+                                                                }
+                                                            }
+                                                            .padding(.horizontal, 8)
+                                                            .padding(.vertical, 6)
+                                                            .background(Color.primary.opacity(0.05))
+                                                            .cornerRadius(4)
+                                                        }
+                                                    }
+                                                }
+                                                .padding(.horizontal, 12)
+                                                .padding(.bottom, 8)
+                                            }
+                                        }
+                                        .background(Color.clear)
+                                    }
+                                }
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                            }
+                            .frame(minHeight: 280, maxHeight: 400)
+                            .onChange(of: selectedIndex) { _, newIndex in
+                                withAnimation {
+                                    proxy.scrollTo(newIndex, anchor: .center)
+                                }
+                            }
+                        }
+                    }
+
+                    HStack {
+                        Spacer()
+                        Button("Cancel") {
+                            onClose()
+                        }
+                        .keyboardShortcut(.cancelAction)
+                    }
+                }
+                .padding(24)
+                .frame(minWidth: 600, minHeight: 450)
+            }
+
+            private func parseSearchQuery(_ query: String) -> (keywords: [String], logic: SearchLogic) {
+                // Remove quotes from the query first - they're not part of the search terms
+                let cleanedQuery = query.replacingOccurrences(of: "\"", with: "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+
+                let lowercased = cleanedQuery.lowercased()
+                var logic: SearchLogic = .and
+                var parts: [String] = []
+
+                // Split on AND/OR using lowercased version (case-insensitive matching)
+                if lowercased.contains(" and ") {
+                    logic = .and
+                    parts = lowercased.components(separatedBy: " and ")
+                } else if lowercased.contains(" or ") {
+                    logic = .or
+                    parts = lowercased.components(separatedBy: " or ")
+                } else {
+                    // Default: treat spaces as separators, each word is a keyword with AND logic
+                    parts = lowercased.components(separatedBy: .whitespaces)
+                        .filter { !$0.isEmpty }
+                    logic = .and
+                }
+
+                let keywords = parts.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+
+                LOG("Guide notes search: query parsed", ctx: [
+                    "originalQuery": query,
+                    "cleanedQuery": cleanedQuery,
+                    "keywords": keywords.joined(separator: ", "),
+                    "logic": logic == .and ? "AND" : "OR"
+                ])
+
+                return (keywords, logic)
+            }
+
+            private func stripMarkdown(_ text: String) -> String {
+                var result = text
+
+                result = result.replacingOccurrences(of: "!\\[([^\\]]*)\\]\\([^\\)]+\\)", with: "$1", options: .regularExpression)
+                result = result.replacingOccurrences(of: "\\[([^\\]]*)\\]\\([^\\)]+\\)", with: "$1", options: .regularExpression)
+                result = result.replacingOccurrences(of: "\\*\\*([^\\*]+)\\*\\*", with: "$1", options: .regularExpression)
+                result = result.replacingOccurrences(of: "__([^_]+)__", with: "$1", options: .regularExpression)
+                result = result.replacingOccurrences(of: "\\*([^\\*]+)\\*", with: "$1", options: .regularExpression)
+                result = result.replacingOccurrences(of: "_([^_]+)_", with: "$1", options: .regularExpression)
+                result = result.replacingOccurrences(of: "`([^`]+)`", with: "$1", options: .regularExpression)
+                result = result.replacingOccurrences(of: "^#{1,6}\\s+", with: "", options: .regularExpression)
+                result = result.replacingOccurrences(of: "^\\s*[-*+]\\s+", with: "", options: .regularExpression)
+                result = result.replacingOccurrences(of: "^\\s*\\d+\\.\\s+", with: "", options: .regularExpression)
+
+                return result
+            }
+
+            private func findMatches(in strippedText: String, rawNotes: String, keywords: [String], logic: SearchLogic) -> [MatchPreview]? {
+                let lines = strippedText.components(separatedBy: .newlines)
+                var allPreviews: [MatchPreview] = []
+
+                LOG("Guide notes search: findMatches called", ctx: [
+                    "lineCount": "\(lines.count)",
+                    "textLength": "\(strippedText.count)",
+                    "keywords": keywords.joined(separator: ", ")
+                ])
+
+                for keyword in keywords {
+                    let lowercasedKeyword = keyword.lowercased()
+                    var matchesForKeyword = 0
+
+                    for (index, line) in lines.enumerated() {
+                        let lowercasedLine = line.lowercased()
+
+                        if lowercasedLine.contains(lowercasedKeyword) {
+                            matchesForKeyword += 1
+                            let contextBefore = index > 0 ? lines[index - 1] : ""
+                            let contextAfter = index < lines.count - 1 ? lines[index + 1] : ""
+
+                            let preview = MatchPreview(
+                                keyword: keyword,
+                                contextBefore: contextBefore,
+                                matchedLine: line,
+                                contextAfter: contextAfter,
+                                lineNumber: index
+                            )
+                            allPreviews.append(preview)
+                        }
+                    }
+
+                    if matchesForKeyword > 0 {
+                        LOG("Guide notes search: keyword found", ctx: [
+                            "keyword": keyword,
+                            "matchCount": "\(matchesForKeyword)"
+                        ])
+                    }
+                }
+
+                if logic == .and && keywords.count > 1 {
+                    let foundKeywords = Set(allPreviews.map { $0.keyword.lowercased() })
+                    let requiredKeywords = Set(keywords.map { $0.lowercased() })
+
+                    if foundKeywords != requiredKeywords {
+                        LOG("Guide notes search: AND logic failed", ctx: [
+                            "required": requiredKeywords.joined(separator: ", "),
+                            "found": foundKeywords.joined(separator: ", ")
+                        ])
+                        return nil
+                    }
+                }
+
+                LOG("Guide notes search: findMatches result", ctx: [
+                    "totalPreviews": "\(allPreviews.count)"
+                ])
+
+                return allPreviews.isEmpty ? nil : allPreviews
             }
         }
 
