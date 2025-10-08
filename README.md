@@ -549,6 +549,7 @@ There are a few helpful KB shortcuts that work in the main screen of the app.
 | Cmd + T     | Toggle Sidebar                                                                                                                                                                                |
 | Cmd + E     | Toggle Ticket Session "Edit" or "Preview" mode  / Toggle locked panes                                                                                                                         |
 | Cmd + K     | Insert link into note                                                                                                                                                                         |
+| Cmd + N    | Create new tab of an addtional three ticket sessions.                                                                                                                                           |
 | Ctrl + 1     | Jump to Ticket Session 1                                                                                                                                                                      |
 | Ctrl + 2     | Jump to Ticket Session 2                                                                                                                                                                      |
 | Ctrl + 3     | Jump to Ticket Session 3                                                                                                                                                                      |
