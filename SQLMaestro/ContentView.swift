@@ -1669,7 +1669,7 @@ struct ContentView: View {
             )
         }
         .sheet(item: $tagEditorTemplate) { template in
-            TemplateTagEditorSheet(
+            TagEditorSheetWrapper(
                 template: template,
                 existingTags: templateTagsStore.tags(for: template),
                 onSave: { newTags in
@@ -9573,12 +9573,40 @@ struct ContentView: View {
             out = out.replacingOccurrences(of: "\"", with: "\\\"")
             return out
         }
-        
+
+        // Wrapper that intercepts Cmd+S for the tag editor
+        struct TagEditorSheetWrapper: View {
+            let template: TemplateItem
+            let existingTags: [String]
+            let onSave: ([String]) -> Void
+            let onCancel: () -> Void
+
+            @State private var shouldSave: Bool = false
+
+            var body: some View {
+                TemplateTagEditorSheet(
+                    template: template,
+                    existingTags: existingTags,
+                    onSave: onSave,
+                    onCancel: onCancel,
+                    externalSaveTrigger: $shouldSave
+                )
+                .background(
+                    Button("") {
+                        shouldSave.toggle()
+                    }
+                    .keyboardShortcut("s", modifiers: [.command])
+                    .hidden()
+                )
+            }
+        }
+
         // Inline Template Editor Sheet
         struct TemplateTagEditorSheet: View {
             let template: TemplateItem
             let onSave: ([String]) -> Void
             let onCancel: () -> Void
+            @Binding var externalSaveTrigger: Bool
 
             @EnvironmentObject private var templatesManager: TemplateManager
             @ObservedObject private var tagsStore = TemplateTagsStore.shared
@@ -9592,10 +9620,12 @@ struct ContentView: View {
             init(template: TemplateItem,
                  existingTags: [String],
                  onSave: @escaping ([String]) -> Void,
-                 onCancel: @escaping () -> Void) {
+                 onCancel: @escaping () -> Void,
+                 externalSaveTrigger: Binding<Bool>) {
                 self.template = template
                 self.onSave = onSave
                 self.onCancel = onCancel
+                self._externalSaveTrigger = externalSaveTrigger
                 _draftTags = State(initialValue: existingTags)
             }
 
@@ -9715,6 +9745,10 @@ struct ContentView: View {
                 }
                 .onChange(of: templatesManager.templates) { _ in
                     refreshAvailableTags()
+                }
+                .onChange(of: externalSaveTrigger) { _ in
+                    commitCurrentEntry()
+                    onSave(draftTags)
                 }
             }
 
