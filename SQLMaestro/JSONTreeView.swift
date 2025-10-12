@@ -21,8 +21,10 @@ struct JSONTreePreview: View {
     @State private var lastSubmittedQuery: String = ""
     @State private var shouldCenterTree: Bool = true
     @State private var panStartOffset: CGSize = .zero
+    @State private var minimapNeedsUpdate: Bool = false
+    @State private var lastMinimapUpdate: Date = .distantPast
     private let maximumZoomScale: CGFloat = 3.0
-    private let minimumZoomScale: CGFloat = 0.0001
+    private let minimumZoomScale: CGFloat = 0.1  // Changed from 0.0001 to prevent extreme zoom-out
     private let searchFocusZoom: CGFloat = 1.2
     private let canvasInnerPadding: CGFloat = 60
     private let canvasOuterPadding: CGFloat = 28
@@ -146,89 +148,89 @@ struct JSONTreePreview: View {
             let viewport = proxy.size
 
             ZStack(alignment: .topLeading) {
-                LinearGradient(
-                    colors: [
-                        Color(red: 0.07, green: 0.08, blue: 0.16),
-                        Color(red: 0.03, green: 0.03, blue: 0.09)
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                )
+                // Main canvas area
+                ZStack(alignment: .topLeading) {
+                    LinearGradient(
+                        colors: [
+                            Color(red: 0.07, green: 0.08, blue: 0.16),
+                            Color(red: 0.03, green: 0.03, blue: 0.09)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
 
-                JSONTreeCanvas(
-                    root: root,
-                    layout: layout,
-                    highlightedNodes: highlighted,
-                    contentInset: canvasContentInset
-                )
-                .padding(canvasInnerPadding)
-                .background(
-                    RoundedRectangle(cornerRadius: 32)
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    Color(red: 0.08, green: 0.09, blue: 0.18),
-                                    Color(red: 0.04, green: 0.05, blue: 0.12)
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
+                    JSONTreeCanvas(
+                        root: root,
+                        layout: layout,
+                        highlightedNodes: highlighted,
+                        contentInset: canvasContentInset
+                    )
+                    .padding(canvasInnerPadding)
+                    .background(
+                        RoundedRectangle(cornerRadius: 32)
+                            .fill(
+                                LinearGradient(
+                                    colors: [
+                                        Color(red: 0.08, green: 0.09, blue: 0.18),
+                                        Color(red: 0.04, green: 0.05, blue: 0.12)
+                                    ],
+                                    startPoint: .topLeading,
+                                    endPoint: .bottomTrailing
+                                )
                             )
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 32)
-                                .stroke(Theme.purple.opacity(0.18), lineWidth: 1.1)
-                        )
-                        .shadow(color: Theme.purple.opacity(0.25), radius: 22, x: 0, y: 18)
-                )
-                .padding(canvasOuterPadding)
-                .scaleEffect(zoomScale, anchor: .topLeading)
-                .offset(x: contentOffset.width, y: contentOffset.height)
-                .animation(nil, value: zoomScale)
-                .animation(nil, value: contentOffset)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 32)
+                                    .stroke(Theme.purple.opacity(0.18), lineWidth: 1.1)
+                            )
+                            .shadow(color: Theme.purple.opacity(0.25), radius: 22, x: 0, y: 18)
+                    )
+                    .padding(canvasOuterPadding)
+                    .scaleEffect(zoomScale, anchor: .topLeading)
+                    .offset(x: contentOffset.width, y: contentOffset.height)
+                    .animation(nil, value: zoomScale)
+                    .animation(nil, value: contentOffset)
 
-                ZoomEventCatcher(
-                    topHitTestInset: 0,
-                    onCommandScroll: { payload in
-                        handleCommandScroll(deltaY: payload.deltaY,
-                                            precise: payload.precise,
-                                            inverted: payload.inverted,
-                                            location: payload.location)
-                    },
-                    onMagnify: { payload in
-                        handleMagnification(delta: payload.delta, location: payload.location)
-                    },
-                    onPanBegan: { location in
-                        handlePanBegan(at: location)
-                    },
-                    onPanChanged: { translation in
-                        handlePanChanged(translation: translation)
-                    },
-                    onPanEnded: {
-                        handlePanEnded()
-                    }
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .allowsHitTesting(true)
-                .accessibilityHidden(true)
-
-                searchControls
-                    .padding(.top, 18)
-                    .padding(.leading, 18)
-                    .padding(.trailing, 18)
+                    ZoomEventCatcher(
+                        topHitTestInset: 0,
+                        onCommandScroll: { payload in
+                            handleCommandScroll(deltaY: payload.deltaY,
+                                                precise: payload.precise,
+                                                inverted: payload.inverted,
+                                                location: payload.location)
+                        },
+                        onMagnify: { payload in
+                            handleMagnification(delta: payload.delta, location: payload.location)
+                        },
+                        onPanBegan: { location in
+                            handlePanBegan(at: location)
+                        },
+                        onPanChanged: { translation in
+                            handlePanChanged(translation: translation)
+                        },
+                        onPanEnded: {
+                            handlePanEnded()
+                        }
+                    )
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .allowsHitTesting(true)
+                    .accessibilityHidden(true)
 
-                // Minimap overlay - temporarily disabled due to performance issues
-                // minimap(viewport: viewport)
-                //     .padding(.trailing, 18)
-                //     .padding(.top, 18)
-                //     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
-                //     .allowsHitTesting(true)
+                    // Search controls overlay (inside clipped area)
+                    searchControls
+                        .padding(.top, 18)
+                        .padding(.leading, 18)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .allowsHitTesting(true)
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 26))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 26)
+                        .stroke(Color.white.opacity(0.05), lineWidth: 0.8)
+                )
+
+                // Minimap overlay - OUTSIDE clipped area, at top-right
+                minimap(viewport: viewport)
             }
-            .clipShape(RoundedRectangle(cornerRadius: 26))
-            .overlay(
-                RoundedRectangle(cornerRadius: 26)
-                    .stroke(Color.white.opacity(0.05), lineWidth: 0.8)
-            )
             .onAppear {
                 handleViewportChange(viewport)
             }
@@ -254,79 +256,132 @@ struct JSONTreePreview: View {
     @ViewBuilder
     private func minimap(viewport: CGSize) -> some View {
         // Only show minimap if tree exists and is large enough to benefit from it
+        // Also check that zoom scale is reasonable
         if let root = treeRoot,
            layout.size.width > 0,
            layout.size.height > 0,
-           (canvasSize.width > viewport.width * 1.5 || canvasSize.height > viewport.height * 1.5) {
+           zoomScale >= minimumZoomScale,  // Show minimap at any zoom level (removed * 2 multiplier)
+           (canvasSize.width > viewport.width * 1.2 || canvasSize.height > viewport.height * 1.2),  // Lowered from 1.5 to 1.2
+           canvasSize.width > 1,  // Safety check: ensure canvasSize is not too small
+           canvasSize.height > 1 {
 
             let minimapWidth: CGFloat = 120
-            let minimapHeight: CGFloat = min(viewport.height * 0.7, 400)
-            let minimapScale = min(minimapWidth / canvasSize.width, minimapHeight / canvasSize.height)
+            let maximumMinimapHeight: CGFloat = min(viewport.height * 0.7, 400)
 
-        VStack(spacing: 0) {
-            ZStack(alignment: .topLeading) {
-                // Minimap content - simplified rendering
+            // Calculate scale to fit within minimap width, but also respect max height
+            let scaleByWidth = minimapWidth / canvasSize.width
+            let scaleByHeight = maximumMinimapHeight / canvasSize.height
+            let minimapScale = min(scaleByWidth, scaleByHeight)
+
+            // Clamp minimap scale to reasonable values
+            let clampedScale = max(min(minimapScale, 1.0), 0.01)
+
+            // Calculate actual minimap content size
+            let contentWidth = canvasSize.width * clampedScale
+            let contentHeight = canvasSize.height * clampedScale
+
+        ZStack(alignment: .topLeading) {
+            // Minimap content - simplified rendering
+            Rectangle()
+                .fill(Color.white.opacity(0.15))
+                .frame(width: contentWidth, height: contentHeight)
+
+            // Viewport indicator rectangle
+            if viewport.width > 0, viewport.height > 0 {
+                let visibleRect = calculateVisibleRect(viewport: viewport, minimapScale: clampedScale)
                 Rectangle()
-                    .fill(Color.white.opacity(0.05))
-                    .frame(width: canvasSize.width * minimapScale, height: canvasSize.height * minimapScale)
-
-                // Viewport indicator rectangle
-                if viewport.width > 0, viewport.height > 0 {
-                    let visibleRect = calculateVisibleRect(viewport: viewport, minimapScale: minimapScale)
-                    Rectangle()
-                        .stroke(Theme.purple, lineWidth: 2)
-                        .fill(Theme.purple.opacity(0.15))
-                        .frame(width: visibleRect.width, height: visibleRect.height)
-                        .offset(x: visibleRect.minX, y: visibleRect.minY)
-                }
+                    .stroke(Theme.purple, lineWidth: 2)
+                    .fill(Theme.purple.opacity(0.15))
+                    .frame(width: max(visibleRect.width, 2), height: max(visibleRect.height, 2))
+                    .offset(x: visibleRect.minX, y: visibleRect.minY)
             }
-            .frame(width: minimapWidth, height: minimapHeight)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.black.opacity(0.5))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Theme.purple.opacity(0.3), lineWidth: 1)
-                    )
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .gesture(
-                DragGesture(minimumDistance: 0)
-                    .onChanged { value in
-                        handleMinimapDrag(at: value.location, minimapScale: minimapScale, viewport: viewport)
-                    }
-            )
         }
+        .frame(width: contentWidth, height: contentHeight, alignment: .topLeading)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.black.opacity(0.7))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Theme.purple.opacity(0.5), lineWidth: 2)
+                )
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .highPriorityGesture(
+            DragGesture(minimumDistance: 0, coordinateSpace: .local)
+                .onChanged { value in
+                    handleMinimapDrag(at: value.location, minimapScale: clampedScale, viewport: viewport)
+                }
+        )
+        .offset(
+            x: viewport.width - contentWidth - 18,
+            y: 18
+        )
+        .allowsHitTesting(true)
+        .zIndex(1000)  // Ensure minimap is above other layers
         }
     }
 
     private func calculateVisibleRect(viewport: CGSize, minimapScale: CGFloat) -> CGRect {
-        let scaledCanvasWidth = canvasSize.width * zoomScale
-        let scaledCanvasHeight = canvasSize.height * zoomScale
+        // Safety check: prevent division by very small numbers
+        let safeZoomScale = max(zoomScale, minimumZoomScale)
 
-        // Calculate what portion of the canvas is visible in the viewport
-        let visibleX = -contentOffset.width / zoomScale
-        let visibleY = -contentOffset.height / zoomScale
-        let visibleWidth = viewport.width / zoomScale
-        let visibleHeight = viewport.height / zoomScale
+        // Calculate what portion of the canvas is visible in the viewport (in canvas coordinates)
+        let visibleX = -contentOffset.width / safeZoomScale
+        let visibleY = -contentOffset.height / safeZoomScale
+        let visibleWidth = viewport.width / safeZoomScale
+        let visibleHeight = viewport.height / safeZoomScale
+
+        // Clamp to canvas bounds (0 to canvasSize)
+        let clampedX = max(0, min(visibleX, canvasSize.width))
+        let clampedY = max(0, min(visibleY, canvasSize.height))
+
+        // Clamp width and height to not exceed canvas bounds
+        let maxWidth = canvasSize.width - clampedX
+        let maxHeight = canvasSize.height - clampedY
+        let clampedWidth = min(visibleWidth, maxWidth)
+        let clampedHeight = min(visibleHeight, maxHeight)
 
         // Scale these coordinates to minimap space
         return CGRect(
-            x: visibleX * minimapScale,
-            y: visibleY * minimapScale,
-            width: visibleWidth * minimapScale,
-            height: visibleHeight * minimapScale
+            x: clampedX * minimapScale,
+            y: clampedY * minimapScale,
+            width: max(clampedWidth * minimapScale, 2),  // Minimum 2px for visibility
+            height: max(clampedHeight * minimapScale, 2)
         )
     }
 
     private func handleMinimapDrag(at location: CGPoint, minimapScale: CGFloat, viewport: CGSize) {
+        // Safety check: prevent division by very small numbers
+        guard minimapScale > 0.001 else {
+            print("⚠️ Minimap scale too small: \(minimapScale)")
+            return
+        }
+
+        print("🖱️ === MINIMAP DRAG START ===")
+        print("🖱️ Click location: \(location)")
+        print("🖱️ Minimap scale: \(minimapScale)")
+        print("🖱️ Current zoom: \(zoomScale)")
+        print("🖱️ Canvas size: \(canvasSize)")
+        print("🖱️ Viewport size: \(viewport)")
+        print("🖱️ Current offset: \(contentOffset)")
+
         // Convert minimap coordinates to canvas coordinates
         let canvasX = location.x / minimapScale
         let canvasY = location.y / minimapScale
 
+        print("🖱️ Canvas coords (raw): x=\(canvasX), y=\(canvasY)")
+
+        let clampedCanvasX = max(0, min(canvasX, canvasSize.width))
+        let clampedCanvasY = max(0, min(canvasY, canvasSize.height))
+
+        print("🖱️ Canvas coords (clamped): x=\(clampedCanvasX), y=\(clampedCanvasY)")
+
         // Center the viewport on this point
-        let newOffsetX = -(canvasX * zoomScale) + viewport.width / 2
-        let newOffsetY = -(canvasY * zoomScale) + viewport.height / 2
+        let newOffsetX = -(clampedCanvasX * zoomScale) + viewport.width / 2
+        let newOffsetY = -(clampedCanvasY * zoomScale) + viewport.height / 2
+
+        print("🖱️ New offset: x=\(newOffsetX), y=\(newOffsetY)")
+        print("🖱️ === MINIMAP DRAG END ===")
 
         shouldCenterTree = false
         contentOffset = CGSize(width: newOffsetX, height: newOffsetY)
