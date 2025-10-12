@@ -1,10 +1,12 @@
 import SwiftUI
 import Foundation
 import AppKit
+import Yams
 
 struct JSONTreePreview: View {
     let fileName: String
     let content: String
+    let format: SavedFileFormat
 
     @State private var treeRoot: JSONTreeGraphNode?
     @State private var parseError: Error?
@@ -214,6 +216,13 @@ struct JSONTreePreview: View {
                     .padding(.leading, 18)
                     .padding(.trailing, 18)
                     .allowsHitTesting(true)
+
+                // Minimap overlay - temporarily disabled due to performance issues
+                // minimap(viewport: viewport)
+                //     .padding(.trailing, 18)
+                //     .padding(.top, 18)
+                //     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topTrailing)
+                //     .allowsHitTesting(true)
             }
             .clipShape(RoundedRectangle(cornerRadius: 26))
             .overlay(
@@ -231,7 +240,7 @@ struct JSONTreePreview: View {
 
     private func errorView(_ error: Error) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Unable to parse JSON")
+            Text("Unable to parse \(format.rawValue.uppercased())")
                 .font(.headline)
                 .foregroundStyle(.red)
             Text(error.localizedDescription)
@@ -242,8 +251,89 @@ struct JSONTreePreview: View {
         }
     }
 
+    @ViewBuilder
+    private func minimap(viewport: CGSize) -> some View {
+        // Only show minimap if tree exists and is large enough to benefit from it
+        if let root = treeRoot,
+           layout.size.width > 0,
+           layout.size.height > 0,
+           (canvasSize.width > viewport.width * 1.5 || canvasSize.height > viewport.height * 1.5) {
+
+            let minimapWidth: CGFloat = 120
+            let minimapHeight: CGFloat = min(viewport.height * 0.7, 400)
+            let minimapScale = min(minimapWidth / canvasSize.width, minimapHeight / canvasSize.height)
+
+        VStack(spacing: 0) {
+            ZStack(alignment: .topLeading) {
+                // Minimap content - simplified rendering
+                Rectangle()
+                    .fill(Color.white.opacity(0.05))
+                    .frame(width: canvasSize.width * minimapScale, height: canvasSize.height * minimapScale)
+
+                // Viewport indicator rectangle
+                if viewport.width > 0, viewport.height > 0 {
+                    let visibleRect = calculateVisibleRect(viewport: viewport, minimapScale: minimapScale)
+                    Rectangle()
+                        .stroke(Theme.purple, lineWidth: 2)
+                        .fill(Theme.purple.opacity(0.15))
+                        .frame(width: visibleRect.width, height: visibleRect.height)
+                        .offset(x: visibleRect.minX, y: visibleRect.minY)
+                }
+            }
+            .frame(width: minimapWidth, height: minimapHeight)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.black.opacity(0.5))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Theme.purple.opacity(0.3), lineWidth: 1)
+                    )
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { value in
+                        handleMinimapDrag(at: value.location, minimapScale: minimapScale, viewport: viewport)
+                    }
+            )
+        }
+        }
+    }
+
+    private func calculateVisibleRect(viewport: CGSize, minimapScale: CGFloat) -> CGRect {
+        let scaledCanvasWidth = canvasSize.width * zoomScale
+        let scaledCanvasHeight = canvasSize.height * zoomScale
+
+        // Calculate what portion of the canvas is visible in the viewport
+        let visibleX = -contentOffset.width / zoomScale
+        let visibleY = -contentOffset.height / zoomScale
+        let visibleWidth = viewport.width / zoomScale
+        let visibleHeight = viewport.height / zoomScale
+
+        // Scale these coordinates to minimap space
+        return CGRect(
+            x: visibleX * minimapScale,
+            y: visibleY * minimapScale,
+            width: visibleWidth * minimapScale,
+            height: visibleHeight * minimapScale
+        )
+    }
+
+    private func handleMinimapDrag(at location: CGPoint, minimapScale: CGFloat, viewport: CGSize) {
+        // Convert minimap coordinates to canvas coordinates
+        let canvasX = location.x / minimapScale
+        let canvasY = location.y / minimapScale
+
+        // Center the viewport on this point
+        let newOffsetX = -(canvasX * zoomScale) + viewport.width / 2
+        let newOffsetY = -(canvasY * zoomScale) + viewport.height / 2
+
+        shouldCenterTree = false
+        contentOffset = CGSize(width: newOffsetX, height: newOffsetY)
+    }
+
     private func parseContent() {
-        let result = JSONTreeParser.parse(content: content, rootName: fileName)
+        let result = JSONTreeParser.parse(content: content, rootName: fileName, format: format)
         switch result {
         case .success(let root):
             treeRoot = root
@@ -495,13 +585,21 @@ struct JSONTreePreview: View {
 
 
 private enum JSONTreeParser {
-    static func parse(content: String, rootName: String) -> Result<JSONTreeGraphNode, Error> {
+    static func parse(content: String, rootName: String, format: SavedFileFormat = .json) -> Result<JSONTreeGraphNode, Error> {
         guard let data = content.data(using: .utf8) else {
             return .failure(NSError(domain: "JSONTree", code: 1, userInfo: [NSLocalizedDescriptionKey: "Content is not UTF-8 encodable"]))
         }
+
+        let parsedObject: Any
         do {
-            let json = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
-            let node = buildNode(name: rootName.isEmpty ? "ROOT" : rootName, value: json)
+            switch format {
+            case .json:
+                parsedObject = try JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed])
+            case .yaml:
+                parsedObject = try Yams.load(yaml: content) ?? NSNull()
+            }
+
+            let node = buildNode(name: rootName.isEmpty ? "ROOT" : rootName, value: parsedObject)
             return .success(node)
         } catch {
             return .failure(error)

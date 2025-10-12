@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		3C779ED12E9BD81900A7E78A /* Yams in Frameworks */ = {isa = PBXBuildFile; productRef = 3C779ED02E9BD81900A7E78A /* Yams */; };
 		3CE5C49E2E8E9BEE007A7FEB /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = 3CE5C49D2E8E9BEE007A7FEB /* MarkdownUI */; };
 		3CE5C6D72E8FE7AF007A7FEB /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = 3CE5C6D62E8FE7AF007A7FEB /* MarkdownUI */; };
 		3CE5C8E42E8FE9D1007A7FEB /* MarkdownUI in Frameworks */ = {isa = PBXBuildFile; productRef = 3CE5C8E32E8FE9D1007A7FEB /* MarkdownUI */; };
@@ -120,6 +121,7 @@
 			files = (
 				3CE5C8E42E8FE9D1007A7FEB /* MarkdownUI in Frameworks */,
 				3CE5C6D72E8FE7AF007A7FEB /* MarkdownUI in Frameworks */,
+				3C779ED12E9BD81900A7E78A /* Yams in Frameworks */,
 				3CE5C49E2E8E9BEE007A7FEB /* MarkdownUI in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -174,6 +176,7 @@
 				3CE5C49D2E8E9BEE007A7FEB /* MarkdownUI */,
 				3CE5C6D62E8FE7AF007A7FEB /* MarkdownUI */,
 				3CE5C8E32E8FE9D1007A7FEB /* MarkdownUI */,
+				3C779ED02E9BD81900A7E78A /* Yams */,
 			);
 			productName = SQLMaestro;
 			productReference = 3CE5BBF82E8E94A5007A7FEB /* SQLMaestro.app */;
@@ -205,6 +208,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				3CE5C8E22E8FE9D1007A7FEB /* XCLocalSwiftPackageReference "SQLMaestro/ThirdParty/MarkdownUI/swift-markdown-ui-main" */,
+				3C779ECF2E9BD81900A7E78A /* XCRemoteSwiftPackageReference "Yams" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 3C3149C12E744E3F00762156 /* Products */;
@@ -452,7 +456,23 @@
 		};
 /* End XCLocalSwiftPackageReference section */
 
+/* Begin XCRemoteSwiftPackageReference section */
+		3C779ECF2E9BD81900A7E78A /* XCRemoteSwiftPackageReference "Yams" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/jpsim/Yams.git";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 6.2.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
 /* Begin XCSwiftPackageProductDependency section */
+		3C779ED02E9BD81900A7E78A /* Yams */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 3C779ECF2E9BD81900A7E78A /* XCRemoteSwiftPackageReference "Yams" */;
+			productName = Yams;
+		};
 		3CE5C49D2E8E9BEE007A7FEB /* MarkdownUI */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = MarkdownUI;

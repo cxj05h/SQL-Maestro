@@ -281,6 +281,7 @@ struct SavedFileTreePreviewContext: Identifiable {
     let id = UUID()
     let fileName: String
     let content: String
+    let format: SavedFileFormat
 }
 
 // MARK: - Temporary Shims (compile-time stand-ins)
@@ -1774,7 +1775,7 @@ struct ContentView: View {
 
     @ViewBuilder
     private func savedFileTreePreviewSheet(_ preview: SavedFileTreePreviewContext) -> some View {
-        JSONTreePreview(fileName: preview.fileName, content: preview.content)
+        JSONTreePreview(fileName: preview.fileName, content: preview.content, format: preview.format)
             .frame(minWidth: 720, minHeight: 540)
             .background(
                 SheetWindowConfigurator(
@@ -3628,8 +3629,11 @@ struct ContentView: View {
             if let value = savedFileValidation[session]?[fileId] {
                 return value
             }
+            guard let file = savedFiles(for: session).first(where: { $0.id == fileId }) else {
+                return .invalid("File not found")
+            }
             let draft = savedFileDraft(for: session, fileId: fileId)
-            let validation = validateJSON(draft)
+            let validation = validateSavedFile(draft, format: file.format)
             var validations = savedFileValidation[session] ?? [:]
             validations[fileId] = validation
             savedFileValidation[session] = validations
@@ -3662,7 +3666,7 @@ struct ContentView: View {
                     hydratedCount += 1
                 }
                 let current = drafts[file.id] ?? file.content
-                validations[file.id] = validateJSON(current)
+                validations[file.id] = validateSavedFile(current, format: file.format)
             }
 
             var removedCount = 0
@@ -3693,23 +3697,44 @@ struct ContentView: View {
 
         private func addSavedFile(for session: TicketSession) {
             ensureSavedFileState(for: session)
+
+            // First, prompt for format selection
+            let formatAlert = NSAlert()
+            formatAlert.messageText = "Choose File Format"
+            formatAlert.informativeText = "Select the format for your new saved file:"
+            formatAlert.alertStyle = .informational
+            formatAlert.addButton(withTitle: "JSON")
+            formatAlert.addButton(withTitle: "YAML")
+            formatAlert.addButton(withTitle: "Cancel")
+
+            let formatResult = runAlertWithFix(formatAlert)
+            guard formatResult != .alertThirdButtonReturn else {
+                LOG("Saved file creation cancelled at format selection", ctx: ["session": "\(session.rawValue)"])
+                return
+            }
+
+            let selectedFormat: SavedFileFormat = formatResult == .alertFirstButtonReturn ? .json : .yaml
+
+            // Then, prompt for filename
             let defaultName = sessions.generateDefaultFileName(for: session)
-            let message = "Enter a name for the new JSON file. '.json' will be added automatically."
+            let extensionText = selectedFormat == .json ? ".json" : ".yaml"
+            let message = "Enter a name for the new \(selectedFormat.rawValue.uppercased()) file. '\(extensionText)' will be added automatically."
             guard let rawInput = promptForString(
                 title: "New Saved File",
                 message: message,
                 defaultValue: defaultName
             ) else {
-                LOG("Saved file creation cancelled", ctx: ["session": "\(session.rawValue)"])
+                LOG("Saved file creation cancelled at name entry", ctx: ["session": "\(session.rawValue)"])
                 return
             }
+
             let provided = rawInput.trimmingCharacters(in: .whitespacesAndNewlines)
             let finalName = provided.isEmpty ? defaultName : provided
-            let file = sessions.addSavedFile(name: finalName, for: session)
+            let file = sessions.addSavedFile(name: finalName, format: selectedFormat, for: session)
             ensureSavedFileState(for: session)
             setSavedFileSelection(file.id, for: session)
             sessionNotesMode[session] = .savedFiles
-            LOG("Saved file added", ctx: ["session": "\(session.rawValue)", "file": file.displayName])
+            LOG("Saved file added", ctx: ["session": "\(session.rawValue)", "file": file.displayName, "format": selectedFormat.rawValue])
         }
 
         private func removeSavedFile(_ fileId: UUID, in session: TicketSession) {
@@ -3750,8 +3775,8 @@ struct ContentView: View {
         private func presentTreeView(for fileId: UUID, session: TicketSession) {
             guard let file = savedFiles(for: session).first(where: { $0.id == fileId }) else { return }
             let content = savedFileDraft(for: session, fileId: fileId)
-            savedFileTreePreview = SavedFileTreePreviewContext(fileName: file.displayName, content: content)
-            LOG("Saved file tree preview", ctx: ["session": "\(session.rawValue)", "file": file.displayName])
+            savedFileTreePreview = SavedFileTreePreviewContext(fileName: file.displayName, content: content, format: file.format)
+            LOG("Saved file tree preview", ctx: ["session": "\(session.rawValue)", "file": file.displayName, "format": file.format.rawValue])
         }
 
         private func setSavedFileDraft(_ value: String,
@@ -3776,9 +3801,10 @@ struct ContentView: View {
 
             var drafts = savedFileDrafts[session] ?? [:]
             let previous = drafts[targetId] ?? savedFiles(for: session).first(where: { $0.id == targetId })?.content ?? ""
+            guard let file = savedFiles(for: session).first(where: { $0.id == targetId }) else { return }
             if previous == value {
                 var validations = savedFileValidation[session] ?? [:]
-                validations[targetId] = validateJSON(value)
+                validations[targetId] = validateSavedFile(value, format: file.format)
                 savedFileValidation[session] = validations
                 return
             }
@@ -3786,7 +3812,7 @@ struct ContentView: View {
             savedFileDrafts[session] = drafts
 
             var validations = savedFileValidation[session] ?? [:]
-            let validation = validateJSON(value)
+            let validation = validateSavedFile(value, format: file.format)
             validations[targetId] = validation
             savedFileValidation[session] = validations
 
@@ -3852,6 +3878,16 @@ struct ContentView: View {
                 return .valid
             } catch {
                 return .invalid(error.localizedDescription)
+            }
+        }
+
+        private func validateSavedFile(_ text: String, format: SavedFileFormat) -> JSONValidationState {
+            let result = SavedFileParser.validate(text, as: format)
+            switch result {
+            case .valid:
+                return .valid
+            case .invalid(let message):
+                return .invalid(message)
             }
         }
 
@@ -7543,13 +7579,15 @@ struct ContentView: View {
                 let id: UUID
                 let name: String
                 let content: String
+                let format: SavedFileFormat
                 let createdAt: Date?
                 let updatedAt: Date?
 
-                init(id: UUID = UUID(), name: String, content: String, createdAt: Date? = nil, updatedAt: Date? = nil) {
+                init(id: UUID = UUID(), name: String, content: String, format: SavedFileFormat = .json, createdAt: Date? = nil, updatedAt: Date? = nil) {
                     self.id = id
                     self.name = name
                     self.content = content
+                    self.format = format
                     self.createdAt = createdAt
                     self.updatedAt = updatedAt
                 }
@@ -7558,6 +7596,7 @@ struct ContentView: View {
                     case id
                     case name
                     case content
+                    case format
                     case createdAt
                     case updatedAt
                 }
@@ -7567,6 +7606,8 @@ struct ContentView: View {
                     self.id = try container.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
                     self.name = try container.decode(String.self, forKey: .name)
                     self.content = try container.decode(String.self, forKey: .content)
+                    // Default to .json for backward compatibility with old saved sessions
+                    self.format = try container.decodeIfPresent(SavedFileFormat.self, forKey: .format) ?? .json
                     self.createdAt = try container.decodeIfPresent(Date.self, forKey: .createdAt)
                     self.updatedAt = try container.decodeIfPresent(Date.self, forKey: .updatedAt)
                 }
@@ -7804,6 +7845,7 @@ struct ContentView: View {
                     id: file.id,
                     name: file.name,
                     content: file.content,
+                    format: file.format,
                     createdAt: file.createdAt,
                     updatedAt: file.updatedAt
                 )
@@ -7974,6 +8016,7 @@ struct ContentView: View {
                     id: item.id,
                     name: item.name,
                     content: item.content,
+                    format: item.format,
                     createdAt: item.createdAt ?? Date(),
                     updatedAt: item.updatedAt ?? Date()
                 )
@@ -8006,8 +8049,9 @@ struct ContentView: View {
             for file in snapshot.savedFiles {
                 let base = sanitizeFileName(file.name)
                 var target = directory.appendingPathComponent(base)
-                if target.pathExtension.lowercased() != "json" {
-                    target = target.appendingPathExtension("json")
+                let expectedExtension = file.format.fileExtension
+                if target.pathExtension.lowercased() != expectedExtension {
+                    target = target.appendingPathExtension(expectedExtension)
                 }
                 try file.content.write(to: target, atomically: true, encoding: .utf8)
             }
@@ -8808,6 +8852,7 @@ struct ContentView: View {
                     id: UUID(),
                     name: file.name,
                     content: file.content,
+                    format: file.format,
                     createdAt: file.createdAt,
                     updatedAt: file.updatedAt
                 )
@@ -13007,14 +13052,22 @@ struct ContentView: View {
 
             @ViewBuilder
             private func validationView(for state: JSONValidationState) -> some View {
+                let formatLabel: String = {
+                    guard let selectedID = selectedID,
+                          let file = files.first(where: { $0.id == selectedID }) else {
+                        return "JSON"
+                    }
+                    return file.format.rawValue.uppercased()
+                }()
+
                 switch state {
                 case .valid:
-                    Label("Valid JSON", systemImage: "checkmark.circle.fill")
+                    Label("Valid \(formatLabel)", systemImage: "checkmark.circle.fill")
                         .font(.system(size: fontSize - 2))
                         .foregroundStyle(Theme.accent)
                 case .invalid(let message):
                     VStack(alignment: .leading, spacing: 6) {
-                        Label("Invalid JSON", systemImage: "exclamationmark.triangle.fill")
+                        Label("Invalid \(formatLabel)", systemImage: "exclamationmark.triangle.fill")
                             .font(.system(size: fontSize - 2, weight: .semibold))
                             .foregroundStyle(Color.red)
                         Text(message)
@@ -13027,7 +13080,7 @@ struct ContentView: View {
 
             private var emptyState: some View {
                 VStack(spacing: 12) {
-                    Text("Create a saved JSON file to get started.")
+                    Text("add json or yaml text here")
                         .font(.system(size: fontSize - 1))
                         .foregroundStyle(.secondary)
                     Button {

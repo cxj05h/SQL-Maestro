@@ -17,22 +17,36 @@ struct SessionImage: Identifiable, Codable {
     }
 }
 
+enum SavedFileFormat: String, Codable, Equatable {
+    case json
+    case yaml
+
+    var fileExtension: String {
+        switch self {
+        case .json: return "json"
+        case .yaml: return "yaml"
+        }
+    }
+}
+
 struct SessionSavedFile: Identifiable, Codable, Equatable {
     let id: UUID
     var name: String
     var content: String
+    var format: SavedFileFormat
     var createdAt: Date
     var updatedAt: Date
 
-    init(id: UUID = UUID(), name: String, content: String, createdAt: Date = Date(), updatedAt: Date = Date()) {
+    init(id: UUID = UUID(), name: String, content: String, format: SavedFileFormat = .json, createdAt: Date = Date(), updatedAt: Date = Date()) {
         self.id = id
         self.name = name
         self.content = content
+        self.format = format
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
 
-    var displayName: String { "\(name).json" }
+    var displayName: String { "\(name).\(format.fileExtension)" }
 }
 
 // MARK: – Model for alternate fields
@@ -230,17 +244,28 @@ final class SessionManager: ObservableObject {
         sessionSavedFiles[session] = files
     }
 
-    func addSavedFile(name: String, content: String = "{\n  \"key\": \"value\"\n}\n", for session: TicketSession) -> SessionSavedFile {
+    func addSavedFile(name: String, format: SavedFileFormat, for session: TicketSession) -> SessionSavedFile {
         var files = sessionSavedFiles[session] ?? []
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let normalized = trimmed.isEmpty ? generateDefaultFileName(for: session, existing: files) : resolveDuplicateName(trimmed, within: files)
         let now = Date()
-        let file = SessionSavedFile(name: normalized, content: content, createdAt: now, updatedAt: now)
+
+        // Default content based on format
+        let defaultContent: String
+        switch format {
+        case .json:
+            defaultContent = "{\n  \"key\": \"value\"\n}\n"
+        case .yaml:
+            defaultContent = "# YAML document\nkey: value\n"
+        }
+
+        let file = SessionSavedFile(name: normalized, content: defaultContent, format: format, createdAt: now, updatedAt: now)
         files.append(file)
         sessionSavedFiles[session] = files
         LOG("Saved file created", ctx: [
             "session": "\(session.rawValue)",
-            "file": file.displayName
+            "file": file.displayName,
+            "format": format.rawValue
         ])
         return file
     }
