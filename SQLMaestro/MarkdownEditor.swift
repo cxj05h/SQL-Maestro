@@ -27,6 +27,11 @@ final class MarkdownEditorController: ObservableObject {
     func find(_ query: String) -> Bool {
         coordinator?.find(query) ?? false
     }
+
+    /// Select and scroll to a specific range in the markdown editor
+    func selectAndScrollToRange(offset: Int, length: Int) {
+        coordinator?.selectAndScrollToRange(offset: offset, length: length)
+    }
 }
 
 struct MarkdownEditor: NSViewRepresentable {
@@ -208,6 +213,24 @@ struct MarkdownEditor: NSViewRepresentable {
                 textView.showFindIndicator(for: range)
             }
             return true
+        }
+
+        func selectAndScrollToRange(offset: Int, length: Int) {
+            guard let textView else { return }
+            let nsRange = NSRange(location: offset, length: length)
+
+            // Validate range
+            guard nsRange.location != NSNotFound,
+                  nsRange.location >= 0,
+                  nsRange.location + nsRange.length <= textView.string.count else {
+                return
+            }
+
+            textView.setSelectedRange(nsRange)
+            textView.scrollRangeToVisible(nsRange)
+            if textView.responds(to: #selector(NSTextView.showFindIndicator(for:))) {
+                textView.showFindIndicator(for: nsRange)
+            }
         }
 
         // MARK: NSTextViewDelegate

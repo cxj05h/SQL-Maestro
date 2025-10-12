@@ -1336,6 +1336,9 @@ struct ContentView: View {
     @State private var showTagSearchDialog: Bool = false
     @State private var showGuideNotesSearchDialog: Bool = false
     @State private var guideNotesSearchKeyword: String = ""
+    @State private var guideNotesInPaneSearchQuery: String = ""
+    @State private var guideNotesSearchMatches: [Range<String.Index>] = []
+    @State private var guideNotesCurrentMatchIndex: Int = 0
     @State private var activePopoutPane: PopoutPaneContext? = nil
     @State private var isSidebarVisible: Bool = false
     struct TagExplorerContext: Identifiable {
@@ -3435,6 +3438,149 @@ struct ContentView: View {
                         "chars": "\(templateGuideStore.currentNotes(for: template).count)"
                     ])
                 }
+            }
+        }
+
+        // MARK: - Guide Notes Search
+
+        private func stripMarkdownForSearch(_ text: String) -> String {
+            var result = text
+
+            // Strip image links: ![alt](url)
+            result = result.replacingOccurrences(of: "!\\[([^\\]]*)\\]\\([^\\)]+\\)", with: "$1", options: .regularExpression)
+            // Strip links: [text](url)
+            result = result.replacingOccurrences(of: "\\[([^\\]]*)\\]\\([^\\)]+\\)", with: "$1", options: .regularExpression)
+            // Strip bold: **text** or __text__
+            result = result.replacingOccurrences(of: "\\*\\*([^\\*]+)\\*\\*", with: "$1", options: .regularExpression)
+            result = result.replacingOccurrences(of: "__([^_]+)__", with: "$1", options: .regularExpression)
+            // Strip italic: *text* or _text_
+            result = result.replacingOccurrences(of: "\\*([^\\*]+)\\*", with: "$1", options: .regularExpression)
+            result = result.replacingOccurrences(of: "_([^_]+)_", with: "$1", options: .regularExpression)
+            // Strip inline code: `code`
+            result = result.replacingOccurrences(of: "`([^`]+)`", with: "$1", options: .regularExpression)
+            // Strip headings: # text
+            result = result.replacingOccurrences(of: "^#{1,6}\\s+", with: "", options: .regularExpression)
+            // Strip bullet lists: - text or * text or + text
+            result = result.replacingOccurrences(of: "^\\s*[-*+]\\s+", with: "", options: .regularExpression)
+            // Strip numbered lists: 1. text
+            result = result.replacingOccurrences(of: "^\\s*\\d+\\.\\s+", with: "", options: .regularExpression)
+
+            return result
+        }
+
+        private func updateGuideNotesSearchMatches() {
+            let query = guideNotesInPaneSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            guard !query.isEmpty else {
+                guideNotesSearchMatches = []
+                guideNotesCurrentMatchIndex = 0
+                return
+            }
+
+            // Search in the raw markdown text (case-insensitive)
+            let text = guideNotesDraft.lowercased()
+            let searchText = query.lowercased()
+            var matches: [Range<String.Index>] = []
+            var searchStartIndex = text.startIndex
+
+            while searchStartIndex < text.endIndex,
+                  let range = text.range(of: searchText, range: searchStartIndex..<text.endIndex) {
+                matches.append(range)
+                searchStartIndex = range.upperBound
+            }
+
+            guideNotesSearchMatches = matches
+            guideNotesCurrentMatchIndex = matches.isEmpty ? 0 : 0
+
+            LOG("Guide notes search: updated matches", ctx: [
+                "query": query,
+                "matchCount": "\(matches.count)"
+            ])
+
+            if !matches.isEmpty {
+                scrollToGuideNotesMatch(at: 0)
+            }
+        }
+
+        private func navigateToGuideNotesPreviousMatch() {
+            guard !guideNotesSearchMatches.isEmpty else {
+                LOG("Guide notes search: no matches to navigate")
+                return
+            }
+
+            let oldIndex = guideNotesCurrentMatchIndex
+            guideNotesCurrentMatchIndex = (guideNotesCurrentMatchIndex - 1 + guideNotesSearchMatches.count) % guideNotesSearchMatches.count
+
+            LOG("Guide notes search: navigate previous", ctx: [
+                "oldIndex": "\(oldIndex)",
+                "newIndex": "\(guideNotesCurrentMatchIndex)",
+                "total": "\(guideNotesSearchMatches.count)"
+            ])
+
+            scrollToGuideNotesMatch(at: guideNotesCurrentMatchIndex)
+        }
+
+        private func navigateToGuideNotesNextMatch() {
+            guard !guideNotesSearchMatches.isEmpty else {
+                LOG("Guide notes search: no matches to navigate")
+                return
+            }
+
+            let oldIndex = guideNotesCurrentMatchIndex
+            guideNotesCurrentMatchIndex = (guideNotesCurrentMatchIndex + 1) % guideNotesSearchMatches.count
+
+            LOG("Guide notes search: navigate next", ctx: [
+                "oldIndex": "\(oldIndex)",
+                "newIndex": "\(guideNotesCurrentMatchIndex)",
+                "total": "\(guideNotesSearchMatches.count)"
+            ])
+
+            scrollToGuideNotesMatch(at: guideNotesCurrentMatchIndex)
+        }
+
+        private func scrollToGuideNotesMatch(at index: Int) {
+            guard index >= 0 && index < guideNotesSearchMatches.count else {
+                LOG("Guide notes search: invalid index", ctx: ["index": "\(index)", "total": "\(guideNotesSearchMatches.count)"])
+                return
+            }
+            guard !guideNotesInPaneSearchQuery.isEmpty else {
+                LOG("Guide notes search: empty query")
+                return
+            }
+
+            // Get the specific match range
+            let matchRange = guideNotesSearchMatches[index]
+
+            // Convert String.Index to Int offset for NSRange
+            let offset = guideNotesDraft.distance(from: guideNotesDraft.startIndex, to: matchRange.lowerBound)
+            let length = guideNotesDraft.distance(from: matchRange.lowerBound, to: matchRange.upperBound)
+
+            LOG("Guide notes search: scrolling to match", ctx: [
+                "index": "\(index + 1)",
+                "total": "\(guideNotesSearchMatches.count)",
+                "offset": "\(offset)",
+                "length": "\(length)",
+                "query": guideNotesInPaneSearchQuery
+            ])
+
+            // Manually select and scroll to the specific range in the editor
+            DispatchQueue.main.async { [self] in
+                guideNotesEditor.selectAndScrollToRange(offset: offset, length: length)
+            }
+        }
+
+        private func handleGuideNotesSearchEnter() {
+            guard !guideNotesInPaneSearchQuery.isEmpty else { return }
+
+            // If in preview mode, switch to edit mode first
+            if isPreviewMode {
+                setPreviewMode(false)
+                LOG("Guide notes search: switched to edit mode on Enter")
+            }
+
+            // Navigate to next match (or first match if just switched modes)
+            if !guideNotesSearchMatches.isEmpty {
+                navigateToGuideNotesNextMatch()
             }
         }
 
@@ -5657,6 +5803,16 @@ struct ContentView: View {
                         set: { setPreviewMode($0) }
                     ))
 
+                    InPaneSearchBar(
+                        searchQuery: $guideNotesInPaneSearchQuery,
+                        matchCount: guideNotesSearchMatches.count,
+                        currentMatchIndex: guideNotesCurrentMatchIndex,
+                        onPrevious: { navigateToGuideNotesPreviousMatch() },
+                        onNext: { navigateToGuideNotesNextMatch() },
+                        onEnter: { handleGuideNotesSearchEnter() },
+                        fontSize: fontSize
+                    )
+
                     Spacer(minLength: 12)
 
                     if guideDirty {
@@ -6057,6 +6213,20 @@ struct ContentView: View {
             guideNotesContent
                 .frame(maxWidth: .infinity, alignment: .top)
                 .frame(minHeight: bottomPaneEditorMinHeight, alignment: .top)
+                .onChange(of: guideNotesInPaneSearchQuery) { _, _ in
+                    updateGuideNotesSearchMatches()
+                }
+                .onChange(of: guideNotesDraft) { _, _ in
+                    if !guideNotesInPaneSearchQuery.isEmpty {
+                        updateGuideNotesSearchMatches()
+                    }
+                }
+                .onChange(of: selectedTemplate?.id) { _, _ in
+                    // Clear search when switching templates
+                    guideNotesInPaneSearchQuery = ""
+                    guideNotesSearchMatches = []
+                    guideNotesCurrentMatchIndex = 0
+                }
         }
 
         @ViewBuilder
@@ -12260,6 +12430,83 @@ struct ContentView: View {
                     Capsule()
                         .stroke(Theme.purple.opacity(isActive ? 1.0 : 0.6), lineWidth: 1)
                 )
+        }
+    }
+
+    struct InPaneSearchBar: View {
+        @Binding var searchQuery: String
+        var matchCount: Int
+        var currentMatchIndex: Int
+        var onPrevious: () -> Void
+        var onNext: () -> Void
+        var onEnter: () -> Void
+        var fontSize: CGFloat
+
+        @FocusState private var isSearchFocused: Bool
+
+        var body: some View {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: fontSize - 1, weight: .medium))
+                    .foregroundStyle(Theme.purple.opacity(0.7))
+
+                TextField("Search...", text: $searchQuery)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: fontSize - 2))
+                    .frame(width: 120)
+                    .submitLabel(.search)
+                    .focused($isSearchFocused)
+                    .onSubmit {
+                        onEnter()
+                        // Refocus the search field after Enter is pressed
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                            isSearchFocused = true
+                        }
+                    }
+
+                if !searchQuery.isEmpty {
+                    if matchCount > 0 {
+                        Text("\(currentMatchIndex + 1) of \(matchCount)")
+                            .font(.system(size: fontSize - 3, weight: .medium))
+                            .foregroundStyle(.secondary)
+
+                        Button(action: onPrevious) {
+                            Image(systemName: "chevron.up")
+                                .font(.system(size: fontSize - 3, weight: .semibold))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(matchCount == 0)
+
+                        Button(action: onNext) {
+                            Image(systemName: "chevron.down")
+                                .font(.system(size: fontSize - 3, weight: .semibold))
+                        }
+                        .buttonStyle(.plain)
+                        .disabled(matchCount == 0)
+                    } else {
+                        Text("No matches")
+                            .font(.system(size: fontSize - 3, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Button(action: { searchQuery = "" }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: fontSize - 2))
+                            .foregroundStyle(.secondary)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Theme.grayBG.opacity(0.35))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
+                    )
+            )
         }
     }
 
