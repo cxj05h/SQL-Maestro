@@ -1602,18 +1602,22 @@ struct ContentView: View {
             guard isActiveTab else { return }
             attemptClearCurrentSession()
         }
+        .registerShortcut(name: "Clear Session", keyLabel: "K", modifiers: [.command, .shift], scope: "Session")
         .onReceive(NotificationCenter.default.publisher(for: .switchToSession1Requested)) { _ in
             guard isActiveTab else { return }
             switchToSession(.one)
         }
+        .registerShortcut(name: "Switch to Session #1", keyLabel: "1", modifiers: [.control], scope: "Session")
         .onReceive(NotificationCenter.default.publisher(for: .switchToSession2Requested)) { _ in
             guard isActiveTab else { return }
             switchToSession(.two)
         }
+        .registerShortcut(name: "Switch to Session #2", keyLabel: "2", modifiers: [.control], scope: "Session")
         .onReceive(NotificationCenter.default.publisher(for: .switchToSession3Requested)) { _ in
             guard isActiveTab else { return }
             switchToSession(.three)
         }
+        .registerShortcut(name: "Switch to Session #3", keyLabel: "3", modifiers: [.control], scope: "Session")
         .sheet(isPresented: $showBeginCaptureSheet) {
             BeginCaptureSheet(orgValue: $beginOrgDraft,
                               acctValue: $beginAcctDraft,
