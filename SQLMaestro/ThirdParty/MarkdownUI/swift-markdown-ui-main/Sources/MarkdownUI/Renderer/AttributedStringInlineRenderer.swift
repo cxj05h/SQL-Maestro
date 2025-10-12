@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 
 extension InlineNode {
   func renderAttributedString(
@@ -145,6 +146,16 @@ private struct AttributedStringInlineRenderer {
     let savedAttributes = self.attributes
     self.attributes = self.textStyles.link.mergingAttributes(self.attributes)
     self.attributes.link = URL(string: destination, relativeTo: self.baseURL)
+
+    // Apply conditional coloring based on URL extension
+    let lowercaseDestination = destination.lowercased()
+    if lowercaseDestination.hasSuffix(".png") {
+      // Pink color for image links (#EF44C0)
+      self.attributes.foregroundColor = Color(red: 0xEF/255.0, green: 0x44/255.0, blue: 0xC0/255.0)
+    } else {
+      // Aqua color for regular links (#7DD3C0)
+      self.attributes.foregroundColor = Color(red: 0x7D/255.0, green: 0xD3/255.0, blue: 0xC0/255.0)
+    }
 
     for child in children {
       self.render(child)
