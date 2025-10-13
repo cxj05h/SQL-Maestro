@@ -254,6 +254,7 @@ enum PopoutPaneContext: Identifiable {
     case guide
     case session(TicketSession)
     case saved(TicketSession)
+    case sessionTemplate(TicketSession)
 
     var id: String {
         switch self {
@@ -263,6 +264,8 @@ enum PopoutPaneContext: Identifiable {
             return "session-\(session.rawValue)"
         case .saved(let session):
             return "saved-\(session.rawValue)"
+        case .sessionTemplate(let session):
+            return "sessionTemplate-\(session.rawValue)"
         }
     }
 }
@@ -1787,11 +1790,72 @@ struct ContentView: View {
     }
 
     private func popoutSheet(for pane: PopoutPaneContext) -> some View {
+        // Handle sessionTemplate separately with its own sheet
+        if case .sessionTemplate(let session) = pane {
+            return AnyView(SessionTemplatePopoutSheet(
+                fontSize: fontSize,
+                session: session,
+                selectedTab: $selectedSessionTemplateTab,
+                sessions: sessions,
+                templateGuideStore: templateGuideStore,
+                templateLinksStore: templateLinksStore,
+                selectedTemplate: selectedTemplate,
+                onClose: {
+                    activePopoutPane = nil
+                },
+                onImagePreview: { image in
+                    // Close popout before showing preview
+                    activePopoutPane = nil
+                    // Show image preview
+                    if let sessionImg = image as? SessionImage {
+                        previewingSessionImage = sessionImg
+                    } else if let context = image as? GuideImagePreviewContext {
+                        previewingGuideImageContext = context
+                    }
+                },
+                onImagePreviewClose: {
+                    // Reopen the popout after preview closes
+                    if case .sessionTemplate = pane {
+                        activePopoutPane = .sessionTemplate(session)
+                    }
+                },
+                onSessionImageDelete: { image in
+                    deleteSessionImage(image)
+                },
+                onSessionImageRename: { image in
+                    renameSessionImage(image)
+                },
+                onSessionImagePaste: {
+                    handleImagePaste()
+                },
+                onGuideImageDelete: { image in
+                    deleteGuideImage(image)
+                },
+                onGuideImageRename: { image in
+                    renameGuideImage(image)
+                },
+                onGuideImageOpen: { image in
+                    openGuideImage(image)
+                },
+                onGuideImagePaste: {
+                    handleGuideImagePaste()
+                },
+                onTemplateLinkHover: { linkId in
+                    hoveredTemplateLinkID = linkId
+                },
+                onTemplateLinkOpen: { link in
+                    openTemplateLink(link)
+                }
+            ))
+        }
+
         let targetSession: TicketSession
         switch pane {
         case .guide:
             targetSession = sessions.current
         case .session(let session), .saved(let session):
+            targetSession = session
+        case .sessionTemplate(let session):
             targetSession = session
         }
 
@@ -1809,7 +1873,7 @@ struct ContentView: View {
             }
         )
 
-        return PanePopoutSheet(
+        return AnyView(PanePopoutSheet(
             pane: pane,
             fontSize: fontSize,
             editorMinHeight: bottomPaneEditorMinHeight,
@@ -1896,7 +1960,7 @@ struct ContentView: View {
                 activePopoutPane = nil
             },
             onTogglePreview: togglePreviewShortcut
-        )
+        ))
     }
 
     private var hardStopTitleRow: some View {
@@ -5196,9 +5260,20 @@ struct ContentView: View {
             let maxPaneHeight = max(220, fontSize * 11)
 
             return VStack(alignment: .leading, spacing: 6) {
-                Text("Session & Template")
-                    .font(.system(size: fontSize + 1, weight: .semibold))
-                    .foregroundStyle(Theme.purple)
+                HStack(alignment: .center, spacing: 8) {
+                    Text("Session & Template")
+                        .font(.system(size: fontSize + 1, weight: .semibold))
+                        .foregroundStyle(Theme.purple)
+
+                    Button("Pop Out") {
+                        triggerSessionTemplatePopOut()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.accent)
+                    .font(.system(size: fontSize - 1))
+
+                    Spacer()
+                }
 
                 Picker("Tab", selection: $selectedSessionTemplateTab) {
                     Text("Ses. Images").tag(SessionTemplateTab.sessionImages)
@@ -6484,6 +6559,10 @@ struct ContentView: View {
                 sessionNotesMode[activeSession] = .savedFiles
                 activePopoutPane = .saved(activeSession)
             }
+        }
+
+        private func triggerSessionTemplatePopOut() {
+            activePopoutPane = .sessionTemplate(sessions.current)
         }
 
         @ViewBuilder
@@ -13470,6 +13549,8 @@ struct ContentView: View {
                             .font(.system(size: fontSize - 1, weight: .medium))
                             .foregroundStyle(.secondary)
                     }
+                case .sessionTemplate:
+                    EmptyView() // This case is handled separately in popoutSheet
                 }
 
                 Spacer()
@@ -13579,6 +13660,8 @@ struct ContentView: View {
                 .overlay(
                     KeyboardShortcutOverlay(onTrigger: onTogglePreview)
                 )
+            case .sessionTemplate:
+                EmptyView() // This case is handled separately in popoutSheet
             }
         }
 
@@ -13651,6 +13734,8 @@ struct ContentView: View {
                 return CGSize(width: 940, height: 700)
             case .saved:
                 return CGSize(width: 940, height: 700)
+            case .sessionTemplate:
+                return CGSize(width: 900, height: 700)
             }
         }
 
@@ -13662,7 +13747,331 @@ struct ContentView: View {
                 return "SessionPanePopoutSize"
             case .saved:
                 return "SavedFilesPanePopoutSize"
+            case .sessionTemplate:
+                return "SessionTemplatePanePopoutSize"
             }
+        }
+    }
+
+    // MARK: – Session & Template Pane Popout
+    struct SessionTemplatePopoutSheet: View {
+        var fontSize: CGFloat
+        var session: TicketSession
+        @Binding var selectedTab: SessionTemplateTab
+        @ObservedObject var sessions: SessionManager
+        @ObservedObject var templateGuideStore: TemplateGuideStore
+        @ObservedObject var templateLinksStore: TemplateLinksStore
+        var selectedTemplate: TemplateItem?
+        let onClose: () -> Void
+        let onImagePreview: (Any) -> Void
+        let onImagePreviewClose: () -> Void
+        let onSessionImageDelete: (SessionImage) -> Void
+        let onSessionImageRename: (SessionImage) -> Void
+        let onSessionImagePaste: () -> Void
+        let onGuideImageDelete: (TemplateGuideImage) -> Void
+        let onGuideImageRename: (TemplateGuideImage) -> Void
+        let onGuideImageOpen: (TemplateGuideImage) -> Void
+        let onGuideImagePaste: () -> Void
+        let onTemplateLinkHover: (UUID?) -> Void
+        let onTemplateLinkOpen: (TemplateLink) -> Void
+
+        @State private var shouldReopenAfterPreview = false
+
+        var body: some View {
+            VStack(alignment: .leading, spacing: 18) {
+                header
+                content
+            }
+            .padding(20)
+            .frame(minWidth: 800, minHeight: 600)
+            .background(
+                SheetWindowConfigurator(
+                    minSize: CGSize(width: 800, height: 600),
+                    preferredSize: CGSize(width: 900, height: 700),
+                    sizeStorageKey: "SessionTemplatePanePopoutSize"
+                )
+            )
+            .onDisappear {
+                if shouldReopenAfterPreview {
+                    shouldReopenAfterPreview = false
+                    onImagePreviewClose()
+                } else {
+                    onClose()
+                }
+            }
+        }
+
+        @ViewBuilder
+        private var header: some View {
+            HStack(alignment: .center, spacing: 12) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Session & Template")
+                        .font(.system(size: fontSize + 4, weight: .semibold))
+                        .foregroundStyle(Theme.purple)
+                    Text("Session #\(session.rawValue)")
+                        .font(.system(size: fontSize - 1, weight: .medium))
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                Button("Close") { onClose() }
+                    .buttonStyle(.bordered)
+                    .font(.system(size: fontSize - 1))
+            }
+        }
+
+        @ViewBuilder
+        private var content: some View {
+            VStack(alignment: .leading, spacing: 12) {
+                Picker("Tab", selection: $selectedTab) {
+                    Text("Ses. Images").tag(SessionTemplateTab.sessionImages)
+                    Text("Guide Images").tag(SessionTemplateTab.guideImages)
+                    Text("Links").tag(SessionTemplateTab.templateLinks)
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Group {
+                    if selectedTab == .sessionImages {
+                        buildSessionImagesView()
+                    } else if selectedTab == .guideImages {
+                        buildGuideImagesView()
+                    } else {
+                        buildLinksView()
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            }
+        }
+
+        @ViewBuilder
+        private func buildSessionImagesView() -> some View {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Session \(session.rawValue) Images")
+                        .font(.system(size: fontSize, weight: .medium))
+                        .foregroundStyle(Theme.purple)
+
+                    Spacer()
+
+                    Button("Paste Screenshot") {
+                        onSessionImagePaste()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.pink)
+                    .font(.system(size: fontSize - 2))
+                }
+
+                let sessionImages = sessions.sessionImages[session] ?? []
+
+                if sessionImages.isEmpty {
+                    VStack {
+                        Image(systemName: "photo.badge.plus")
+                            .font(.system(size: 32))
+                            .foregroundStyle(.secondary.opacity(0.5))
+                        Text("No images yet")
+                            .font(.system(size: fontSize - 1))
+                            .foregroundStyle(.secondary)
+                        Text("Click 'Paste Screenshot' to add images")
+                            .font(.system(size: fontSize - 3))
+                            .foregroundStyle(.secondary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    ScrollView {
+                        LazyVStack(alignment: .leading, spacing: 6) {
+                            ForEach(sessionImages) { image in
+                                SessionImageRow(
+                                    image: image,
+                                    fontSize: fontSize,
+                                    onDelete: { onSessionImageDelete($0) },
+                                    onRename: { onSessionImageRename($0) },
+                                    onPreview: { img in
+                                        shouldReopenAfterPreview = true
+                                        onImagePreview(img)
+                                    }
+                                )
+                            }
+                        }
+                        .padding(4)
+                    }
+                }
+
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Theme.grayBG.opacity(0.25))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
+                    )
+            )
+        }
+
+        @ViewBuilder
+        private func buildGuideImagesView() -> some View {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    if let template = selectedTemplate {
+                        Text("\(template.name) Guide Images")
+                            .font(.system(size: fontSize, weight: .medium))
+                            .foregroundStyle(Theme.purple)
+                    } else {
+                        Text("No Template Selected")
+                            .font(.system(size: fontSize, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+
+                    Button("Paste Guide Image") {
+                        onGuideImagePaste()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(Theme.purple)
+                    .font(.system(size: fontSize - 2))
+                    .disabled(selectedTemplate == nil)
+                }
+
+                if let template = selectedTemplate {
+                    let guideImages = templateGuideStore.images(for: template)
+
+                    if guideImages.isEmpty {
+                        VStack {
+                            Image(systemName: "photo")
+                                .font(.system(size: 32))
+                                .foregroundStyle(.secondary.opacity(0.5))
+                            Text("No guide images yet")
+                                .font(.system(size: fontSize - 1))
+                                .foregroundStyle(.secondary)
+                            Text("Paste screenshots to document this template")
+                                .font(.system(size: fontSize - 3))
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 6) {
+                                ForEach(guideImages) { image in
+                                    TemplateGuideImageRow(
+                                        template: template,
+                                        image: image,
+                                        fontSize: fontSize,
+                                        onOpen: { onGuideImageOpen(image) },
+                                        onRename: { onGuideImageRename(image) },
+                                        onDelete: { onGuideImageDelete(image) },
+                                        onPreview: {
+                                            shouldReopenAfterPreview = true
+                                            let context = GuideImagePreviewContext(template: template, image: image)
+                                            onImagePreview(context)
+                                        }
+                                    )
+                                }
+                            }
+                            .padding(4)
+                        }
+                    }
+                } else {
+                    VStack {
+                        Text("Select a template to view its guide images")
+                            .font(.system(size: fontSize - 1))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Theme.grayBG.opacity(0.25))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
+                    )
+            )
+        }
+
+        @ViewBuilder
+        private func buildLinksView() -> some View {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    if let template = selectedTemplate {
+                        Text("\(template.name) Links")
+                            .font(.system(size: fontSize, weight: .medium))
+                            .foregroundStyle(Theme.purple)
+                    } else {
+                        Text("No Template Selected")
+                            .font(.system(size: fontSize, weight: .medium))
+                            .foregroundStyle(.secondary)
+                    }
+
+                    Spacer()
+                }
+
+                if let template = selectedTemplate {
+                    let templateLinks = templateLinksStore.links(for: template)
+
+                    if templateLinks.isEmpty {
+                        VStack {
+                            Image(systemName: "link.badge.plus")
+                                .font(.system(size: 32))
+                                .foregroundStyle(.secondary.opacity(0.5))
+                            Text("No links yet")
+                                .font(.system(size: fontSize - 1))
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    } else {
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 6) {
+                                ForEach(templateLinks) { link in
+                                    TemplateLinkRow(
+                                        link: link,
+                                        fontSize: fontSize,
+                                        onOpen: { onTemplateLinkOpen(link) },
+                                        onEdit: { },
+                                        onDelete: { },
+                                        hoveredLinkID: .constant(nil)
+                                    )
+                                    .onHover { hovering in
+                                        if hovering {
+                                            onTemplateLinkHover(link.id)
+                                        } else {
+                                            onTemplateLinkHover(nil)
+                                        }
+                                    }
+                                }
+                            }
+                            .padding(4)
+                        }
+                    }
+                } else {
+                    VStack {
+                        Text("Select a template to manage its links")
+                            .font(.system(size: fontSize - 1))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                }
+
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Theme.grayBG.opacity(0.25))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
+                    )
+            )
         }
     }
 
