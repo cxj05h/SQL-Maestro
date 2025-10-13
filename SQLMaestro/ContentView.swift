@@ -12917,7 +12917,7 @@ struct ContentView: View {
                         .padding(.top, -20)
                         .padding(.bottom, 8)
 
-                    if let selectedID, files.contains(where: { $0.id == selectedID }) {
+                    if let selectedID, let selectedFile = files.first(where: { $0.id == selectedID }) {
                         let binding = Binding<String>(
                             get: { draftProvider(selectedID) },
                             set: { onContentChange(selectedID, $0) }
@@ -12926,6 +12926,7 @@ struct ContentView: View {
                         JSONEditor(
                             text: binding,
                             fontSize: fontSize * 1.35,
+                            fileType: selectedFile.format,
                             onFocusChanged: onFocusChange,
                             controller: editorController,
                             onFindCommand: {
