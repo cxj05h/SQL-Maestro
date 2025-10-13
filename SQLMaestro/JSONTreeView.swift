@@ -29,10 +29,53 @@ struct JSONTreePreview: View {
     private let canvasInnerPadding: CGFloat = 60
     private let canvasOuterPadding: CGFloat = 28
     private let contentSpacing: CGFloat = 12
+    private let maxTextureSize: CGFloat = 16384  // Metal texture size limit
     private var canvasContentInset: CGFloat { canvasInnerPadding + canvasOuterPadding }
     private var canvasSize: CGSize {
         CGSize(width: layout.size.width + canvasContentInset * 2,
                height: layout.size.height + canvasContentInset * 2)
+    }
+
+    // Compute the effective zoom scale that won't exceed Metal texture limits
+    private var effectiveZoomScale: CGFloat {
+        let baseSize = canvasSize
+        // The actual view size includes the canvas plus padding
+        // Based on the view hierarchy: canvas -> padding(canvasInnerPadding) -> background -> padding(canvasOuterPadding)
+        let totalWidth = baseSize.width + canvasInnerPadding * 2 + canvasOuterPadding * 2
+        let totalHeight = baseSize.height + canvasInnerPadding * 2 + canvasOuterPadding * 2
+
+        // Calculate what the scaled size would be
+        let scaledWidth = totalWidth * zoomScale
+        let scaledHeight = totalHeight * zoomScale
+
+        // ALWAYS log when zoom is between 0.15 and 0.18 to debug
+        if zoomScale >= 0.15 && zoomScale <= 0.18 {
+            print("🔍 ZOOM DEBUG (zoom=\(zoomScale)):")
+            print("   Base canvas size: \(baseSize)")
+            print("   Total size with padding: [\(totalWidth), \(totalHeight)]")
+            print("   Would scale to: [\(scaledWidth), \(scaledHeight)]")
+            print("   Max texture size: \(maxTextureSize)")
+            print("   Exceeds limit? \(scaledWidth > maxTextureSize || scaledHeight > maxTextureSize)")
+        }
+
+        // Debug logging
+        if scaledWidth > maxTextureSize || scaledHeight > maxTextureSize {
+            print("⚠️ ZOOM CLAMPING:")
+            print("   Base canvas size: \(baseSize)")
+            print("   Total size with padding: [\(totalWidth), \(totalHeight)]")
+            print("   Current zoom: \(zoomScale)")
+            print("   Would scale to: [\(scaledWidth), \(scaledHeight)]")
+            print("   Max texture size: \(maxTextureSize)")
+
+            let maxScaleByWidth = maxTextureSize / totalWidth
+            let maxScaleByHeight = maxTextureSize / totalHeight
+            let clampedScale = min(maxScaleByWidth, maxScaleByHeight, zoomScale)
+            print("   Clamping to: \(clampedScale)")
+            print("   Resulting size: [\(totalWidth * clampedScale), \(totalHeight * clampedScale)]")
+            return clampedScale
+        }
+
+        return zoomScale
     }
 
     var body: some View {
@@ -159,35 +202,39 @@ struct JSONTreePreview: View {
                         endPoint: .bottomTrailing
                     )
 
-                    JSONTreeCanvas(
-                        root: root,
-                        layout: layout,
-                        highlightedNodes: highlighted,
-                        contentInset: canvasContentInset
-                    )
-                    .padding(canvasInnerPadding)
-                    .background(
-                        RoundedRectangle(cornerRadius: 32)
-                            .fill(
-                                LinearGradient(
-                                    colors: [
-                                        Color(red: 0.08, green: 0.09, blue: 0.18),
-                                        Color(red: 0.04, green: 0.05, blue: 0.12)
-                                    ],
-                                    startPoint: .topLeading,
-                                    endPoint: .bottomTrailing
+                    Group {
+                        JSONTreeCanvas(
+                            root: root,
+                            layout: layout,
+                            highlightedNodes: highlighted,
+                            contentInset: canvasContentInset,
+                            zoomScale: effectiveZoomScale
+                        )
+                        .padding(canvasInnerPadding)
+                        .background(
+                            RoundedRectangle(cornerRadius: 32)
+                                .fill(
+                                    LinearGradient(
+                                        colors: [
+                                            Color(red: 0.08, green: 0.09, blue: 0.18),
+                                            Color(red: 0.04, green: 0.05, blue: 0.12)
+                                        ],
+                                        startPoint: .topLeading,
+                                        endPoint: .bottomTrailing
+                                    )
                                 )
-                            )
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 32)
-                                    .stroke(Theme.purple.opacity(0.18), lineWidth: 1.1)
-                            )
-                            .shadow(color: Theme.purple.opacity(0.25), radius: 22, x: 0, y: 18)
-                    )
-                    .padding(canvasOuterPadding)
-                    .scaleEffect(zoomScale, anchor: .topLeading)
+                                .overlay(
+                                    RoundedRectangle(cornerRadius: 32)
+                                        .stroke(Theme.purple.opacity(0.18), lineWidth: 1.1)
+                                )
+                                .shadow(color: Theme.purple.opacity(0.25), radius: 22, x: 0, y: 18)
+                        )
+                        .padding(canvasOuterPadding)
+                    }
+                    .drawingGroup(opaque: false, colorMode: .nonLinear)
+                    .scaleEffect(effectiveZoomScale, anchor: .topLeading)
                     .offset(x: contentOffset.width, y: contentOffset.height)
-                    .animation(nil, value: zoomScale)
+                    .animation(nil, value: effectiveZoomScale)
                     .animation(nil, value: contentOffset)
 
                     ZoomEventCatcher(
@@ -871,15 +918,20 @@ private struct JSONTreeCanvas: View {
     let layout: JSONTreeLayout
     let highlightedNodes: Set<UUID>
     let contentInset: CGFloat
+    let zoomScale: CGFloat
 
     var body: some View {
         let size = layout.size
-        Canvas { context, _ in
-            drawConnections(context: &context)
-            drawNodes(context: &context)
+        // Render canvas at full requested size accounting for zoom
+        let totalWidth = size.width + contentInset * 2
+        let totalHeight = size.height + contentInset * 2
+
+        return Canvas { context, _ in
+            drawConnections(context: &context, scale: 1.0)
+            drawNodes(context: &context, scale: 1.0)
         }
-        .frame(width: size.width + contentInset * 2,
-               height: size.height + contentInset * 2)
+        .frame(width: totalWidth,
+               height: totalHeight)
         .background(
             LinearGradient(
                 colors: [
@@ -897,31 +949,31 @@ private struct JSONTreeCanvas: View {
         )
     }
 
-    private func drawConnections(context: inout GraphicsContext) {
+    private func drawConnections(context: inout GraphicsContext, scale: CGFloat) {
         context.drawLayer { layer in
-            layer.addFilter(.shadow(color: Theme.aqua.opacity(0.25), radius: 12, x: 0, y: 6))
+            layer.addFilter(.shadow(color: Theme.aqua.opacity(0.25), radius: 12 * scale, x: 0, y: 6 * scale))
             for positioned in layout.positionedNodes {
                 guard !positioned.node.children.isEmpty else { continue }
                 let startPoint = positioned.position
                 for child in positioned.node.children {
                     guard let childPoint = layout.position(for: child.id) else { continue }
                     var path = Path()
-                    let start = CGPoint(x: startPoint.x + contentInset,
-                                        y: startPoint.y + contentInset)
+                    let start = CGPoint(x: (startPoint.x + contentInset) * scale,
+                                        y: (startPoint.y + contentInset) * scale)
                     path.move(to: start)
 
                     let distanceX = max(childPoint.x - startPoint.x, 160)
                     let controlOffset = distanceX * 0.45
                     let verticalDelta = childPoint.y - startPoint.y
-                    let end = CGPoint(x: childPoint.x + contentInset,
-                                      y: childPoint.y + contentInset)
+                    let end = CGPoint(x: (childPoint.x + contentInset) * scale,
+                                      y: (childPoint.y + contentInset) * scale)
                     let control1 = CGPoint(
-                        x: start.x + controlOffset,
-                        y: start.y + verticalDelta * 0.18
+                        x: start.x + controlOffset * scale,
+                        y: start.y + verticalDelta * 0.18 * scale
                     )
                     let control2 = CGPoint(
-                        x: end.x - controlOffset,
-                        y: end.y - verticalDelta * 0.18
+                        x: end.x - controlOffset * scale,
+                        y: end.y - verticalDelta * 0.18 * scale
                     )
                     path.addCurve(to: end, control1: control1, control2: control2)
 
@@ -936,21 +988,21 @@ private struct JSONTreeCanvas: View {
                     layer.stroke(
                         path,
                         with: shading,
-                        style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round)
+                        style: StrokeStyle(lineWidth: 1.6 * scale, lineCap: .round, lineJoin: .round)
                     )
                 }
             }
         }
     }
 
-    private func drawNodes(context: inout GraphicsContext) {
+    private func drawNodes(context: inout GraphicsContext, scale: CGFloat) {
         for positioned in layout.positionedNodes {
-            let point = CGPoint(x: positioned.position.x + contentInset,
-                                y: positioned.position.y + contentInset)
+            let point = CGPoint(x: (positioned.position.x + contentInset) * scale,
+                                y: (positioned.position.y + contentInset) * scale)
             let node = positioned.node
 
             let isHighlighted = highlightedNodes.contains(node.id)
-            let radius: CGFloat = isHighlighted ? 8 : 7
+            let radius: CGFloat = (isHighlighted ? 8 : 7) * scale
             let circleRect = CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2)
 
             context.drawLayer { layer in
@@ -960,20 +1012,20 @@ private struct JSONTreeCanvas: View {
                     startRadius: 0,
                     endRadius: radius * 1.8
                 )
-                layer.addFilter(.shadow(color: (isHighlighted ? Theme.gold : Theme.aqua).opacity(0.4), radius: isHighlighted ? 14 : 10, x: 0, y: 0))
+                layer.addFilter(.shadow(color: (isHighlighted ? Theme.gold : Theme.aqua).opacity(0.4), radius: (isHighlighted ? 14 : 10) * scale, x: 0, y: 0))
                 layer.fill(Path(ellipseIn: circleRect), with: gradient)
                 layer.stroke(
                     Path(ellipseIn: circleRect),
                     with: .color(isHighlighted ? Theme.gold : Theme.aqua),
-                    style: StrokeStyle(lineWidth: isHighlighted ? 2.2 : 1.4)
+                    style: StrokeStyle(lineWidth: (isHighlighted ? 2.2 : 1.4) * scale)
                 )
             }
 
             var keyText = AttributedString(node.name)
-            keyText.font = .system(size: 12, weight: .semibold, design: .rounded)
+            keyText.font = .system(size: 12 * scale, weight: .semibold, design: .rounded)
             keyText.foregroundColor = isHighlighted ? Theme.gold : Theme.purple
 
-            let keyPoint = CGPoint(x: point.x + 22, y: point.y - 8)
+            let keyPoint = CGPoint(x: point.x + 22 * scale, y: point.y - 8 * scale)
             context.draw(Text(keyText), at: keyPoint, anchor: .leading)
 
             if let value = node.valueDescription {
@@ -983,34 +1035,34 @@ private struct JSONTreeCanvas: View {
 
                 // For strings, render quotes separately in white for light mode
                 if case .string(let stringValue) = node.kind, isLightMode {
-                    let valuePoint = CGPoint(x: point.x + 22, y: point.y + 14)
+                    let valuePoint = CGPoint(x: point.x + 22 * scale, y: point.y + 14 * scale)
 
                     // Opening quote in white
                     var openQuote = AttributedString("\"")
-                    openQuote.font = .system(size: 12, weight: .regular, design: .monospaced)
+                    openQuote.font = .system(size: 12 * scale, weight: .regular, design: .monospaced)
                     openQuote.foregroundColor = .white
                     context.draw(Text(openQuote), at: valuePoint, anchor: .leading)
 
                     // String content in color
                     var stringText = AttributedString(stringValue)
-                    stringText.font = .system(size: 12, weight: .regular, design: .monospaced)
+                    stringText.font = .system(size: 12 * scale, weight: .regular, design: .monospaced)
                     stringText.foregroundColor = baseColor.opacity(valueOpacity)
-                    let stringPoint = CGPoint(x: valuePoint.x + 7, y: valuePoint.y)
+                    let stringPoint = CGPoint(x: valuePoint.x + 7 * scale, y: valuePoint.y)
                     context.draw(Text(stringText), at: stringPoint, anchor: .leading)
 
                     // Closing quote in white
                     var closeQuote = AttributedString("\"")
-                    closeQuote.font = .system(size: 12, weight: .regular, design: .monospaced)
+                    closeQuote.font = .system(size: 12 * scale, weight: .regular, design: .monospaced)
                     closeQuote.foregroundColor = .white
-                    let quoteOffset = CGFloat(stringValue.count * 7 + 7)
+                    let quoteOffset = CGFloat(stringValue.count * 7 + 7) * scale
                     let closePoint = CGPoint(x: valuePoint.x + quoteOffset, y: valuePoint.y)
                     context.draw(Text(closeQuote), at: closePoint, anchor: .leading)
                 } else {
                     // For non-strings or dark mode, render as before
                     var valueText = AttributedString(value)
-                    valueText.font = .system(size: 12, weight: .regular, design: .monospaced)
+                    valueText.font = .system(size: 12 * scale, weight: .regular, design: .monospaced)
                     valueText.foregroundColor = baseColor.opacity(valueOpacity)
-                    let valuePoint = CGPoint(x: point.x + 22, y: point.y + 14)
+                    let valuePoint = CGPoint(x: point.x + 22 * scale, y: point.y + 14 * scale)
                     context.draw(Text(valueText), at: valuePoint, anchor: .leading)
                 }
             }
