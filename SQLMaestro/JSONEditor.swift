@@ -51,6 +51,7 @@ struct JSONEditor: NSViewRepresentable {
         textView.isHorizontallyResizable = false
         textView.autoresizingMask = [.width]
         textView.textContainer?.widthTracksTextView = true
+        textView.textContainer?.lineFragmentPadding = 5
         textView.backgroundColor = .clear
         textView.drawsBackground = false
         textView.delegate = context.coordinator
@@ -67,6 +68,14 @@ struct JSONEditor: NSViewRepresentable {
         scrollView.hasHorizontalScroller = false
         scrollView.autohidesScrollers = true
         scrollView.scrollerStyle = .overlay
+
+        // Add line numbers BEFORE setting documentView
+        scrollView.hasVerticalRuler = true
+        scrollView.rulersVisible = true
+        let lineNumberView = LineNumberRulerView(textView: textView)
+        scrollView.verticalRulerView = lineNumberView
+
+        // Set documentView after ruler is configured
         scrollView.documentView = textView
 
         scrollView.setContentHuggingPriority(.init(1), for: .vertical)
