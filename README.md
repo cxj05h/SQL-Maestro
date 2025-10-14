@@ -387,7 +387,7 @@ Each panel can be accessed via the Sidebar or KB shortcuts:
 
 ![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/sessionnotespanel.png)
 
-![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/savefilespanel.png)
+![Session Editor Screenshot](SQLMaestro/images/Maestro-Screenshots/savedfilespanel.png)
 
 **Panel Features**
 - Panels open inline by default in the main window
