@@ -905,7 +905,7 @@ private final class MarkdownLayoutManager: NSLayoutManager {
         }
 
         override func keyDown(with event: NSEvent) {
-            // Handle backtick for inline code / code block formatting
+            // Handle backtick for inline code / code block formatting without interfering with other navigation
             if let characters = event.characters,
                characters == "`",
                !event.modifierFlags.contains(.command),
@@ -915,46 +915,141 @@ private final class MarkdownLayoutManager: NSLayoutManager {
                     return
                 }
             }
+            super.keyDown(with: event)
+        }
 
-            // Handle Option+Arrow keys for word/paragraph navigation
-            if event.modifierFlags.contains(.option) {
-                let shift = event.modifierFlags.contains(.shift)
+        override func moveWordLeft(_ sender: Any?) {
+            moveToWordBoundary(forward: false, extendSelection: false)
+        }
 
-                switch Int(event.keyCode) {
-                case 123: // Left arrow
-                    if shift {
-                        moveWordBackwardAndModifySelection(nil)
-                    } else {
-                        moveWordBackward(nil)
-                    }
-                    return
-                case 124: // Right arrow
-                    if shift {
-                        moveWordForwardAndModifySelection(nil)
-                    } else {
-                        moveWordForward(nil)
-                    }
-                    return
-                case 125: // Down arrow
-                    if shift {
-                        moveToEndOfParagraphAndModifySelection(nil)
-                    } else {
-                        moveToEndOfParagraph(nil)
-                    }
-                    return
-                case 126: // Up arrow
-                    if shift {
-                        moveToBeginningOfParagraphAndModifySelection(nil)
-                    } else {
-                        moveToBeginningOfParagraph(nil)
-                    }
-                    return
-                default:
-                    break
-                }
+        override func moveWordLeftAndModifySelection(_ sender: Any?) {
+            moveToWordBoundary(forward: false, extendSelection: true)
+        }
+
+        override func moveWordRight(_ sender: Any?) {
+            moveToWordBoundary(forward: true, extendSelection: false)
+        }
+
+        override func moveWordRightAndModifySelection(_ sender: Any?) {
+            moveToWordBoundary(forward: true, extendSelection: true)
+        }
+
+        // MARK: - Word Boundary Navigation
+
+        private func moveToWordBoundary(forward: Bool, extendSelection: Bool) {
+            guard let textStorage = textStorage else {
+                print("❌ No text storage")
+                return
+            }
+            let text = textStorage.string
+            let nsText = text as NSString
+            let currentRange = selectedRange()
+
+            // Use the insertion point (start or end of selection depending on direction)
+            let currentPosition = forward ? currentRange.upperBound : currentRange.location
+
+            // Show context around cursor
+            let contextStart = max(0, currentPosition - 20)
+            let contextEnd = min(nsText.length, currentPosition + 20)
+            let before = nsText.substring(with: NSRange(location: contextStart, length: currentPosition - contextStart))
+            let after = nsText.substring(with: NSRange(location: currentPosition, length: contextEnd - currentPosition))
+
+            print("🔍 moveToWordBoundary - forward: \(forward), extendSelection: \(extendSelection)")
+            print("   Current position: \(currentPosition), range: \(currentRange)")
+            print("   Text length: \(nsText.length)")
+            print("   Context: '\(before)||\(after)'")
+
+            guard currentPosition >= 0 && currentPosition <= nsText.length else {
+                print("❌ Position out of bounds")
+                return
             }
 
-            super.keyDown(with: event)
+            let whitespace = CharacterSet.whitespacesAndNewlines
+
+            // Find the next word boundary
+            var newPosition = currentPosition
+
+            if forward {
+                // Moving forward
+                if currentPosition >= nsText.length {
+                    print("❌ Already at end")
+                    return // Already at end
+                }
+
+                print("   Starting forward scan from position \(newPosition)")
+
+                // Skip whitespace at the current position to reach the start of the next word
+                while newPosition < nsText.length,
+                      let scalar = UnicodeScalar(nsText.character(at: newPosition)),
+                      whitespace.contains(scalar) {
+                    print("   Skipping whitespace at \(newPosition)")
+                    newPosition += 1
+                }
+
+                // Now skip non-whitespace characters to reach the boundary after the word
+                while newPosition < nsText.length,
+                      let scalar = UnicodeScalar(nsText.character(at: newPosition)),
+                      !whitespace.contains(scalar) {
+                    newPosition += 1
+                }
+                print("   Found forward boundary at \(newPosition)")
+            } else {
+                // Moving backward
+                if currentPosition <= 0 {
+                    print("❌ Already at start")
+                    return // Already at start
+                }
+
+                newPosition -= 1
+                print("   Starting backward scan from position \(newPosition)")
+
+                // Skip whitespace immediately before the cursor position
+                while newPosition >= 0,
+                      let scalar = UnicodeScalar(nsText.character(at: newPosition)),
+                      whitespace.contains(scalar) {
+                    if newPosition == 0 {
+                        break
+                    }
+                    print("   Skipping whitespace at \(newPosition)")
+                    newPosition -= 1
+                }
+
+                if newPosition < 0 {
+                    newPosition = 0
+                } else if let scalar = UnicodeScalar(nsText.character(at: newPosition)),
+                          whitespace.contains(scalar) {
+                    newPosition = 0
+                } else {
+                    // Move to the whitespace immediately preceding the current word
+                    while newPosition > 0,
+                          let prevScalar = UnicodeScalar(nsText.character(at: newPosition - 1)),
+                          !whitespace.contains(prevScalar) {
+                        newPosition -= 1
+                    }
+                }
+                print("   Found backward boundary at \(newPosition)")
+            }
+
+            print("   New position: \(newPosition)")
+
+            // Update selection
+            if extendSelection {
+                let newRange: NSRange
+                if forward {
+                    newRange = NSRange(location: currentRange.location,
+                                     length: newPosition - currentRange.location)
+                } else {
+                    newRange = NSRange(location: newPosition,
+                                     length: currentRange.upperBound - newPosition)
+                }
+                print("   Setting extended selection: \(newRange)")
+                setSelectedRange(newRange)
+            } else {
+                print("   Setting cursor to: \(newPosition)")
+                setSelectedRange(NSRange(location: newPosition, length: 0))
+            }
+
+            scrollRangeToVisible(selectedRange())
         }
 
     }
