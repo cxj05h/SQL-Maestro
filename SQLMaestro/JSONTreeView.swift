@@ -708,19 +708,100 @@ private enum JSONTreeParser {
         }
     }
 
-    private static func buildNode(name: String, value: Any) -> JSONTreeGraphNode {
+    /// Extracts a meaningful display name for an array item
+    /// Shows dash prefix and identifier from the dictionary if available
+    /// Returns the identifier key that was used, so it can be excluded from children
+    private static func extractArrayItemName(item: Any, index: Int) -> (displayName: String, usedKey: String?) {
+        // For dictionaries/objects in arrays, try to show a meaningful identifier
+        if let dict = item as? [String: Any], !dict.isEmpty {
+            // Prioritize common identifier keys
+            let priorityKeys = ["name", "id", "key", "title", "label", "type"]
+
+            // First, check if any priority key exists
+            for priorityKey in priorityKeys {
+                if let value = dict[priorityKey] {
+                    let valueStr = formatValueForDisplay(value)
+                    return ("- \(priorityKey): \(valueStr)", priorityKey)
+                }
+            }
+
+            // No identifier found, just show index
+            return ("- [\(index)]", nil)
+        }
+
+        // For primitive values in arrays, show them directly with dash prefix and index
+        if let string = item as? String {
+            return ("- [\(index)] \"\(string)\"", nil)
+        }
+        if let number = item as? NSNumber {
+            if CFGetTypeID(number) == CFBooleanGetTypeID() {
+                return ("- [\(index)] \(number.boolValue ? "true" : "false")", nil)
+            }
+            return ("- [\(index)] \(number.stringValue)", nil)
+        }
+        if item is NSNull {
+            return ("- [\(index)] null", nil)
+        }
+
+        // Fallback to index notation only (for nested arrays, etc.)
+        return ("- [\(index)]", nil)
+    }
+
+    /// Formats a value for compact display in the array item name
+    private static func formatValueForDisplay(_ value: Any) -> String {
+        if let string = value as? String {
+            // For strings, show them in quotes but truncate if too long
+            let maxLength = 30
+            if string.count > maxLength {
+                return "\"\(string.prefix(maxLength))...\""
+            }
+            return "\"\(string)\""
+        }
+        if let number = value as? NSNumber {
+            if CFGetTypeID(number) == CFBooleanGetTypeID() {
+                return number.boolValue ? "true" : "false"
+            }
+            return number.stringValue
+        }
+        if value is NSNull {
+            return "null"
+        }
+        if value is [String: Any] {
+            return "{...}"
+        }
+        if value is [Any] {
+            return "[...]"
+        }
+        return String(describing: value)
+    }
+
+    private static func buildNode(name: String, value: Any, isArrayItem: Bool = false, excludeKey: String? = nil) -> JSONTreeGraphNode {
         switch value {
         case let dict as [String: Any]:
-            let children = dict.keys.sorted().map { key in
+            // Filter out the key that was used in the array item name
+            let keysToShow = dict.keys.filter { $0 != excludeKey }.sorted()
+            let children = keysToShow.map { key in
                 buildNode(name: key, value: dict[key] ?? NSNull())
             }
             return JSONTreeGraphNode(name: name, kind: .object(children))
         case let array as [Any]:
             let children = array.enumerated().map { index, item in
-                buildNode(name: "[\(index)]", value: item)
+                let (displayName, usedKey) = extractArrayItemName(item: item, index: index)
+                return buildNode(name: displayName, value: item, isArrayItem: true, excludeKey: usedKey)
             }
             return JSONTreeGraphNode(name: name, kind: .array(children))
         default:
+            // For primitive values that are direct array items, don't duplicate the value
+            // since it's already included in the display name
+            if isArrayItem {
+                // Check if this is a primitive value (not an object or array)
+                let isPrimitive = !(value is [String: Any]) && !(value is [Any])
+                if isPrimitive {
+                    // Return a node without a value description to avoid duplication
+                    return JSONTreeGraphNode(name: name, kind: .object([]))
+                }
+            }
+
             if value is NSNull {
                 return JSONTreeGraphNode(name: name, kind: .null)
             }
