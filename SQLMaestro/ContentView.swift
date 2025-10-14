@@ -6773,9 +6773,15 @@ struct ContentView: View {
 
             var blockLines: [String] = []
             blockLines.append(formattedSessionName)
-            blockLines.append("**Org-ID:** ``\(orgId)``")
-            blockLines.append("**Acct-ID:** ``\(acctId)``")
-            blockLines.append("**mysqlDb:** ``\(mysqlDb)``")
+            if !orgId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                blockLines.append("**Org-ID:** `\(orgId)`")
+            }
+            if !acctId.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                blockLines.append("**Acct-ID:** `\(acctId)`")
+            }
+            if !mysqlDb.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                blockLines.append("**mysqlDb:** `\(mysqlDb)`")
+            }
 
             let templateForBlock: TemplateItem? = {
                 if let override = templateOverride {
@@ -6787,13 +6793,20 @@ struct ContentView: View {
                 let staticKeys = ["Org-ID", "Acct-ID", "mysqlDb"]
                 for ph in t.placeholders where !staticKeys.contains(ph) {
                     let val = sessions.value(for: ph)
-                    values.append(val)
-                    blockLines.append("**\(ph):** ``\(val)``")
+                    if !val.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        values.append(val)
+                        blockLines.append("**\(ph):** `\(val)`")
+                    }
                 }
             }
 
             if let alternates = sessions.sessionAlternateFields[sessions.current] {
                 for alt in alternates {
+                    // Skip if name or value is empty
+                    if alt.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
+                       alt.value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        continue
+                    }
                     values.append(alt.value)
                     let formattedName: String
                     if let separatorRange = alt.name.range(of: " • ") {
@@ -6803,7 +6816,7 @@ struct ContentView: View {
                     } else {
                         formattedName = "**\(alt.name):**"
                     }
-                    blockLines.append("\(formattedName) ``\(alt.value)``")
+                    blockLines.append("\(formattedName) `\(alt.value)`")
                 }
             }
 
@@ -12246,7 +12259,7 @@ struct ContentView: View {
             }
         }
         
-        private func toggleInlineCode() { wrapSelection(prefix: "`") }
+        private func toggleInlineCode() { wrapSelection(prefix: "`", suffix: "`") }
         private func toggleBold() { wrapSelection(prefix: "**") }
         private func toggleItalic() { wrapSelection(prefix: "*") }
         private func toggleUnderline() { wrapSelection(prefix: "<u>", suffix: "</u>") }

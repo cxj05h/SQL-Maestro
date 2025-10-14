@@ -12,7 +12,7 @@ final class MarkdownEditorController: ObservableObject {
     func heading(level: Int) { coordinator?.applyHeading(level) }
     func bulletList() { coordinator?.toggleBulletList() }
     func numberedList() { coordinator?.toggleNumberedList() }
-    func inlineCode() { coordinator?.wrapSelection(prefix: "``", suffix: "``") }
+    func inlineCode() { coordinator?.wrapSelection(prefix: "`", suffix: "`") }
     func codeBlock() { coordinator?.wrapSelection(prefix: "\n```\n", suffix: "\n```\n") }
     func link() { coordinator?.requestLinkInsertion(source: .toolbar) }
 
@@ -521,8 +521,8 @@ struct MarkdownEditor: NSViewRepresentable {
             guard let textView else { return }
 
             if backtickCount == 1 {
-                // Single backtick = styled inline code (double backticks)
-                wrapSelection(prefix: "``", suffix: "``")
+                // Single backtick = styled inline code
+                wrapSelection(prefix: "`", suffix: "`")
             } else if backtickCount == 3 {
                 // Triple backtick = code block
                 wrapSelection(prefix: "\n```\n", suffix: "\n```\n")

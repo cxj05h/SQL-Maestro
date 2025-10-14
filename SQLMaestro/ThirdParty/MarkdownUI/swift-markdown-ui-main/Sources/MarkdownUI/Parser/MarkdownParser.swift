@@ -27,10 +27,10 @@ extension Array where Element == BlockNode {
   }
 
   private static func preprocessStyledCode(_ markdown: String) -> String {
-    // Replace ``code`` with `⟪STYLED⟪code⟫STYLED⟫` to keep cmark from splitting on angle brackets
+    // Replace `code` with `⟪STYLED⟪code⟫STYLED⟫` to keep cmark from splitting on angle brackets
     // Using special Unicode characters that are unlikely to appear in normal text
-    // This uses a negative lookbehind/lookahead to avoid matching triple backticks
-    let pattern = "(?<!`)``(?!`)([^`]+)``(?!`)"
+    // This uses a negative lookbehind/lookahead to avoid matching code blocks (triple backticks)
+    let pattern = "(?<!`)`(?!`)([^`]+)`(?!`)"
     guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
       return markdown
     }
@@ -80,7 +80,7 @@ extension Array where Element == BlockNode {
       in: markdown,
       options: [],
       range: range,
-      withTemplate: "``$1``"
+      withTemplate: "`$1`"
     )
   }
 }
