@@ -999,7 +999,11 @@ struct MarkdownPreviewView: View {
                 .padding(16)
         }
         .background(fill)
-        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
+        .overlay(
+            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                .stroke(fill.opacity(0.35), lineWidth: 1)
+        )
         .markdownMargin(top: 0, bottom: 16)
     }
 
