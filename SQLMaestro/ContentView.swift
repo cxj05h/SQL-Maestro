@@ -934,6 +934,7 @@ struct MarkdownPreviewView: View {
     var body: some View {
         ScrollView {
             previewMarkdown
+                .padding(.bottom, fontSize * 3)
         }
         .background(Color.clear)
         .environment(\.openURL, makeOpenURLAction())
@@ -944,7 +945,6 @@ struct MarkdownPreviewView: View {
             .markdownTheme(previewTheme)
             .markdownSoftBreakMode(.lineBreak)
             .markdownMargin(top: 0, bottom: 0)
-            .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 8)
             .padding(.vertical, 2)
             .textSelection(.enabled)
@@ -1000,10 +1000,6 @@ struct MarkdownPreviewView: View {
         }
         .background(fill)
         .clipShape(RoundedRectangle(cornerRadius: 6))
-        .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .stroke(Theme.purple.opacity(0.2), lineWidth: 1)
-        )
         .markdownMargin(top: 0, bottom: 16)
     }
 
