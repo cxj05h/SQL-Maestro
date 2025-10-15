@@ -3378,6 +3378,7 @@ struct ContentView: View {
 
             if value != previous {
                 syncSessionImageNames(with: value, for: session)
+                syncSessionImagesWithNotes(notes: value, for: session)
                 scheduleSessionNotesAutosave(for: session)
             }
             guard logChange else { return }
@@ -3445,12 +3446,65 @@ struct ContentView: View {
             }
         }
 
+        private func syncSessionImagesWithNotes(notes: String, for session: TicketSession) {
+            // Extract all file names referenced in the notes
+            let referencedFileNames = Set(extractFileLinkLabels(from: notes).keys)
+
+            // Get current images from session
+            let currentImages = sessions.sessionImages[session] ?? []
+
+            // Find images that are no longer referenced in the notes
+            let orphanedImages = currentImages.filter { image in
+                !referencedFileNames.contains(image.fileName)
+            }
+
+            // Remove orphaned images
+            for orphanedImage in orphanedImages {
+                let imageURL = AppPaths.sessionImages.appendingPathComponent(orphanedImage.fileName)
+                try? FileManager.default.removeItem(at: imageURL)
+
+                var images = sessions.sessionImages[session] ?? []
+                images.removeAll { $0.id == orphanedImage.id }
+                sessions.sessionImages[session] = images
+
+                LOG("Session image removed (orphaned from notes)", ctx: [
+                    "session": "\(session.rawValue)",
+                    "fileName": orphanedImage.fileName,
+                    "displayName": orphanedImage.displayName
+                ])
+            }
+        }
+
         private func syncGuideImageNames(with notes: String, for template: TemplateItem) {
             let labels = extractFileLinkLabels(from: notes)
             guard !labels.isEmpty else { return }
 
             for (fileName, label) in labels {
                 templateGuideStore.setImageCustomName(fileName: fileName, to: label, for: template)
+            }
+        }
+
+        private func syncGuideImagesWithNotes(notes: String, for template: TemplateItem) {
+            // Extract all file names referenced in the notes
+            let referencedFileNames = Set(extractFileLinkLabels(from: notes).keys)
+
+            // Get current images from store
+            let currentImages = templateGuideStore.images(for: template)
+
+            // Find images that are no longer referenced in the notes
+            let orphanedImages = currentImages.filter { image in
+                !referencedFileNames.contains(image.fileName)
+            }
+
+            // Remove orphaned images
+            for orphanedImage in orphanedImages {
+                if templateGuideStore.deleteImage(orphanedImage, for: template) {
+                    LOG("Guide image removed (orphaned from notes)", ctx: [
+                        "template": template.name,
+                        "fileName": orphanedImage.fileName,
+                        "displayName": orphanedImage.displayName
+                    ])
+                }
             }
         }
 
@@ -3478,6 +3532,7 @@ struct ContentView: View {
             guard changed else { return }
 
             syncGuideImageNames(with: value, for: template)
+            syncGuideImagesWithNotes(notes: value, for: template)
             scheduleGuideNotesAutosave(for: template, lastKnownText: previous)
 
             guard logChange else { return }
@@ -5625,12 +5680,14 @@ struct ContentView: View {
                         Text(editingName.isEmpty ? "unnamed" : editingName)
                             .font(.system(size: max(fontSize - 4, 11)))
                             .foregroundStyle(.secondary)
+                            .textSelection(.enabled) // ✅ Enable text selection for name
 
                         Text(editingValue.isEmpty ? "empty" : editingValue)
                             .font(.system(size: fontSize))
                             .foregroundStyle(editingValue.isEmpty ? .secondary : .primary)
                             .lineLimit(nil) // Allow multiple lines
                             .fixedSize(horizontal: false, vertical: true) // Auto-expand vertically
+                            .textSelection(.enabled) // ✅ Enable text selection for value
                             .padding(.vertical, 6)
                             .padding(.horizontal, 8)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -5654,7 +5711,10 @@ struct ContentView: View {
                         TextField("Name", text: $editingName)
                             .font(.system(size: fontSize - 1))
                             .textFieldStyle(.roundedBorder)
-                            .onSubmit { commitChanges() }
+                            .onSubmit {
+                                commitChanges()
+                                addNewAlternateField()
+                            }
                             .onChange(of: editingName) { _, newVal in
                                 commitChanges(newName: newVal, newValue: editingValue)
                             }
@@ -5662,7 +5722,10 @@ struct ContentView: View {
                         TextField("Value", text: $editingValue)
                             .font(.system(size: fontSize))
                             .textFieldStyle(.roundedBorder)
-                            .onSubmit { commitChanges() }
+                            .onSubmit {
+                                commitChanges()
+                                addNewAlternateField()
+                            }
                             .onChange(of: editingValue) { _, newVal in
                                 commitChanges(newName: editingName, newValue: newVal)
                             }
@@ -5697,7 +5760,23 @@ struct ContentView: View {
                     "value": sessions.sessionAlternateFields[session]?[idx].value ?? ""
                 ])
             }
-            
+
+            private func addNewAlternateField() {
+                // Create a new blank alternate field
+                let newField = AlternateField(name: "", value: "")
+
+                // Add it to the session's alternate fields
+                if sessions.sessionAlternateFields[session] == nil {
+                    sessions.sessionAlternateFields[session] = []
+                }
+                sessions.sessionAlternateFields[session]?.append(newField)
+
+                LOG("New alternate field added via Cmd+Enter", ctx: [
+                    "session": "\(session.rawValue)",
+                    "id": "\(newField.id)"
+                ])
+            }
+
             private func promptReplaceDynamicField() {
                 let alert = NSAlert()
                 alert.messageText = "Replace Dynamic Field"
