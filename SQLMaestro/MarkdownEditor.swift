@@ -586,8 +586,6 @@ struct MarkdownEditor: NSViewRepresentable {
             let lineRange = ns.lineRange(for: NSRange(location: selection.location, length: 0))
             let line = ns.substring(with: lineRange)
             let lineNSString = line as NSString
-            let caretInLine = selection.location - lineRange.location
-            let caretAtLineEnd = caretInLine >= lineNSString.length
 
             // Ordered lists
             if let match = Coordinator.numberedRegex.firstMatch(in: line, options: [], range: NSRange(location: 0, length: lineNSString.length)) {
@@ -599,12 +597,14 @@ struct MarkdownEditor: NSViewRepresentable {
                 let remainder = remainderRange.length > 0 ? lineNSString.substring(with: remainderRange).trimmingCharacters(in: .whitespaces) : ""
                 let prefixRangeInDoc = NSRange(location: lineRange.location, length: prefixLength)
 
-                if remainder.isEmpty && caretAtLineEnd {
+                // If the line is empty (no text after the list marker), remove the list marker and insert a newline
+                if remainder.isEmpty {
                     replace(range: prefixRangeInDoc, with: "", newSelection: NSRange(location: prefixRangeInDoc.location, length: 0))
                     insert(text: "\n")
                     return true
                 }
 
+                // Otherwise, continue the numbered list
                 let currentNumber = Int(numberString) ?? 0
                 let nextNumber = max(currentNumber + 1, 1)
                 let insertion = "\n" + indent + "\(nextNumber)\(delimiter) "
@@ -620,12 +620,14 @@ struct MarkdownEditor: NSViewRepresentable {
                 let remainder = remainderRange.length > 0 ? lineNSString.substring(with: remainderRange).trimmingCharacters(in: .whitespaces) : ""
                 let prefixRangeInDoc = NSRange(location: lineRange.location, length: prefixLength)
 
-                if remainder.isEmpty && caretAtLineEnd {
+                // If the line is empty (no text after the list marker), remove the list marker and insert a newline
+                if remainder.isEmpty {
                     replace(range: prefixRangeInDoc, with: "", newSelection: NSRange(location: prefixRangeInDoc.location, length: 0))
                     insert(text: "\n")
                     return true
                 }
 
+                // Otherwise, continue the bulleted list
                 let insertion = "\n" + indent + "- "
                 insert(text: insertion)
                 return true
