@@ -933,7 +933,7 @@ struct MarkdownPreviewView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            ScrollView(.vertical, showsIndicators: true) {
+            NonBubblingScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     previewMarkdown
                         .frame(width: geometry.size.width - 16, alignment: .leading)
@@ -941,6 +941,7 @@ struct MarkdownPreviewView: View {
                 .padding(.horizontal, 8)
                 .padding(.bottom, fontSize * 3)
             }
+            .frame(width: geometry.size.width, height: geometry.size.height)
             .background(Color.clear)
             .environment(\.openURL, makeOpenURLAction())
         }
@@ -1118,40 +1119,67 @@ private struct NonBubblingScrollView<Content: View>: NSViewRepresentable {
 }
 
 final class NonBubblingNSScrollView: NSScrollView {
-    override func scrollWheel(with event: NSEvent) {
+    enum ScrollDecision {
+        case passToParent
+        case swallow
+        case handle
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        configure()
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        configure()
+    }
+
+    private func configure() {
+        verticalScrollElasticity = .none
+        horizontalScrollElasticity = .none
+        contentView.copiesOnScroll = false
+    }
+
+    func scrollDecision(for event: NSEvent) -> ScrollDecision {
         guard let documentView = documentView else {
-            super.scrollWheel(with: event)
-            return
+            return .handle
         }
 
-        let clipBoundsBefore = contentView.bounds
         let docBounds = documentView.bounds
-        let maxOffsetY = max(docBounds.height - clipBoundsBefore.height, 0)
+        let visibleRect = contentView.documentVisibleRect
+        let maxOffsetY = max(docBounds.height - visibleRect.height, 0)
         let hasScrollableContent = maxOffsetY > 0.5
 
-        // Check if we're at a boundary before scrolling
         let scrollingUp = event.scrollingDeltaY > 0
         let scrollingDown = event.scrollingDeltaY < 0
-        let atTop = clipBoundsBefore.origin.y <= 1.0
-        let atBottom = clipBoundsBefore.origin.y >= maxOffsetY - 1.0
+        let epsilon: CGFloat = 1.0
+        let atTop = visibleRect.minY <= docBounds.minY + epsilon
+        let atBottom = visibleRect.maxY >= docBounds.maxY - epsilon
 
-        // If we have no scrollable content, pass to parent immediately
         if !hasScrollableContent {
-            nextResponder?.scrollWheel(with: event)
-            return
+            return .passToParent
         }
 
-        // If we're at a boundary and trying to scroll further in that direction, swallow the event completely
         if (scrollingUp && atTop) || (scrollingDown && atBottom) {
-            // Do not call super, do not pass to next responder - completely swallow the event
-            return
+            return .swallow
         }
 
-        // Otherwise, handle the scroll normally but prevent it from bubbling to parent
-        let originalNextResponder = nextResponder
-        nextResponder = nil
-        super.scrollWheel(with: event)
-        nextResponder = originalNextResponder
+        return .handle
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        switch scrollDecision(for: event) {
+        case .passToParent:
+            nextResponder?.scrollWheel(with: event)
+        case .swallow:
+            return
+        case .handle:
+            let originalNextResponder = nextResponder
+            nextResponder = nil
+            super.scrollWheel(with: event)
+            nextResponder = originalNextResponder
+        }
     }
 }
 
@@ -1441,6 +1469,7 @@ struct ContentView: View {
     @State private var suggestionIndexByRow: [Int: Int] = [:]
     @State private var selectedTagIndex: Int = 0
     @State private var keyEventMonitor: Any?
+    @State private var scrollEventMonitor: Any?
     
     // Track static fields per session - but now using SessionManager for global cache too
     @State private var sessionStaticFields: [TicketSession: (orgId: String, acctId: String, mysqlDb: String, company: String)] = [
@@ -1506,6 +1535,7 @@ struct ContentView: View {
 
                 return event
             }
+            updateScrollEventMonitor()
             #endif
         }
         .onDisappear {
@@ -1514,6 +1544,10 @@ struct ContentView: View {
             if let monitor = keyEventMonitor {
                 NSEvent.removeMonitor(monitor)
                 keyEventMonitor = nil
+            }
+            if let monitor = scrollEventMonitor {
+                NSEvent.removeMonitor(monitor)
+                scrollEventMonitor = nil
             }
             #endif
         }
@@ -1561,6 +1595,16 @@ struct ContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .searchGuideNotesRequested)) { _ in
             handleSearchGuideNotesShortcut()
+        }
+        .onChange(of: isGuideNotesEditorFocused) { _, _ in
+            #if os(macOS)
+            updateScrollEventMonitor()
+            #endif
+        }
+        .onChange(of: isSessionNotesEditorFocused) { _, _ in
+            #if os(macOS)
+            updateScrollEventMonitor()
+            #endif
         }
     }
 
@@ -4704,7 +4748,50 @@ struct ContentView: View {
                 return event
             }
         }
-#endif
+
+        private func updateScrollEventMonitor() {
+            let needsMonitor = isGuideNotesEditorFocused || isSessionNotesEditorFocused
+            if needsMonitor {
+                if scrollEventMonitor == nil {
+                    scrollEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { event in
+                        return shouldSwallowMarkdownScroll(event: event) ? nil : event
+                    }
+                }
+            } else if let monitor = scrollEventMonitor {
+                NSEvent.removeMonitor(monitor)
+                scrollEventMonitor = nil
+            }
+        }
+
+        private func shouldSwallowMarkdownScroll(event: NSEvent) -> Bool {
+            guard isGuideNotesEditorFocused || isSessionNotesEditorFocused else { return false }
+            guard let responder = NSApp.keyWindow?.firstResponder else { return false }
+            guard let textView = currentMarkdownTextView(from: responder) else { return false }
+            guard let scrollView = textView.enclosingScrollView as? NonBubblingNSScrollView else { return false }
+
+            let decision = scrollView.scrollDecision(for: event)
+            if case .swallow = decision {
+                return true
+            }
+            return false
+        }
+
+        private func currentMarkdownTextView(from responder: NSResponder?) -> MarkdownTextView? {
+            if let textView = responder as? MarkdownTextView {
+                return textView
+            }
+            if let view = responder as? NSView {
+                var current: NSView? = view
+                while let candidate = current {
+                    if let textView = candidate as? MarkdownTextView {
+                        return textView
+                    }
+                    current = candidate.superview
+                }
+            }
+            return nil
+        }
+	#endif
 
 
         private func startAddTags(for template: TemplateItem) {
