@@ -6131,6 +6131,10 @@ struct ContentView: View {
                         onPrevious: { navigateToGuideNotesPreviousMatch() },
                         onNext: { navigateToGuideNotesNextMatch() },
                         onEnter: { handleGuideNotesSearchEnter() },
+                        onCancel: {
+                            isGuideNotesSearchFocused = false
+                            isSearchFocused = true
+                        },
                         fontSize: fontSize,
                         isSearchFocused: $isGuideNotesSearchFocused
                     )
@@ -6171,6 +6175,10 @@ struct ContentView: View {
                         onPrevious: { navigateToSessionNotesPreviousMatch() },
                         onNext: { navigateToSessionNotesNextMatch() },
                         onEnter: { handleSessionNotesSearchEnter() },
+                        onCancel: {
+                            isSessionNotesSearchFocused = false
+                            isSearchFocused = true
+                        },
                         fontSize: fontSize,
                         isSearchFocused: $isSessionNotesSearchFocused
                     )
@@ -12857,6 +12865,7 @@ struct ContentView: View {
         var onPrevious: () -> Void
         var onNext: () -> Void
         var onEnter: () -> Void
+        var onCancel: () -> Void
         var fontSize: CGFloat
         var isSearchFocused: FocusState<Bool>.Binding
 
@@ -12878,6 +12887,10 @@ struct ContentView: View {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
                             isSearchFocused.wrappedValue = true
                         }
+                    }
+                    .onKeyPress(.escape) {
+                        onCancel()
+                        return .handled
                     }
 
                 if !searchQuery.isEmpty {
