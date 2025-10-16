@@ -1331,6 +1331,8 @@ struct ContentView: View {
     @State private var toastPreviewBehind: Bool = false
 
     @State private var alternateFieldsLocked: Bool = true
+    @State private var alternateFieldsReorderMode: Bool = false
+    @State private var draggedAlternateField: UUID?
 
     @State private var fontSize: CGFloat = 13
     @State private var hoverRecentKey: String? = nil
@@ -5380,7 +5382,37 @@ struct ContentView: View {
                           ? "Alternate fields are locked for copying. Uncheck to edit."
                           : "Alternate fields are editable. Check to lock for easy copying.")
                 }
-                
+
+                // Reorder mode banner
+                if alternateFieldsReorderMode {
+                    HStack {
+                        Image(systemName: "arrow.up.arrow.down")
+                            .foregroundStyle(.blue)
+                        Text("Reorder Mode: Drag rows to reorder")
+                            .font(.system(size: fontSize - 1, weight: .medium))
+                            .foregroundStyle(.blue)
+                        Spacer()
+                        Button("Done") {
+                            withAnimation {
+                                alternateFieldsReorderMode = false
+                            }
+                            LOG("Reorder mode deactivated via Done button", ctx: ["session": "\(sessions.current.rawValue)"])
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(.blue)
+                        .font(.system(size: fontSize - 2))
+                    }
+                    .padding(6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(Color.blue.opacity(0.1))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .stroke(Color.blue.opacity(0.3), lineWidth: 1)
+                            )
+                    )
+                }
+
                 let minPaneHeight = max(160, fontSize * 8)
                 let maxPaneHeight = max(220, fontSize * 11)
 
@@ -5390,9 +5422,11 @@ struct ContentView: View {
                             AlternateFieldRow(session: sessions.current,
                                               field: field,
                                               locked: $alternateFieldsLocked,
+                                              reorderMode: $alternateFieldsReorderMode,
+                                              draggedField: $draggedAlternateField,
                                               fontSize: fontSize,
                                               selectedTemplate: selectedTemplate,
-                                              draftDynamicValues: $draftDynamicValues) // ✅ pass it in
+                                              draftDynamicValues: $draftDynamicValues)
                         }
 
                         if !alternateFieldsLocked {
@@ -5781,22 +5815,31 @@ struct ContentView: View {
             let session: TicketSession
             let field: AlternateField
             @Binding var locked: Bool
+            @Binding var reorderMode: Bool
+            @Binding var draggedField: UUID?
             let fontSize: CGFloat
             let selectedTemplate: TemplateItem?
             @Binding var draftDynamicValues: [TicketSession: [String: String]]
-            
+
             @State private var editingName: String
             @State private var editingValue: String
-            
+            @State private var longPressTimer: Timer?
+            @State private var gestureStartLocation: CGPoint?
+            @State private var hasMovedDuringGesture: Bool = false
+
             init(session: TicketSession,
                  field: AlternateField,
                  locked: Binding<Bool>,
+                 reorderMode: Binding<Bool>,
+                 draggedField: Binding<UUID?>,
                  fontSize: CGFloat,
                  selectedTemplate: TemplateItem?,
                  draftDynamicValues: Binding<[TicketSession: [String: String]]>) {
                 self.session = session
                 self.field = field
                 self._locked = locked
+                self._reorderMode = reorderMode
+                self._draggedField = draggedField
                 self.fontSize = fontSize
                 self.selectedTemplate = selectedTemplate
                 self._draftDynamicValues = draftDynamicValues
@@ -5807,35 +5850,76 @@ struct ContentView: View {
             var body: some View {
                 if locked {
                     // 🔒 Locked mode: styled like dynamic fields (label above, value inside field look)
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(editingName.isEmpty ? "unnamed" : editingName)
-                            .font(.system(size: max(fontSize - 4, 11)))
-                            .foregroundStyle(.secondary)
-                            .textSelection(.enabled) // ✅ Enable text selection for name
+                    HStack(spacing: 6) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(editingName.isEmpty ? "unnamed" : editingName)
+                                .font(.system(size: max(fontSize - 4, 11)))
+                                .foregroundStyle(.secondary)
+                                .textSelection(.enabled) // ✅ Enable text selection for name
 
-                        Text(editingValue.isEmpty ? "empty" : editingValue)
-                            .font(.system(size: fontSize))
-                            .foregroundStyle(editingValue.isEmpty ? .secondary : .primary)
-                            .lineLimit(nil) // Allow multiple lines
-                            .fixedSize(horizontal: false, vertical: true) // Auto-expand vertically
-                            .textSelection(.enabled) // ✅ Enable text selection for value
-                            .padding(.vertical, 6)
-                            .padding(.horizontal, 8)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .fill(Color.secondary.opacity(0.1))
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 6)
-                                            .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
-                                    )
-                            )
+                            Text(editingValue.isEmpty ? "empty" : editingValue)
+                                .font(.system(size: fontSize))
+                                .foregroundStyle(editingValue.isEmpty ? .secondary : .primary)
+                                .lineLimit(nil) // Allow multiple lines
+                                .fixedSize(horizontal: false, vertical: true) // Auto-expand vertically
+                                .textSelection(.enabled) // ✅ Enable text selection for value
+                                .padding(.vertical, 6)
+                                .padding(.horizontal, 8)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6)
+                                        .fill(Color.secondary.opacity(0.1))
+                                        .overlay(
+                                            RoundedRectangle(cornerRadius: 6)
+                                                .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+                                        )
+                                )
+                        }
+                        .contentShape(Rectangle()) // ✅ makes the whole row tappable
+                        .onTapGesture(count: 2) {
+                            promptReplaceDynamicField()
+                        }
+
+                        // Reorder icon in locked mode
+                        Image(systemName: reorderMode ? "line.3.horizontal" : "line.3.horizontal")
+                            .font(.system(size: max(fontSize - 4, 14)))
+                            .foregroundStyle(reorderMode ? .blue : .secondary)
+                            .frame(width: 20, height: 20)
+                            .contentShape(Rectangle())
+                            .onLongPressGesture(minimumDuration: 0.5) {
+                                // Activate reorder mode after 0.5s hold
+                                withAnimation {
+                                    reorderMode = true
+                                }
+                                LOG("Reorder mode activated", ctx: ["session": "\(session.rawValue)"])
+                            }
+                            .onTapGesture {
+                                // Quick click in reorder mode - exit reorder mode
+                                if reorderMode {
+                                    withAnimation {
+                                        reorderMode = false
+                                    }
+                                    LOG("Reorder mode deactivated", ctx: ["session": "\(session.rawValue)"])
+                                }
+                            }
                     }
                     .padding(.vertical, 4)
-                    .contentShape(Rectangle()) // ✅ makes the whole row tappable
-                    .onTapGesture(count: 2) {
-                        promptReplaceDynamicField()
+                    .opacity(draggedField == field.id && reorderMode ? 0.5 : 1.0)
+                    .onDrag {
+                        // Enable dragging when in reorder mode
+                        if reorderMode {
+                            draggedField = field.id
+                            return NSItemProvider(object: field.id.uuidString as NSString)
+                        }
+                        return NSItemProvider()
                     }
+                    .onDrop(of: [.text], delegate: AlternateFieldDropDelegate(
+                        item: field,
+                        session: session,
+                        sessions: sessions,
+                        draggedField: $draggedField,
+                        reorderMode: reorderMode
+                    ))
                 } else {
                     // ✏️ Editable mode: name + value side by side
                     HStack(spacing: 6) {
@@ -5861,20 +5945,71 @@ struct ContentView: View {
                                 commitChanges(newName: editingName, newValue: newVal)
                             }
 
-                        Button {
-                            if let idx = sessions.sessionAlternateFields[session]?.firstIndex(where: { $0.id == field.id }) {
-                                sessions.sessionAlternateFields[session]?.remove(at: idx)
-                                LOG("Alternate field removed", ctx: [
-                                    "session": "\(session.rawValue)",
-                                    "id": "\(field.id)"
-                                ])
-                            }
-                        } label: {
-                            Image(systemName: "minus.circle")
-                                .font(.system(size: max(fontSize - 4, 12)))
-                                .foregroundStyle(.red)
-                        }
-                        .buttonStyle(.plain)
+                        // Delete/Reorder button
+                        Image(systemName: reorderMode ? "line.3.horizontal" : "minus.circle")
+                            .font(.system(size: max(fontSize - 4, 12)))
+                            .foregroundStyle(reorderMode ? .blue : .red)
+                            .contentShape(Rectangle())
+                            .gesture(
+                                DragGesture(minimumDistance: 0)
+                                    .onChanged { value in
+                                        // Track if mouse has moved during gesture
+                                        if gestureStartLocation == nil {
+                                            // First onChanged call - record start location
+                                            gestureStartLocation = value.startLocation
+                                            hasMovedDuringGesture = false
+
+                                            // Start long press timer on mouse down
+                                            longPressTimer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: false) { _ in
+                                                // Activate reorder mode after 0.5s hold
+                                                withAnimation {
+                                                    reorderMode = true
+                                                }
+                                                LOG("Reorder mode activated", ctx: ["session": "\(session.rawValue)"])
+                                            }
+                                        } else {
+                                            // Check if mouse has moved significantly (more than 5 points)
+                                            let distance = sqrt(
+                                                pow(value.location.x - value.startLocation.x, 2) +
+                                                pow(value.location.y - value.startLocation.y, 2)
+                                            )
+                                            if distance > 5 {
+                                                hasMovedDuringGesture = true
+                                            }
+                                        }
+                                    }
+                                    .onEnded { _ in
+                                        // Clean up timer
+                                        if let timer = longPressTimer, timer.isValid {
+                                            timer.invalidate()
+                                            longPressTimer = nil
+
+                                            // Only delete if: not in reorder mode, quick click, and hasn't moved
+                                            if !reorderMode && !hasMovedDuringGesture {
+                                                if let idx = sessions.sessionAlternateFields[session]?.firstIndex(where: { $0.id == field.id }) {
+                                                    sessions.sessionAlternateFields[session]?.remove(at: idx)
+                                                    LOG("Alternate field removed", ctx: [
+                                                        "session": "\(session.rawValue)",
+                                                        "id": "\(field.id)"
+                                                    ])
+                                                }
+                                            } else if reorderMode && !hasMovedDuringGesture {
+                                                // Quick click in reorder mode - exit reorder mode
+                                                withAnimation {
+                                                    reorderMode = false
+                                                }
+                                                LOG("Reorder mode deactivated", ctx: ["session": "\(session.rawValue)"])
+                                            }
+                                        } else {
+                                            // Long press completed - timer already fired
+                                            longPressTimer = nil
+                                        }
+
+                                        // Reset gesture tracking
+                                        gestureStartLocation = nil
+                                        hasMovedDuringGesture = false
+                                    }
+                            )
                     }
                     .padding(.vertical, 4)
                 }
@@ -5962,7 +6097,43 @@ struct ContentView: View {
                 }
             }
         }
-        
+
+        // MARK: — Alternate Field Drop Delegate
+        private struct AlternateFieldDropDelegate: DropDelegate {
+            let item: AlternateField
+            let session: TicketSession
+            let sessions: SessionManager
+            @Binding var draggedField: UUID?
+            let reorderMode: Bool
+
+            func performDrop(info: DropInfo) -> Bool {
+                draggedField = nil
+                return true
+            }
+
+            func dropEntered(info: DropInfo) {
+                guard reorderMode else { return }
+                guard let draggedID = draggedField else { return }
+                guard let items = sessions.sessionAlternateFields[session] else { return }
+                guard let fromIndex = items.firstIndex(where: { $0.id == draggedID }) else { return }
+                guard let toIndex = items.firstIndex(where: { $0.id == item.id }) else { return }
+
+                if fromIndex != toIndex {
+                    withAnimation {
+                        var updatedItems = items
+                        let movedItem = updatedItems.remove(at: fromIndex)
+                        updatedItems.insert(movedItem, at: toIndex)
+                        sessions.sessionAlternateFields[session] = updatedItems
+                        LOG("Alternate field reordered", ctx: [
+                            "session": "\(session.rawValue)",
+                            "from": "\(fromIndex)",
+                            "to": "\(toIndex)"
+                        ])
+                    }
+                }
+            }
+        }
+
         // MARK: — Output area
 
         private func setActivePane(_ pane: BottomPaneContent?) {
