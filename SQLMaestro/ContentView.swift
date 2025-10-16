@@ -1348,6 +1348,9 @@ struct ContentView: View {
     @State private var guideNotesInPaneSearchQuery: String = ""
     @State private var guideNotesSearchMatches: [Range<String.Index>] = []
     @State private var guideNotesCurrentMatchIndex: Int = 0
+    @State private var sessionNotesInPaneSearchQuery: String = ""
+    @State private var sessionNotesSearchMatches: [Range<String.Index>] = []
+    @State private var sessionNotesCurrentMatchIndex: Int = 0
     @State private var activePopoutPane: PopoutPaneContext? = nil
     @State private var isSidebarVisible: Bool = false
     struct TagExplorerContext: Identifiable {
@@ -1420,6 +1423,8 @@ struct ContentView: View {
     @FocusState private var isSearchFocused: Bool
     @FocusState private var isListFocused: Bool
     @FocusState private var focusedDBTableRow: Int?
+    @FocusState private var isGuideNotesSearchFocused: Bool
+    @FocusState private var isSessionNotesSearchFocused: Bool
     @State private var dbTablesLocked: Bool = true
     @State private var suggestionIndexByRow: [Int: Int] = [:]
     @State private var selectedTagIndex: Int = 0
@@ -3708,6 +3713,125 @@ struct ContentView: View {
             // Navigate to next match (or first match if just switched modes)
             if !guideNotesSearchMatches.isEmpty {
                 navigateToGuideNotesNextMatch()
+            }
+        }
+
+        // MARK: - Session Notes Search
+
+        private func updateSessionNotesSearchMatches() {
+            let query = sessionNotesInPaneSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            guard !query.isEmpty else {
+                sessionNotesSearchMatches = []
+                sessionNotesCurrentMatchIndex = 0
+                return
+            }
+
+            // Get the current session notes text
+            let text = (sessionNotesDrafts[sessions.current] ?? "").lowercased()
+            let searchText = query.lowercased()
+            var matches: [Range<String.Index>] = []
+            var searchStartIndex = text.startIndex
+
+            while searchStartIndex < text.endIndex,
+                  let range = text.range(of: searchText, range: searchStartIndex..<text.endIndex) {
+                matches.append(range)
+                searchStartIndex = range.upperBound
+            }
+
+            sessionNotesSearchMatches = matches
+            sessionNotesCurrentMatchIndex = matches.isEmpty ? 0 : 0
+
+            LOG("Session notes search: updated matches", ctx: [
+                "query": query,
+                "matchCount": "\(matches.count)"
+            ])
+
+            if !matches.isEmpty {
+                scrollToSessionNotesMatch(at: 0)
+            }
+        }
+
+        private func navigateToSessionNotesPreviousMatch() {
+            guard !sessionNotesSearchMatches.isEmpty else {
+                LOG("Session notes search: no matches to navigate")
+                return
+            }
+
+            let oldIndex = sessionNotesCurrentMatchIndex
+            sessionNotesCurrentMatchIndex = (sessionNotesCurrentMatchIndex - 1 + sessionNotesSearchMatches.count) % sessionNotesSearchMatches.count
+
+            LOG("Session notes search: navigate previous", ctx: [
+                "oldIndex": "\(oldIndex)",
+                "newIndex": "\(sessionNotesCurrentMatchIndex)",
+                "total": "\(sessionNotesSearchMatches.count)"
+            ])
+
+            scrollToSessionNotesMatch(at: sessionNotesCurrentMatchIndex)
+        }
+
+        private func navigateToSessionNotesNextMatch() {
+            guard !sessionNotesSearchMatches.isEmpty else {
+                LOG("Session notes search: no matches to navigate")
+                return
+            }
+
+            let oldIndex = sessionNotesCurrentMatchIndex
+            sessionNotesCurrentMatchIndex = (sessionNotesCurrentMatchIndex + 1) % sessionNotesSearchMatches.count
+
+            LOG("Session notes search: navigate next", ctx: [
+                "oldIndex": "\(oldIndex)",
+                "newIndex": "\(sessionNotesCurrentMatchIndex)",
+                "total": "\(sessionNotesSearchMatches.count)"
+            ])
+
+            scrollToSessionNotesMatch(at: sessionNotesCurrentMatchIndex)
+        }
+
+        private func scrollToSessionNotesMatch(at index: Int) {
+            guard index >= 0 && index < sessionNotesSearchMatches.count else {
+                LOG("Session notes search: invalid index", ctx: ["index": "\(index)", "total": "\(sessionNotesSearchMatches.count)"])
+                return
+            }
+            guard !sessionNotesInPaneSearchQuery.isEmpty else {
+                LOG("Session notes search: empty query")
+                return
+            }
+
+            let sessionNotesDraft = sessionNotesDrafts[sessions.current] ?? ""
+
+            // Get the specific match range
+            let matchRange = sessionNotesSearchMatches[index]
+
+            // Convert String.Index to Int offset for NSRange
+            let offset = sessionNotesDraft.distance(from: sessionNotesDraft.startIndex, to: matchRange.lowerBound)
+            let length = sessionNotesDraft.distance(from: matchRange.lowerBound, to: matchRange.upperBound)
+
+            LOG("Session notes search: scrolling to match", ctx: [
+                "index": "\(index + 1)",
+                "total": "\(sessionNotesSearchMatches.count)",
+                "offset": "\(offset)",
+                "length": "\(length)",
+                "query": sessionNotesInPaneSearchQuery
+            ])
+
+            // Manually select and scroll to the specific range in the editor
+            DispatchQueue.main.async { [self] in
+                sessionNotesEditor.selectAndScrollToRange(offset: offset, length: length)
+            }
+        }
+
+        private func handleSessionNotesSearchEnter() {
+            guard !sessionNotesInPaneSearchQuery.isEmpty else { return }
+
+            // If in preview mode, switch to edit mode first
+            if isPreviewMode {
+                setPreviewMode(false)
+            }
+
+            // Navigate to next match (or first match if just switched modes)
+            if !sessionNotesSearchMatches.isEmpty {
+                navigateToSessionNotesNextMatch()
             }
         }
 
@@ -6007,7 +6131,8 @@ struct ContentView: View {
                         onPrevious: { navigateToGuideNotesPreviousMatch() },
                         onNext: { navigateToGuideNotesNextMatch() },
                         onEnter: { handleGuideNotesSearchEnter() },
-                        fontSize: fontSize
+                        fontSize: fontSize,
+                        isSearchFocused: $isGuideNotesSearchFocused
                     )
 
                     Spacer(minLength: 12)
@@ -6038,6 +6163,17 @@ struct ContentView: View {
                         get: { isPreviewMode },
                         set: { setPreviewMode($0) }
                     ))
+
+                    InPaneSearchBar(
+                        searchQuery: $sessionNotesInPaneSearchQuery,
+                        matchCount: sessionNotesSearchMatches.count,
+                        currentMatchIndex: sessionNotesCurrentMatchIndex,
+                        onPrevious: { navigateToSessionNotesPreviousMatch() },
+                        onNext: { navigateToSessionNotesNextMatch() },
+                        onEnter: { handleSessionNotesSearchEnter() },
+                        fontSize: fontSize,
+                        isSearchFocused: $isSessionNotesSearchFocused
+                    )
 
                     Spacer(minLength: 12)
                     if (sessionNotesDrafts[activeSession] ?? "") != (sessions.sessionNotes[activeSession] ?? "") {
@@ -6252,20 +6388,30 @@ struct ContentView: View {
                 LOG("Search shortcut ignored for inactive tab", ctx: ["tabId": tabID])
                 return
             }
-            guard !isSavedFileEditorFocused else {
+
+            // If guide notes editor is actively focused, focus the guide notes search bar
+            if isGuideNotesEditorFocused {
+                isGuideNotesSearchFocused = true
+                LOG("Guide notes search focused via keyboard shortcut", ctx: ["tabId": tabID])
+                return
+            }
+
+            // If session notes editor is actively focused, focus the session notes search bar
+            if isSessionNotesEditorFocused {
+                isSessionNotesSearchFocused = true
+                LOG("Session notes search focused via keyboard shortcut", ctx: ["tabId": tabID])
+                return
+            }
+
+            // If saved file editor is focused, ignore the shortcut
+            if isSavedFileEditorFocused {
                 LOG("Search shortcut ignored while saved file editor focused", ctx: ["tabId": tabID])
                 return
             }
-            guard !isGuideNotesEditorFocused else {
-                LOG("Search shortcut ignored while guide notes editor focused", ctx: ["tabId": tabID])
-                return
-            }
-            guard !isSessionNotesEditorFocused else {
-                LOG("Search shortcut ignored while session notes editor focused", ctx: ["tabId": tabID])
-                return
-            }
+
+            // Otherwise, focus the main query template search
             isSearchFocused = true
-            LOG("Search focused via keyboard shortcut", ctx: ["tabId": tabID])
+            LOG("Query template search focused via keyboard shortcut", ctx: ["tabId": tabID])
         }
 
         private func handleShowGuideNotesShortcut() {
@@ -6579,6 +6725,20 @@ struct ContentView: View {
                 showsOuterBackground: false,
                 showsContentBackground: true
             )
+            .onChange(of: sessionNotesInPaneSearchQuery) { _, _ in
+                updateSessionNotesSearchMatches()
+            }
+            .onChange(of: sessionNotesDrafts[activeSession]) { _, _ in
+                if !sessionNotesInPaneSearchQuery.isEmpty {
+                    updateSessionNotesSearchMatches()
+                }
+            }
+            .onChange(of: activeSession) { _, _ in
+                // Clear search when switching sessions
+                sessionNotesInPaneSearchQuery = ""
+                sessionNotesSearchMatches = []
+                sessionNotesCurrentMatchIndex = 0
+            }
         }
 
         private func savedFilesPane(for activeSession: TicketSession) -> some View {
@@ -12098,6 +12258,16 @@ struct ContentView: View {
                             LOG("Session image preview show in Finder", ctx: ["fileName": sessionImage.fileName])
                         }
                         .disabled(!imageExists)
+
+                        Button("Copy") {
+                            if let image = displayedImage {
+                                let pasteboard = NSPasteboard.general
+                                pasteboard.clearContents()
+                                pasteboard.writeObjects([image])
+                                LOG("Session image copied to clipboard", ctx: ["fileName": sessionImage.fileName])
+                            }
+                        }
+                        .disabled(!imageExists)
                     }
                 }
                 .padding(20)
@@ -12255,6 +12425,16 @@ struct ContentView: View {
 
                         Button("Show in Finder") {
                             NSWorkspace.shared.activateFileViewerSelecting([imageURL])
+                        }
+                        .disabled(!imageExists)
+
+                        Button("Copy") {
+                            if let image = displayedImage {
+                                let pasteboard = NSPasteboard.general
+                                pasteboard.clearContents()
+                                pasteboard.writeObjects([image])
+                                LOG("Guide image copied to clipboard", ctx: ["fileName": guideImage.fileName])
+                            }
                         }
                         .disabled(!imageExists)
                     }
@@ -12678,8 +12858,7 @@ struct ContentView: View {
         var onNext: () -> Void
         var onEnter: () -> Void
         var fontSize: CGFloat
-
-        @FocusState private var isSearchFocused: Bool
+        var isSearchFocused: FocusState<Bool>.Binding
 
         var body: some View {
             HStack(spacing: 6) {
@@ -12692,12 +12871,12 @@ struct ContentView: View {
                     .font(.system(size: fontSize - 2))
                     .frame(width: 120)
                     .submitLabel(.search)
-                    .focused($isSearchFocused)
+                    .focused(isSearchFocused)
                     .onSubmit {
                         onEnter()
                         // Refocus the search field after Enter is pressed
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
-                            isSearchFocused = true
+                            isSearchFocused.wrappedValue = true
                         }
                     }
 

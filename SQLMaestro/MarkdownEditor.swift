@@ -247,11 +247,11 @@ struct MarkdownEditor: NSViewRepresentable {
         }
 
         func textDidBeginEditing(_ notification: Notification) {
-            parent.onFocusChange?(true)
+            // Focus change is now handled by becomeFirstResponder/resignFirstResponder
         }
 
         func textDidEndEditing(_ notification: Notification) {
-            parent.onFocusChange?(false)
+            // Focus change is now handled by becomeFirstResponder/resignFirstResponder
         }
 
         func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {
@@ -843,6 +843,22 @@ private final class MarkdownLayoutManager: NSLayoutManager {
         var handlePaste: ((NSPasteboard) -> Bool)?
         var canAcceptDrag: ((NSPasteboard) -> Bool)?
         var handleDrop: ((NSPasteboard, NSPoint) -> Bool)?
+
+        override func becomeFirstResponder() -> Bool {
+            let result = super.becomeFirstResponder()
+            if result {
+                coordinator?.parent.onFocusChange?(true)
+            }
+            return result
+        }
+
+        override func resignFirstResponder() -> Bool {
+            let result = super.resignFirstResponder()
+            if result {
+                coordinator?.parent.onFocusChange?(false)
+            }
+            return result
+        }
 
         override func paste(_ sender: Any?) {
             let pasteboard = NSPasteboard.general
