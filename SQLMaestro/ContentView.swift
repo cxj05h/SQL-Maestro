@@ -932,12 +932,18 @@ struct MarkdownPreviewView: View {
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
-        ScrollView {
-            previewMarkdown
+        GeometryReader { geometry in
+            ScrollView(.vertical, showsIndicators: true) {
+                VStack(alignment: .leading, spacing: 0) {
+                    previewMarkdown
+                        .frame(width: geometry.size.width - 16, alignment: .leading)
+                }
+                .padding(.horizontal, 8)
                 .padding(.bottom, fontSize * 3)
+            }
+            .background(Color.clear)
+            .environment(\.openURL, makeOpenURLAction())
         }
-        .background(Color.clear)
-        .environment(\.openURL, makeOpenURLAction())
     }
 
     private var previewMarkdown: some View {
@@ -945,7 +951,6 @@ struct MarkdownPreviewView: View {
             .markdownTheme(previewTheme)
             .markdownSoftBreakMode(.lineBreak)
             .markdownMargin(top: 0, bottom: 0)
-            .padding(.horizontal, 8)
             .padding(.vertical, 2)
             .textSelection(.enabled)
     }
@@ -1388,7 +1393,9 @@ struct ContentView: View {
     @State private var savedFileValidation: [TicketSession: [UUID: JSONValidationState]] = [:]
     @State private var savedFileTreePreview: SavedFileTreePreviewContext?
     @State private var isSavedFileEditorFocused: Bool = false
-    
+    @State private var isGuideNotesEditorFocused: Bool = false
+    @State private var isSessionNotesEditorFocused: Bool = false
+
     @State private var searchText: String = ""
     @State private var showShortcutsSheet: Bool = false
     @State private var showDatabaseSettings: Bool = false
@@ -6249,6 +6256,14 @@ struct ContentView: View {
                 LOG("Search shortcut ignored while saved file editor focused", ctx: ["tabId": tabID])
                 return
             }
+            guard !isGuideNotesEditorFocused else {
+                LOG("Search shortcut ignored while guide notes editor focused", ctx: ["tabId": tabID])
+                return
+            }
+            guard !isSessionNotesEditorFocused else {
+                LOG("Search shortcut ignored while session notes editor focused", ctx: ["tabId": tabID])
+                return
+            }
             isSearchFocused = true
             LOG("Search focused via keyboard shortcut", ctx: ["tabId": tabID])
         }
@@ -6456,6 +6471,9 @@ struct ContentView: View {
                         onLinkRequested: handleTroubleshootingLink(selectedText:source:completion:),
                         onImageAttachment: { info in
                             handleGuideEditorImageAttachment(info)
+                        },
+                        onFocusChange: { focused in
+                            isGuideNotesEditorFocused = focused
                         }
                     )
                     .frame(maxWidth: .infinity, minHeight: bottomPaneEditorMinHeight, alignment: .top)
@@ -6544,6 +6562,9 @@ struct ContentView: View {
                 onSavedFileOpenTree: { presentTreeView(for: $0, session: activeSession) },
                 onSavedFilesModeExit: { commitSavedFileDrafts(for: activeSession) },
                 onSavedFilesPopout: nil,
+                onSessionNotesFocusChanged: { focused in
+                    isSessionNotesEditorFocused = focused
+                },
                 onSave: { saveSessionNotes() },
                 onRevert: revertSessionNotes,
                 onLinkRequested: handleSessionNotesLink(selectedText:source:completion:),
@@ -12772,6 +12793,7 @@ struct ContentView: View {
         var onSavedFileOpenTree: (UUID) -> Void
         var onSavedFilesModeExit: () -> Void
         var onSavedFilesPopout: (() -> Void)? = nil
+        var onSessionNotesFocusChanged: ((Bool) -> Void)? = nil
         var onSave: () -> Void
         var onRevert: () -> Void
         var onLinkRequested: (_ selectedText: String, _ source: MarkdownEditor.LinkRequestSource, _ completion: @escaping (MarkdownEditor.LinkInsertion?) -> Void) -> Void
@@ -12792,7 +12814,7 @@ struct ContentView: View {
                         .padding(.vertical, 18)
                         .background(
                             RoundedRectangle(cornerRadius: 14)
-                                .fill(Theme.grayBG.opacity(0.22))
+                                .fill(Color(hex: "#2A2A35").opacity(0.5))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 14)
                                         .stroke(Theme.purple.opacity(0.2), lineWidth: 1)
@@ -12924,6 +12946,9 @@ struct ContentView: View {
                         onLinkRequested: onLinkRequested,
                         onImageAttachment: { info in
                             onImageAttachment(info)
+                        },
+                        onFocusChange: { focused in
+                            onSessionNotesFocusChanged?(focused)
                         }
                     )
                     .frame(maxWidth: .infinity, minHeight: editorMinHeight, alignment: .top)
@@ -13792,7 +13817,7 @@ struct ContentView: View {
                         .frame(minHeight: 320)
                         .background(
                             RoundedRectangle(cornerRadius: 10)
-                                .fill(Theme.grayBG.opacity(0.25))
+                                .fill(Color(hex: "#2A2A35"))
                                 .overlay(
                                     RoundedRectangle(cornerRadius: 10)
                                         .stroke(Theme.purple.opacity(0.25), lineWidth: 1)

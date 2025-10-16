@@ -66,6 +66,7 @@ struct MarkdownEditor: NSViewRepresentable {
     @ObservedObject var controller: MarkdownEditorController
     var onLinkRequested: ((_ selectedText: String, _ source: LinkRequestSource, _ completion: @escaping (LinkInsertion?) -> Void) -> Void)?
     var onImageAttachment: ((ImageDropInfo) -> ImageInsertion?)?
+    var onFocusChange: ((Bool) -> Void)?
 
     func makeCoordinator() -> Coordinator {
         Coordinator(parent: self)
@@ -243,6 +244,14 @@ struct MarkdownEditor: NSViewRepresentable {
             } else {
                 parent.text = sanitized
             }
+        }
+
+        func textDidBeginEditing(_ notification: Notification) {
+            parent.onFocusChange?(true)
+        }
+
+        func textDidEndEditing(_ notification: Notification) {
+            parent.onFocusChange?(false)
         }
 
         func textView(_ textView: NSTextView, doCommandBy commandSelector: Selector) -> Bool {

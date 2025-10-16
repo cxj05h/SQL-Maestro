@@ -393,10 +393,33 @@ private struct InlineFlowLayout: Layout {
       let size = CGSize(width: dimensions.width, height: dimensions.height)
       let baseline = dimensions[VerticalAlignment.firstTextBaseline]
 
-      currentItems.append(Item(index: index, size: size, baseline: baseline, isLineBreak: false))
-      currentWidth += spacingBefore + size.width
-      currentHeight = max(currentHeight, size.height)
-      currentBaseline = max(currentBaseline, baseline ?? size.height)
+      // Check if adding this item would leave insufficient space for continuation
+      // If we have items on the line and adding this item would leave less than 20% of max width,
+      // it's better to wrap to the next line
+      let newWidth = currentWidth + spacingBefore + size.width
+      let remainingWidth = maxWidth.isFinite ? maxWidth - newWidth : .infinity
+      let minContinuationWidth = maxWidth.isFinite ? maxWidth * 0.2 : 0
+
+      if maxWidth.isFinite && !currentItems.isEmpty &&
+         remainingWidth < minContinuationWidth &&
+         remainingWidth > 0 &&
+         size.width < maxWidth * 0.8 {  // Only wrap if the item itself isn't too wide
+        flushLine()
+        spacingBefore = 0
+        dimensions = subviews[index].dimensions(
+          in: ProposedViewSize(width: maxWidth, height: nil)
+        )
+        let newSize = CGSize(width: dimensions.width, height: dimensions.height)
+        currentItems.append(Item(index: index, size: newSize, baseline: baseline, isLineBreak: false))
+        currentWidth = newSize.width
+        currentHeight = max(currentHeight, newSize.height)
+        currentBaseline = max(currentBaseline, baseline ?? newSize.height)
+      } else {
+        currentItems.append(Item(index: index, size: size, baseline: baseline, isLineBreak: false))
+        currentWidth += spacingBefore + size.width
+        currentHeight = max(currentHeight, size.height)
+        currentBaseline = max(currentBaseline, baseline ?? size.height)
+      }
     }
 
     flushLine()
