@@ -2,6 +2,44 @@ import SwiftUI
 import AppKit
 import UniformTypeIdentifiers
 
+/// Custom scroll view that prevents scroll events from bubbling to parent when at boundaries
+private final class MarkdownScrollView: NSScrollView {
+    override func scrollWheel(with event: NSEvent) {
+        guard let documentView = documentView else {
+            super.scrollWheel(with: event)
+            return
+        }
+
+        let clipBounds = contentView.bounds
+        let docBounds = documentView.bounds
+        let maxOffsetY = max(docBounds.height - clipBounds.height, 0)
+        let hasScrollableContent = maxOffsetY > 0.5
+
+        // Detect scroll direction
+        let scrollingUp = event.scrollingDeltaY > 0
+        let scrollingDown = event.scrollingDeltaY < 0
+        let atTop = clipBounds.origin.y <= 1.0
+        let atBottom = clipBounds.origin.y >= maxOffsetY - 1.0
+
+        // If no scrollable content, pass to parent
+        if !hasScrollableContent {
+            nextResponder?.scrollWheel(with: event)
+            return
+        }
+
+        // If at boundary trying to scroll further, swallow the event
+        if (scrollingUp && atTop) || (scrollingDown && atBottom) {
+            return
+        }
+
+        // Normal scroll - prevent bubbling to parent
+        let originalNextResponder = nextResponder
+        nextResponder = nil
+        super.scrollWheel(with: event)
+        nextResponder = originalNextResponder
+    }
+}
+
 /// Controller passed into `MarkdownEditor` to expose formatting actions to toolbars.
 final class MarkdownEditorController: ObservableObject {
     fileprivate weak var coordinator: MarkdownEditor.Coordinator?
@@ -74,10 +112,12 @@ struct MarkdownEditor: NSViewRepresentable {
 
     func makeNSView(context: Context) -> NSScrollView {
         let textView = MarkdownTextView()
-        let scrollView = NSScrollView()
+        let scrollView = MarkdownScrollView()
         scrollView.drawsBackground = false
         scrollView.hasVerticalScroller = true
         scrollView.hasHorizontalScroller = false
+        scrollView.autohidesScrollers = true
+        scrollView.scrollerStyle = .overlay
         scrollView.documentView = textView
         scrollView.contentInsets = NSEdgeInsets(top: 0, left: 0, bottom: 0, right: 0)
         scrollView.automaticallyAdjustsContentInsets = false

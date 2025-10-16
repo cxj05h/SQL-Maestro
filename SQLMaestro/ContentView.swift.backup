@@ -1129,29 +1129,20 @@ final class NonBubblingNSScrollView: NSScrollView {
         let maxOffsetY = max(docBounds.height - clipBoundsBefore.height, 0)
         let hasScrollableContent = maxOffsetY > 0.5
 
-        // Check if we're at a boundary before scrolling
-        let scrollingUp = event.scrollingDeltaY > 0
-        let scrollingDown = event.scrollingDeltaY < 0
-        let atTop = clipBoundsBefore.origin.y <= 1.0
-        let atBottom = clipBoundsBefore.origin.y >= maxOffsetY - 1.0
-
-        // If we have no scrollable content, pass to parent immediately
-        if !hasScrollableContent {
-            nextResponder?.scrollWheel(with: event)
-            return
-        }
-
-        // If we're at a boundary and trying to scroll further in that direction, swallow the event completely
-        if (scrollingUp && atTop) || (scrollingDown && atBottom) {
-            // Do not call super, do not pass to next responder - completely swallow the event
-            return
-        }
-
-        // Otherwise, handle the scroll normally but prevent it from bubbling to parent
         let originalNextResponder = nextResponder
         nextResponder = nil
         super.scrollWheel(with: event)
         nextResponder = originalNextResponder
+
+        let clipBoundsAfter = contentView.bounds
+        let moved = abs(clipBoundsAfter.origin.y - clipBoundsBefore.origin.y) > 0.05
+
+        if !moved {
+            if !hasScrollableContent {
+                originalNextResponder?.scrollWheel(with: event)
+            }
+            // Otherwise swallow the overflow event so the parent scroll view stays put.
+        }
     }
 }
 
@@ -1436,7 +1427,6 @@ struct ContentView: View {
     @FocusState private var focusedDBTableRow: Int?
     @FocusState private var isGuideNotesSearchFocused: Bool
     @FocusState private var isSessionNotesSearchFocused: Bool
-    @FocusState private var isSavedFileSearchFocused: Bool
     @State private var dbTablesLocked: Bool = true
     @State private var suggestionIndexByRow: [Int: Int] = [:]
     @State private var selectedTagIndex: Int = 0
@@ -6429,10 +6419,9 @@ struct ContentView: View {
                     .offset(x: isSidebarVisible ? 0 : 280)
                     .padding(.top, 30)
                     .shadow(color: Color.black.opacity(0.18), radius: 18, x: -6, y: 0)
-                    .allowsHitTesting(isActiveTab) // Sidebar content only interactable on active tab
             }
             .animation(.easeInOut(duration: 0.26), value: isSidebarVisible)
-            .allowsHitTesting(isSidebarVisible) // Entire ZStack (including dismiss overlay) interactable when visible
+            .allowsHitTesting(isSidebarVisible || isActiveTab) // Allow interaction only if visible or active tab
         }
 
         private var commandSidebarContent: some View {
@@ -6593,10 +6582,9 @@ struct ContentView: View {
                 return
             }
 
-            // If saved file editor is actively focused, focus the saved file search bar
+            // If saved file editor is focused, ignore the shortcut
             if isSavedFileEditorFocused {
-                isSavedFileSearchFocused = true
-                LOG("Saved file search focused via keyboard shortcut", ctx: ["tabId": tabID])
+                LOG("Search shortcut ignored while saved file editor focused", ctx: ["tabId": tabID])
                 return
             }
 
@@ -6900,7 +6888,6 @@ struct ContentView: View {
                 onSavedFileSearchCancel: {
                     isSearchFocused = true
                 },
-                savedFileSearchFocused: $isSavedFileSearchFocused,
                 onSavedFilesModeExit: { commitSavedFileDrafts(for: activeSession) },
                 onSavedFilesPopout: nil,
                 onSessionNotesFocusChanged: { focused in
@@ -6983,7 +6970,6 @@ struct ContentView: View {
                 onSavedFileSearchCancel: {
                     isSearchFocused = true
                 },
-                savedFileSearchFocused: $isSavedFileSearchFocused,
                 onSavedFilesModeExit: { commitSavedFileDrafts(for: activeSession) },
                 onSavedFilesPopout: nil,
                 onSave: { saveSessionNotes() },
@@ -13175,7 +13161,6 @@ struct ContentView: View {
         var onSavedFileFocusChanged: (Bool) -> Void
         var onSavedFileOpenTree: (UUID) -> Void
         var onSavedFileSearchCancel: () -> Void
-        var savedFileSearchFocused: FocusState<Bool>.Binding
         var onSavedFilesModeExit: () -> Void
         var onSavedFilesPopout: (() -> Void)? = nil
         var onSessionNotesFocusChanged: ((Bool) -> Void)? = nil
@@ -13262,7 +13247,6 @@ struct ContentView: View {
                     onFocusChange: onSavedFileFocusChanged,
                     onOpenTree: onSavedFileOpenTree,
                     onSearchCancel: onSavedFileSearchCancel,
-                    isSearchFieldFocused: savedFileSearchFocused,
                     editorMinHeight: editorMinHeight
                 )
                 .padding(.top, topPadding)
@@ -13488,12 +13472,12 @@ struct ContentView: View {
             var onFocusChange: (Bool) -> Void
             var onOpenTree: (UUID) -> Void
             var onSearchCancel: () -> Void
-            var isSearchFieldFocused: FocusState<Bool>.Binding
             var editorMinHeight: CGFloat
 
             @StateObject private var editorController = JSONEditorController()
             @State private var searchQuery: String = ""
             @State private var searchStatus: SearchStatus = .idle
+            @FocusState private var isSearchFieldFocused: Bool
 
             var body: some View {
                 VStack(alignment: .leading, spacing: 0) {
@@ -13516,7 +13500,7 @@ struct ContentView: View {
                             onFindCommand: {
                                 guard selectedID != nil else { return }
                                 DispatchQueue.main.async {
-                                    isSearchFieldFocused.wrappedValue = true
+                                    isSearchFieldFocused = true
                                 }
                             }
                         )
@@ -13548,7 +13532,7 @@ struct ContentView: View {
                             editorController.focusAndSelectAll()
                         }
                     }
-                    isSearchFieldFocused.wrappedValue = false
+                    isSearchFieldFocused = false
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                 .layoutPriority(1)
@@ -13566,9 +13550,9 @@ struct ContentView: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
                         .disabled(selectedID == nil)
-                        .focused(isSearchFieldFocused)
+                        .focused($isSearchFieldFocused)
                         .onKeyPress(.escape) {
-                            isSearchFieldFocused.wrappedValue = false
+                            isSearchFieldFocused = false
                             onSearchCancel()
                             return .handled
                         }
@@ -14005,8 +13989,6 @@ struct ContentView: View {
         let onClose: () -> Void
         let onTogglePreview: () -> Void
 
-        @FocusState private var popoutSavedFileSearchFocused: Bool
-
         var body: some View {
             VStack(alignment: .leading, spacing: 18) {
                 header
@@ -14124,7 +14106,6 @@ struct ContentView: View {
                     onSavedFileSearchCancel: {
                         // No-op for popout windows
                     },
-                    savedFileSearchFocused: $popoutSavedFileSearchFocused,
                     onSavedFilesModeExit: onSavedFilesModeExit,
                     onSavedFilesPopout: nil,
                     onSave: onSessionSave,
@@ -14164,7 +14145,6 @@ struct ContentView: View {
                     onSavedFileSearchCancel: {
                         // No-op for popout windows
                     },
-                    savedFileSearchFocused: $popoutSavedFileSearchFocused,
                     onSavedFilesModeExit: onSavedFilesModeExit,
                     onSavedFilesPopout: nil,
                     onSave: onSessionSave,
