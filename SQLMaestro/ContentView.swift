@@ -2190,7 +2190,7 @@ struct ContentView: View {
                     .frame(width: 320)
 
                 alternateFieldsPane
-                    .frame(width: 320)
+                    .frame(width: 440)
 
                 Spacer()
             }
@@ -4445,6 +4445,7 @@ struct ContentView: View {
                     })
                     .textFieldStyle(PlainTextFieldStyle())
                     .padding(.vertical, 4)
+                    .padding(.trailing, 20)
                     .padding(.horizontal, 6)
                     .background(
                         RoundedRectangle(cornerRadius: 6)
@@ -5499,7 +5500,7 @@ struct ContentView: View {
                         .tint(.blue)
                         .font(.system(size: fontSize - 2))
                     }
-                    .padding(6)
+                    .padding(EdgeInsets(top: 6, leading: 6, bottom: 6, trailing: 14))
                     .background(
                         RoundedRectangle(cornerRadius: 6)
                             .fill(Color.blue.opacity(0.1))
@@ -5555,7 +5556,7 @@ struct ContentView: View {
                             .padding(.top, 4)
                         }
                     }
-                    .padding(6)
+                    .padding(EdgeInsets(top: 6, leading: 6, bottom: 6, trailing: 14))
                     .frame(maxWidth: .infinity, minHeight: minPaneHeight, alignment: .topLeading)
                 }
                 .frame(minHeight: minPaneHeight, maxHeight: maxPaneHeight)
@@ -6001,6 +6002,7 @@ struct ContentView: View {
                             }
                     }
                     .padding(.vertical, 4)
+                    .padding(.trailing, 20)
                     .opacity(draggedField == field.id && reorderMode ? 0.5 : 1.0)
                     .onDrag {
                         // Enable dragging when in reorder mode
@@ -6109,6 +6111,7 @@ struct ContentView: View {
                             )
                     }
                     .padding(.vertical, 4)
+                    .padding(.trailing, 20)
                 }
             }
             
