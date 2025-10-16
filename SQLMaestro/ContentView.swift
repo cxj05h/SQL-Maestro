@@ -8260,7 +8260,7 @@ struct ContentView: View {
             let placeholders: [String:String]
             let dbTables: [String]
             let notes: String
-            let alternateFields: [String: String]
+            let alternateFields: [SavedAlternateField]
             let sessionImages: [SessionImage]
             let savedFiles: [SavedFile]
             let usedTemplates: [UsedTemplate]
@@ -8290,7 +8290,7 @@ struct ContentView: View {
                  placeholders: [String : String],
                  dbTables: [String],
                  notes: String,
-                 alternateFields: [String : String],
+                 alternateFields: [SavedAlternateField],
                  sessionImages: [SessionImage],
                  savedFiles: [SavedFile],
                  usedTemplates: [UsedTemplate]) {
@@ -8320,7 +8320,17 @@ struct ContentView: View {
                 self.placeholders = try container.decode([String:String].self, forKey: .placeholders)
                 self.dbTables = try container.decode([String].self, forKey: .dbTables)
                 self.notes = try container.decode(String.self, forKey: .notes)
-                self.alternateFields = try container.decode([String:String].self, forKey: .alternateFields)
+                if let arrayFields = try? container.decode([SavedAlternateField].self, forKey: .alternateFields) {
+                    self.alternateFields = arrayFields
+                } else if let dictFields = try? container.decode([String:String].self, forKey: .alternateFields) {
+                    self.alternateFields = dictFields
+                        .sorted { $0.key.localizedCaseInsensitiveCompare($1.key) == .orderedAscending }
+                        .map { key, value in
+                            SavedAlternateField(id: UUID(), name: key, value: value)
+                        }
+                } else {
+                    self.alternateFields = []
+                }
                 self.sessionImages = try container.decodeIfPresent([SessionImage].self, forKey: .sessionImages) ?? []
                 self.savedFiles = try container.decodeIfPresent([SavedFile].self, forKey: .savedFiles) ?? []
                 self.usedTemplates = try container.decodeIfPresent([UsedTemplate].self, forKey: .usedTemplates) ?? []
@@ -8516,6 +8526,9 @@ struct ContentView: View {
                 usedTemplates: usedTemplateSnapshots
             )
             let limitedCombinedFields = Array(combinedAlternateFields.prefix(200))
+            let limitedSavedAlternateFields = limitedCombinedFields.map { field in
+                SavedTicketSession.SavedAlternateField(id: field.id, name: field.name, value: field.value)
+            }
 
             return SavedTicketSession(
                 version: 3,
@@ -8527,9 +8540,7 @@ struct ContentView: View {
                 placeholders: placeholders,
                 dbTables: dbTablesSnapshot,
                 notes: sessions.sessionNotes[session] ?? "",
-                alternateFields: limitedCombinedFields.reduce(into: [String:String]()) { dict, field in
-                    dict[field.name] = field.value
-                },
+                alternateFields: limitedSavedAlternateFields,
                 sessionImages: sessions.sessionImages[session] ?? [],
                 savedFiles: savedFilesSnapshot,
                 usedTemplates: usedTemplateSnapshots
@@ -8630,7 +8641,11 @@ struct ContentView: View {
 
             isLoadingTicketSession = true
 
-            let baseAlternateFields = snapshot.alternateFields.map { AlternateField(name: $0.key, value: $0.value) }
+            let baseAlternateFields = snapshot.alternateFields.map { savedField -> AlternateField in
+                var field = AlternateField(name: savedField.name, value: savedField.value)
+                field.id = savedField.id
+                return field
+            }
             let combinedAlternateFields = buildCombinedAlternateFields(
                 base: baseAlternateFields,
                 usedTemplates: snapshot.usedTemplates
@@ -9324,17 +9339,11 @@ struct ContentView: View {
                 addField(name: field.name, value: field.value)
             }
 
-            let orderedEntries = usedTemplates.sorted { lhs, rhs in
-                (lhs.lastUpdated ?? Date.distantPast) < (rhs.lastUpdated ?? Date.distantPast)
-            }
-
-            for entry in orderedEntries {
+            for entry in usedTemplates {
                 if entry.alternateFields.isEmpty {
                     let templateLabel = (entry.templateName?.isEmpty == false) ? entry.templateName! : "Template"
-                    for key in entry.placeholders.keys.sorted(by: { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }) {
-                        if let value = entry.placeholders[key] {
-                            addField(name: "\(templateLabel) • \(key)", value: value)
-                        }
+                    for (key, value) in entry.placeholders {
+                        addField(name: "\(templateLabel) • \(key)", value: value)
                     }
                 } else {
                     for alt in entry.alternateFields {
@@ -9548,14 +9557,18 @@ struct ContentView: View {
                 }
             }()
 
-            let baseAlternateFields = original.alternateFields.map { AlternateField(name: $0.key, value: $0.value) }
+            let baseAlternateFields = original.alternateFields.map { savedField -> AlternateField in
+                var field = AlternateField(name: savedField.name, value: savedField.value)
+                field.id = savedField.id
+                return field
+            }
             let combinedAlternateFields = buildCombinedAlternateFields(
                 base: baseAlternateFields,
                 usedTemplates: adjustedUsedTemplates
             )
             let limitedAlternateFields = Array(combinedAlternateFields.prefix(200))
-            let alternateFieldsDict = limitedAlternateFields.reduce(into: [String:String]()) { dict, field in
-                dict[field.name] = field.value
+            let alternateFieldsList = limitedAlternateFields.map {
+                SavedTicketSession.SavedAlternateField(id: $0.id, name: $0.name, value: $0.value)
             }
 
             return SavedTicketSession(
@@ -9568,7 +9581,7 @@ struct ContentView: View {
                 placeholders: original.placeholders,
                 dbTables: original.dbTables,
                 notes: original.notes,
-                alternateFields: alternateFieldsDict,
+                alternateFields: alternateFieldsList,
                 sessionImages: remappedImages.isEmpty ? original.sessionImages : remappedImages,
                 savedFiles: remappedSavedFiles,
                 usedTemplates: adjustedUsedTemplates
