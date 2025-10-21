@@ -2027,7 +2027,15 @@ struct ContentView: View {
                 isSavedFileEditorFocused = false
                 activePopoutPane = nil
             },
-            onTogglePreview: togglePreviewShortcut
+            onTogglePreview: togglePreviewShortcut,
+            onImagePreview: {
+                // Close popout before showing preview
+                activePopoutPane = nil
+            },
+            onImagePreviewClose: {
+                // Reopen the popout after preview closes
+                activePopoutPane = pane
+            }
         ))
     }
 
@@ -14154,8 +14162,11 @@ struct ContentView: View {
         let onSessionLinkOpen: (URL, NSEvent.ModifierFlags) -> Void
         let onClose: () -> Void
         let onTogglePreview: () -> Void
+        let onImagePreview: () -> Void
+        let onImagePreviewClose: () -> Void
 
         @FocusState private var popoutSavedFileSearchFocused: Bool
+        @State private var shouldReopenAfterPreview = false
 
         var body: some View {
             VStack(alignment: .leading, spacing: 18) {
@@ -14171,7 +14182,14 @@ struct ContentView: View {
                     sizeStorageKey: storageKey
                 )
             )
-            .onDisappear(perform: onClose)
+            .onDisappear {
+                if shouldReopenAfterPreview {
+                    shouldReopenAfterPreview = false
+                    onImagePreviewClose()
+                } else {
+                    onClose()
+                }
+            }
         }
 
         @ViewBuilder
@@ -14280,7 +14298,7 @@ struct ContentView: View {
                     onSave: onSessionSave,
                     onRevert: onSessionRevert,
                     onLinkRequested: onSessionLinkRequested,
-                    onLinkOpen: onSessionLinkOpen,
+                    onLinkOpen: wrappedSessionLinkOpen,
                     onImageAttachment: onSessionImageAttachment,
                     showsModePicker: false,
                     showsModeToolbar: true,
@@ -14320,7 +14338,7 @@ struct ContentView: View {
                     onSave: onSessionSave,
                     onRevert: onSessionRevert,
                     onLinkRequested: onSessionLinkRequested,
-                    onLinkOpen: onSessionLinkOpen,
+                    onLinkOpen: wrappedSessionLinkOpen,
                     onImageAttachment: onSessionImageAttachment,
                     showsModePicker: false,
                     showsModeToolbar: true,
@@ -14350,7 +14368,7 @@ struct ContentView: View {
                                 MarkdownPreviewView(
                                     text: guideText,
                                     fontSize: fontSize * 1.5,
-                                    onLinkOpen: onGuideLinkOpen
+                                    onLinkOpen: wrappedGuideLinkOpen
                                 )
                             } else {
                                 MarkdownEditor(
@@ -14394,6 +14412,26 @@ struct ContentView: View {
             .overlay(
                 KeyboardShortcutOverlay(onTrigger: onTogglePreview)
             )
+        }
+
+        private func wrappedGuideLinkOpen(_ url: URL, _ modifiers: NSEvent.ModifierFlags) {
+            // Check if this is an image preview action
+            let wantsPreview = modifiers.contains(.command)
+            if url.isFileURL && wantsPreview {
+                shouldReopenAfterPreview = true
+                onImagePreview()
+            }
+            onGuideLinkOpen(url, modifiers)
+        }
+
+        private func wrappedSessionLinkOpen(_ url: URL, _ modifiers: NSEvent.ModifierFlags) {
+            // Check if this is an image preview action
+            let wantsPreview = modifiers.contains(.command)
+            if url.isFileURL && wantsPreview {
+                shouldReopenAfterPreview = true
+                onImagePreview()
+            }
+            onSessionLinkOpen(url, modifiers)
         }
 
         private var preferredSize: CGSize {
