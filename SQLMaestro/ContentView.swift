@@ -1367,6 +1367,11 @@ struct ContentView: View {
     @State private var imageAttachmentToast: String? = nil
     @State private var toastPreviewBehind: Bool = false
 
+    // Copy Individual progress
+    @State private var showCopyWarning: Bool = false
+    @State private var copyProgressMessage: String = ""
+    @State private var copySuccessMessage: String = ""
+
     @State private var alternateFieldsLocked: Bool = true
     @State private var alternateFieldsReorderMode: Bool = false
     @State private var draggedAlternateField: UUID?
@@ -2054,6 +2059,39 @@ struct ContentView: View {
 
     private var toastOverlay: some View {
         VStack(spacing: 10) {
+            // Red warning banner for copy in progress
+            if showCopyWarning {
+                Text("⚠️ Copying in progress - Do not use keyboard or mouse")
+                    .font(.system(size: fontSize + 4, weight: .bold))
+                    .padding(.horizontal, 24).padding(.vertical, 14)
+                    .background(Color.red).foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .shadow(color: .black.opacity(0.4), radius: 10, x: 0, y: 4)
+                    .transition(.scale.combined(with: .opacity))
+            }
+
+            // Progress message
+            if !copyProgressMessage.isEmpty {
+                Text(copyProgressMessage)
+                    .font(.system(size: fontSize + 4, weight: .semibold))
+                    .padding(.horizontal, 24).padding(.vertical, 14)
+                    .background(Theme.aqua).foregroundStyle(.black)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
+                    .transition(.scale.combined(with: .opacity))
+            }
+
+            // Success message
+            if !copySuccessMessage.isEmpty {
+                Text("✓ " + copySuccessMessage)
+                    .font(.system(size: fontSize + 4, weight: .semibold))
+                    .padding(.horizontal, 24).padding(.vertical, 14)
+                    .background(Color.green).foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
+                    .transition(.scale.combined(with: .opacity))
+            }
+
             if toastCopied {
                 Text("Copied to clipboard")
                     .font(.system(size: fontSize + 4, weight: .semibold))
@@ -7423,10 +7461,19 @@ struct ContentView: View {
             var values: [String] = []
 
             // Always include static fields first (ensures orgId isn't dropped)
-            if !orgId.isEmpty { values.append(orgId) }
-            if !acctId.isEmpty { values.append(acctId) }
-            if !mysqlDb.isEmpty { values.append(mysqlDb) }
-            
+            if !orgId.isEmpty {
+                values.append(orgId)
+                LOG("CI: Added orgId: \(orgId)")
+            }
+            if !acctId.isEmpty {
+                values.append(acctId)
+                LOG("CI: Added acctId: \(acctId)")
+            }
+            if !mysqlDb.isEmpty {
+                values.append(mysqlDb)
+                LOG("CI: Added mysqlDb: \(mysqlDb)")
+            }
+
             if let t = selectedTemplate {
                 let staticKeys = ["Org-ID", "Acct-ID", "mysqlDb"]
                 for ph in t.placeholders {
@@ -7436,6 +7483,7 @@ struct ContentView: View {
                     let val = sessions.value(for: ph)
                     if !val.isEmpty {
                         values.append(val)
+                        LOG("CI: Added dynamic field '\(ph)': \(val)")
                     }
                 }
             }
@@ -7444,26 +7492,50 @@ struct ContentView: View {
                 for alt in alternates {
                     if !alt.value.isEmpty {
                         values.append(alt.value)
+                        LOG("CI: Added alternate field '\(alt.name)': \(alt.value)")
                     }
                 }
             }
-            
+
+            LOG("CI: Total values to copy: \(values.count)")
+
             let count = values.count
             let pb = NSPasteboard.general
-            
+
+            // Show warning banner
+            withAnimation { showCopyWarning = true }
+
             for (idx, v) in values.enumerated() {
                 DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(idx * 800)) {
                     pb.clearContents()
                     pb.setString(v, forType: .string)
                     LOG("Copied value \(idx + 1)/\(count): \(v)")
+
+                    // Update progress message
+                    withAnimation {
+                        copyProgressMessage = "Copied to clipboard: \(idx + 1) of \(count)"
+                    }
                 }
             }
-            
-            LOG("Scheduled copy of all values individually", ctx: ["count": "\(count)"])
-            withAnimation { toastCopied = true }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
-                withAnimation { toastCopied = false }
+
+            // Show final success message after all values are copied
+            let totalDuration = count * 800
+            DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(totalDuration + 200)) {
+                withAnimation {
+                    showCopyWarning = false
+                    copyProgressMessage = ""
+                    copySuccessMessage = "All \(count) values copied successfully"
+                }
+
+                // Clear success message after 2 seconds
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2.0) {
+                    withAnimation {
+                        copySuccessMessage = ""
+                    }
+                }
             }
+
+            LOG("Scheduled copy of all values individually", ctx: ["count": "\(count)"])
         }
 
     private struct UnsavedFlags {
