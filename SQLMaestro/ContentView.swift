@@ -9783,14 +9783,23 @@ struct ContentView: View {
             let snapshot = captureSnapshot(for: sessions.current)
 
             guard flags.any else {
-                guard snapshot.hasAnyContent else {
+                // If there are no unsaved changes, check if session matches saved state
+                if let savedSnapshot = sessionSavedSnapshots[sessions.current] {
+                    // Session was saved - if current state matches saved state, clear without prompt
+                    if snapshot == savedSnapshot {
+                        clearCurrentSessionState()
+                        return
+                    }
+                } else if !snapshot.hasAnyContent {
+                    // No saved snapshot and no content - safe to clear without prompt
                     clearCurrentSessionState()
                     return
                 }
 
+                // Session has content but doesn't match saved state (or no saved state exists with content)
                 let alert = NSAlert()
                 alert.messageText = "Clear Session #\(sessions.current.rawValue)?"
-                alert.informativeText = "Clearing will remove the current session’s data. Save before clearing or cancel to keep working."
+                alert.informativeText = "Clearing will remove the current session's data. Save before clearing or cancel to keep working."
                 alert.alertStyle = .warning
                 alert.addButton(withTitle: "Save")
                 alert.addButton(withTitle: "Clear")
@@ -12286,6 +12295,9 @@ struct ContentView: View {
                     Button("Open") {
                         openSessionImage(image)
                     }
+                    Button("Copy File Path") {
+                        copyFilePath(image)
+                    }
                     Divider()
                     Button("Rename") {
                         onRename(image)
@@ -12321,6 +12333,14 @@ struct ContentView: View {
                 } else {
                     LOG("Session image file not found", ctx: ["fileName": image.fileName])
                 }
+            }
+
+            private func copyFilePath(_ image: SessionImage) {
+                let imageURL = AppPaths.sessionImages.appendingPathComponent(image.fileName)
+                let pasteboard = NSPasteboard.general
+                pasteboard.clearContents()
+                pasteboard.setString(imageURL.path, forType: .string)
+                LOG("Session image file path copied to clipboard", ctx: ["fileName": image.fileName, "path": imageURL.path])
             }
         }
 
@@ -12388,6 +12408,9 @@ struct ContentView: View {
                     Button("Open") {
                         onOpen()
                     }
+                    Button("Copy File Path") {
+                        copyFilePath()
+                    }
                     Divider()
                     Button("Rename") {
                         onRename()
@@ -12413,6 +12436,14 @@ struct ContentView: View {
                 formatter.dateStyle = .none
                 formatter.timeStyle = .short
                 return formatter.string(from: date)
+            }
+
+            private func copyFilePath() {
+                let imageURL = TemplateGuideStore.shared.imageURL(for: image, template: template)
+                let pasteboard = NSPasteboard.general
+                pasteboard.clearContents()
+                pasteboard.setString(imageURL.path, forType: .string)
+                LOG("Guide image file path copied to clipboard", ctx: ["fileName": image.fileName, "path": imageURL.path])
             }
         }
 
@@ -12558,6 +12589,14 @@ struct ContentView: View {
                         Button("Show in Finder") {
                             NSWorkspace.shared.activateFileViewerSelecting([imageURL])
                             LOG("Session image preview show in Finder", ctx: ["fileName": sessionImage.fileName])
+                        }
+                        .disabled(!imageExists)
+
+                        Button("Copy File Path") {
+                            let pasteboard = NSPasteboard.general
+                            pasteboard.clearContents()
+                            pasteboard.setString(imageURL.path, forType: .string)
+                            LOG("Session image file path copied to clipboard", ctx: ["fileName": sessionImage.fileName, "path": imageURL.path])
                         }
                         .disabled(!imageExists)
 
@@ -12727,6 +12766,14 @@ struct ContentView: View {
 
                         Button("Show in Finder") {
                             NSWorkspace.shared.activateFileViewerSelecting([imageURL])
+                        }
+                        .disabled(!imageExists)
+
+                        Button("Copy File Path") {
+                            let pasteboard = NSPasteboard.general
+                            pasteboard.clearContents()
+                            pasteboard.setString(imageURL.path, forType: .string)
+                            LOG("Guide image file path copied to clipboard", ctx: ["fileName": guideImage.fileName, "path": imageURL.path])
                         }
                         .disabled(!imageExists)
 
