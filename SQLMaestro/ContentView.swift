@@ -14124,50 +14124,50 @@ struct ContentView: View {
                                                               let currentIdx = currentDragIndex,
                                                               let onReorder = onReorder else { return }
 
-                                                        // Calculate which button we're over based on drag position
+                                                        // Get current mouse position
                                                         let dragX = value.location.x
-                                                        var targetIndex: Int? = nil
 
-                                                        // Find which button we're currently over
-                                                        for (idx, f) in files.enumerated() {
-                                                            if let midX = buttonPositions[f.id], let width = buttonWidths[f.id] {
-                                                                let leftEdge = midX - width / 2
-                                                                let rightEdge = midX + width / 2
-
-                                                                if dragX >= leftEdge && dragX <= rightEdge {
-                                                                    targetIndex = idx
-                                                                    break
+                                                        // Check if we need to swap with adjacent button
+                                                        // Look at the button to the left
+                                                        if currentIdx > 0 {
+                                                            let leftIdx = currentIdx - 1
+                                                            if let leftFile = files[safe: leftIdx],
+                                                               let leftMidX = buttonPositions[leftFile.id] {
+                                                                // If mouse crosses the midpoint of the left button, swap
+                                                                if dragX < leftMidX {
+                                                                    LOG("Crossed left midpoint", ctx: [
+                                                                        "file": file.displayName,
+                                                                        "from": "\(currentIdx)",
+                                                                        "to": "\(leftIdx)",
+                                                                        "dragX": "\(Int(dragX))",
+                                                                        "leftMidX": "\(Int(leftMidX))"
+                                                                    ])
+                                                                    onReorder(currentIdx, leftIdx)
+                                                                    currentDragIndex = leftIdx
+                                                                    return
                                                                 }
                                                             }
                                                         }
 
-                                                        guard let targetIdx = targetIndex, targetIdx != currentIdx else { return }
-
-                                                        // Calculate how far we need to drag to trigger a swap
-                                                        // Use 70% of button width as threshold to prevent jitter
-                                                        guard let currentFileID = files[safe: currentIdx]?.id,
-                                                              let targetFileID = files[safe: targetIdx]?.id,
-                                                              let currentWidth = buttonWidths[currentFileID],
-                                                              let targetWidth = buttonWidths[targetFileID] else { return }
-
-                                                        let avgWidth = (currentWidth + targetWidth) / 2
-                                                        let threshold = avgWidth * 0.7  // Must cross 70% of button width
-
-                                                        let direction = targetIdx > currentIdx ? 1 : -1
-                                                        let dragDistance = abs(value.translation.width)
-
-                                                        // Only swap if we've dragged far enough
-                                                        if dragDistance >= threshold {
-                                                            LOG("Reordering during drag", ctx: [
-                                                                "file": file.displayName,
-                                                                "from": "\(currentIdx)",
-                                                                "to": "\(targetIdx)",
-                                                                "dragDistance": "\(Int(dragDistance))",
-                                                                "threshold": "\(Int(threshold))"
-                                                            ])
-                                                            onReorder(currentIdx, targetIdx)
-                                                            currentDragIndex = targetIdx
-                                                            accumulatedDragDistance = 0
+                                                        // Look at the button to the right
+                                                        if currentIdx < files.count - 1 {
+                                                            let rightIdx = currentIdx + 1
+                                                            if let rightFile = files[safe: rightIdx],
+                                                               let rightMidX = buttonPositions[rightFile.id] {
+                                                                // If mouse crosses the midpoint of the right button, swap
+                                                                if dragX > rightMidX {
+                                                                    LOG("Crossed right midpoint", ctx: [
+                                                                        "file": file.displayName,
+                                                                        "from": "\(currentIdx)",
+                                                                        "to": "\(rightIdx)",
+                                                                        "dragX": "\(Int(dragX))",
+                                                                        "rightMidX": "\(Int(rightMidX))"
+                                                                    ])
+                                                                    onReorder(currentIdx, rightIdx)
+                                                                    currentDragIndex = rightIdx
+                                                                    return
+                                                                }
+                                                            }
                                                         }
                                                     }
                                                     .onEnded { _ in
