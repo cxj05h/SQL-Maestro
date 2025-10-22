@@ -1440,6 +1440,7 @@ struct ContentView: View {
     @StateObject private var savedFileAutosave = SavedFileAutosaveCoordinator()
     @StateObject private var dbTablesAutosave = DBTablesAutosaveCoordinator()
     @State private var isPreviewMode: Bool = true
+    @State private var savedScrollPosition: CGFloat = 0.0
     @State private var sessionNotesMode: [TicketSession: SessionNotesPaneMode] = [
         .one: .notes,
         .two: .notes,
@@ -6995,6 +6996,18 @@ struct ContentView: View {
                 return
             }
 
+            // Log current state
+            LOG("=== Cmd+F pressed ===", ctx: [
+                "isSearchFocused": "\(isSearchFocused)",
+                "isGuideNotesSearchFocused": "\(isGuideNotesSearchFocused)",
+                "isSessionNotesSearchFocused": "\(isSessionNotesSearchFocused)",
+                "isSavedFileSearchFocused": "\(isSavedFileSearchFocused)",
+                "isGuideNotesEditorFocused": "\(isGuideNotesEditorFocused)",
+                "isSessionNotesEditorFocused": "\(isSessionNotesEditorFocused)",
+                "isSavedFileEditorFocused": "\(isSavedFileEditorFocused)",
+                "activeBottomPane": "\(String(describing: activeBottomPane))"
+            ])
+
             // Toggle between pane search and query template search
             // Priority: if a pane search is focused, switch to query template search
             // If query template search is focused, switch to the active pane's search
@@ -7097,13 +7110,22 @@ struct ContentView: View {
                 LOG("Session notes shortcut ignored for inactive tab", ctx: ["tabId": tabID])
                 return
             }
+            LOG("=== Cmd+2 pressed (before) ===", ctx: [
+                "activeBottomPane": "\(String(describing: activeBottomPane))",
+                "isGuideNotesSearchFocused": "\(isGuideNotesSearchFocused)",
+                "isSessionNotesSearchFocused": "\(isSessionNotesSearchFocused)"
+            ])
             // Clear all search focus states when switching panes
             isGuideNotesSearchFocused = false
             isSessionNotesSearchFocused = false
             isSavedFileSearchFocused = false
             isSearchFocused = false
             setActivePane(.sessionNotes)
-            LOG("Session notes shortcut handled", ctx: ["tabId": tabID])
+            LOG("=== Cmd+2 pressed (after) ===", ctx: [
+                "activeBottomPane": "\(String(describing: activeBottomPane))",
+                "isGuideNotesSearchFocused": "\(isGuideNotesSearchFocused)",
+                "isSessionNotesSearchFocused": "\(isSessionNotesSearchFocused)"
+            ])
         }
 
         private func handleShowSavedFilesShortcut() {
@@ -8416,9 +8438,30 @@ struct ContentView: View {
         }
 
         private func setPreviewMode(_ preview: Bool) {
+            // Save scroll position when leaving edit mode
+            if isPreviewMode != preview && isPreviewMode == false {
+                if activeBottomPane == .guideNotes {
+                    savedScrollPosition = guideNotesEditor.getScrollPosition()
+                } else {
+                    savedScrollPosition = sessionNotesEditor.getScrollPosition()
+                }
+            }
+
             isPreviewMode = preview
-            if !preview, activeBottomPane == .guideNotes {
-                DispatchQueue.main.async { guideNotesEditor.focus() }
+
+            // Restore scroll position when entering edit mode
+            if !preview {
+                if activeBottomPane == .guideNotes {
+                    DispatchQueue.main.async {
+                        guideNotesEditor.focus()
+                        guideNotesEditor.setScrollPosition(savedScrollPosition)
+                    }
+                } else {
+                    DispatchQueue.main.async {
+                        sessionNotesEditor.focus()
+                        sessionNotesEditor.setScrollPosition(savedScrollPosition)
+                    }
+                }
             }
         }
 

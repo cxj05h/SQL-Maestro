@@ -32,6 +32,16 @@ final class MarkdownEditorController: ObservableObject {
     func selectAndScrollToRange(offset: Int, length: Int) {
         coordinator?.selectAndScrollToRange(offset: offset, length: length)
     }
+
+    /// Get the current scroll position (as a fraction from 0.0 to 1.0)
+    func getScrollPosition() -> CGFloat {
+        coordinator?.getScrollPosition() ?? 0.0
+    }
+
+    /// Set the scroll position (as a fraction from 0.0 to 1.0)
+    func setScrollPosition(_ position: CGFloat) {
+        coordinator?.setScrollPosition(position)
+    }
 }
 
 struct MarkdownEditor: NSViewRepresentable {
@@ -236,6 +246,37 @@ struct MarkdownEditor: NSViewRepresentable {
             if textView.responds(to: #selector(NSTextView.showFindIndicator(for:))) {
                 textView.showFindIndicator(for: nsRange)
             }
+        }
+
+        func getScrollPosition() -> CGFloat {
+            guard let scrollView = textView?.enclosingScrollView else { return 0.0 }
+            let contentView = scrollView.contentView
+            let documentRect = contentView.documentRect
+            let visibleRect = contentView.documentVisibleRect
+
+            // Calculate scroll position as a fraction (0.0 = top, 1.0 = bottom)
+            let maxScroll = documentRect.height - visibleRect.height
+            guard maxScroll > 0 else { return 0.0 }
+
+            let currentScroll = visibleRect.origin.y
+            return currentScroll / maxScroll
+        }
+
+        func setScrollPosition(_ position: CGFloat) {
+            guard let scrollView = textView?.enclosingScrollView else { return }
+            let contentView = scrollView.contentView
+            let documentRect = contentView.documentRect
+            let visibleRect = contentView.documentVisibleRect
+
+            // Calculate the y position from the fraction
+            let maxScroll = documentRect.height - visibleRect.height
+            guard maxScroll > 0 else { return }
+
+            let targetY = position * maxScroll
+            let targetPoint = NSPoint(x: visibleRect.origin.x, y: targetY)
+
+            contentView.scroll(to: targetPoint)
+            scrollView.reflectScrolledClipView(contentView)
         }
 
         // MARK: NSTextViewDelegate
