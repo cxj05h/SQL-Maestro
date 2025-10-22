@@ -939,15 +939,102 @@ extension WheelNumberField {
     }
 }
 
+private enum PreviewHighlighting {
+    struct Entry {
+        let range: Range<String.Index>
+        let sourceIndex: Int
+    }
+
+    static func entries(in text: String, matches: [Range<String.Index>]) -> [Entry] {
+        guard !text.isEmpty, !matches.isEmpty else { return [] }
+
+        var excludedRanges = codeFenceRanges("```", in: text)
+        excludedRanges.append(contentsOf: codeFenceRanges("~~~", in: text))
+
+        if let inlineRegex {
+            let nsRange = NSRange(text.startIndex..., in: text)
+            inlineRegex.enumerateMatches(in: text, options: [], range: nsRange) { match, _, _ in
+                guard let match, let range = Range(match.range, in: text) else { return }
+                if !excludedRanges.contains(where: { $0.overlaps(range) }) {
+                    excludedRanges.append(range)
+                }
+            }
+        }
+
+        return matches.enumerated().compactMap { offset, range in
+            guard !excludedRanges.contains(where: { $0.overlaps(range) }) else { return nil }
+            return Entry(range: range, sourceIndex: offset)
+        }
+    }
+
+    private static let inlineRegex = try? NSRegularExpression(pattern: "`[^`\\n]+`", options: [])
+
+    private static func codeFenceRanges(_ fence: String, in text: String) -> [Range<String.Index>] {
+        var ranges: [Range<String.Index>] = []
+        var searchStart = text.startIndex
+
+        while searchStart < text.endIndex,
+              let fenceRange = text.range(of: fence, range: searchStart..<text.endIndex) {
+            let atLineStart: Bool = {
+                if fenceRange.lowerBound == text.startIndex { return true }
+                let beforeIndex = text.index(before: fenceRange.lowerBound)
+                let beforeChar = text[beforeIndex]
+                return beforeChar == "\n" || beforeChar == "\r"
+            }()
+
+            if atLineStart {
+                let closingSearchStart = fenceRange.upperBound
+                if let closingRange = text.range(of: fence, range: closingSearchStart..<text.endIndex) {
+                    let range = fenceRange.lowerBound..<closingRange.upperBound
+                    ranges.append(range)
+                    searchStart = closingRange.upperBound
+                    continue
+                } else {
+                    break
+                }
+            }
+
+            searchStart = text.index(after: fenceRange.lowerBound)
+        }
+
+        return ranges
+    }
+}
+
 struct MarkdownPreviewView: View {
-    var text: String
-    var fontSize: CGFloat
-    var onLinkOpen: ((URL, NSEvent.ModifierFlags) -> Void)? = nil
+    private let text: String
+    private let fontSize: CGFloat
+    private let highlightRanges: [Range<String.Index>]
+    private let activeHighlightIndex: Int?
+    private let scrollRequest: PreviewScrollRequest?
+    private let onLinkOpen: ((URL, NSEvent.ModifierFlags) -> Void)?
+    @Binding private var scrollPosition: CGFloat
     @Environment(\.colorScheme) private var colorScheme
+
+    init(
+        text: String,
+        fontSize: CGFloat,
+        highlightRanges: [Range<String.Index>] = [],
+        activeHighlightIndex: Int? = nil,
+        scrollPosition: Binding<CGFloat> = .constant(0),
+        scrollRequest: PreviewScrollRequest? = nil,
+        onLinkOpen: ((URL, NSEvent.ModifierFlags) -> Void)? = nil
+    ) {
+        self.text = text
+        self.fontSize = fontSize
+        self.highlightRanges = highlightRanges
+        self.activeHighlightIndex = activeHighlightIndex
+        self._scrollPosition = scrollPosition
+        self.scrollRequest = scrollRequest
+        self.onLinkOpen = onLinkOpen
+    }
 
     var body: some View {
         GeometryReader { geometry in
-            NonBubblingScrollView {
+            NonBubblingScrollView(
+                scrollPosition: $scrollPosition,
+                scrollRequest: scrollRequest
+            ) {
                 VStack(alignment: .leading, spacing: 0) {
                     previewMarkdown
                         .frame(width: geometry.size.width - 16, alignment: .leading)
@@ -971,7 +1058,33 @@ struct MarkdownPreviewView: View {
     }
 
     private var processedText: String {
-        text.replacingOccurrences(of: "=>", with: "→")
+        highlightedText.replacingOccurrences(of: "=>", with: "→")
+    }
+
+    private var highlightedText: String {
+        guard !highlightRanges.isEmpty else { return text }
+
+        var result = text
+        let entries = highlightRanges.enumerated().map { element -> (index: Int, lower: Int, upper: Int) in
+            let lower = text.distance(from: text.startIndex, to: element.element.lowerBound)
+            let upper = text.distance(from: text.startIndex, to: element.element.upperBound)
+            return (element.offset, lower, upper)
+        }
+
+        for entry in entries.sorted(by: { $0.lower > $1.lower }) {
+            let isActive = activeHighlightIndex.map { $0 == entry.index } ?? false
+            let openTag = isActive
+                ? "<mark data-sqlmaestro=\"active\">"
+                : "<mark data-sqlmaestro=\"match\">"
+            let closeTag = "</mark>"
+
+            let upperIndex = result.index(result.startIndex, offsetBy: entry.upper)
+            result.insert(contentsOf: closeTag, at: upperIndex)
+            let lowerIndex = result.index(result.startIndex, offsetBy: entry.lower)
+            result.insert(contentsOf: openTag, at: lowerIndex)
+        }
+
+        return result
     }
 
     private var previewTheme: MarkdownUI.Theme {
@@ -1044,6 +1157,16 @@ struct MarkdownPreviewView: View {
     }
 }
 
+struct PreviewScrollRequest: Equatable, Identifiable {
+    let id: UUID
+    let target: CGFloat
+
+    init(id: UUID = UUID(), target: CGFloat) {
+        self.id = id
+        self.target = target
+    }
+}
+
 private struct MonospacedTextStyle: TextStyle {
     var size: CGFloat
 
@@ -1069,10 +1192,19 @@ private struct InlineCodeTextStyle: TextStyle {
 /// Scroll view used inside nested panes to swallow edge scroll events so the parent view doesn't move.
 private struct NonBubblingScrollView<Content: View>: NSViewRepresentable {
     var showsIndicators: Bool
+    var scrollPosition: Binding<CGFloat>?
+    var scrollRequest: PreviewScrollRequest?
     var content: Content
 
-    init(showsIndicators: Bool = true, @ViewBuilder content: () -> Content) {
+    init(
+        showsIndicators: Bool = true,
+        scrollPosition: Binding<CGFloat>? = nil,
+        scrollRequest: PreviewScrollRequest? = nil,
+        @ViewBuilder content: () -> Content
+    ) {
         self.showsIndicators = showsIndicators
+        self.scrollPosition = scrollPosition
+        self.scrollRequest = scrollRequest
         self.content = content()
     }
 
@@ -1089,6 +1221,7 @@ private struct NonBubblingScrollView<Content: View>: NSViewRepresentable {
         scrollView.autohidesScrollers = showsIndicators
         scrollView.scrollerStyle = .overlay
         scrollView.automaticallyAdjustsContentInsets = false
+        scrollView.contentView.postsBoundsChangedNotifications = true
 
         // Enable layer-backing and clipping to prevent content overflow
         scrollView.wantsLayer = true
@@ -1100,6 +1233,7 @@ private struct NonBubblingScrollView<Content: View>: NSViewRepresentable {
         hosting.layer?.masksToBounds = true
         scrollView.documentView = hosting
         context.coordinator.hostingView = hosting
+        context.coordinator.attach(scrollView: scrollView, scrollPosition: scrollPosition)
 
         if let clipView = scrollView.contentView as? NSClipView {
             // Enable clipping on the clip view itself
@@ -1125,10 +1259,71 @@ private struct NonBubblingScrollView<Content: View>: NSViewRepresentable {
         if let hosting = context.coordinator.hostingView {
             hosting.rootView = content
         }
+        context.coordinator.attach(scrollView: nsView, scrollPosition: scrollPosition)
+        if let request = scrollRequest {
+            context.coordinator.apply(scrollRequest: request)
+        }
     }
 
-    final class Coordinator {
+    final class Coordinator: NSObject {
         var hostingView: NSHostingView<Content>?
+        private weak var scrollView: NonBubblingNSScrollView?
+        private weak var observedContentView: NSClipView?
+        private var scrollPosition: Binding<CGFloat>?
+        private var lastAppliedScrollRequestID: UUID?
+
+        func attach(scrollView: NonBubblingNSScrollView, scrollPosition: Binding<CGFloat>?) {
+            if observedContentView !== scrollView.contentView {
+                if let observedContentView {
+                    NotificationCenter.default.removeObserver(self, name: NSView.boundsDidChangeNotification, object: observedContentView)
+                }
+                observedContentView = scrollView.contentView
+                NotificationCenter.default.addObserver(
+                    self,
+                    selector: #selector(contentViewBoundsDidChange(_:)),
+                    name: NSView.boundsDidChangeNotification,
+                    object: scrollView.contentView
+                )
+            }
+
+            self.scrollView = scrollView
+            self.scrollPosition = scrollPosition
+            updateScrollBinding()
+        }
+
+        deinit {
+            if let observedContentView {
+                NotificationCenter.default.removeObserver(self, name: NSView.boundsDidChangeNotification, object: observedContentView)
+            }
+        }
+
+        @objc private func contentViewBoundsDidChange(_ notification: Notification) {
+            updateScrollBinding()
+        }
+
+        private func updateScrollBinding() {
+            guard let binding = scrollPosition, let scrollView = scrollView else { return }
+            let fraction = scrollView.scrollFraction()
+            guard fraction.isFinite else { return }
+            let clamped = max(0, min(1, fraction))
+
+            if abs(binding.wrappedValue - clamped) > 0.001 {
+                DispatchQueue.main.async {
+                    binding.wrappedValue = clamped
+                }
+            }
+        }
+
+        func apply(scrollRequest: PreviewScrollRequest) {
+            guard let scrollView else { return }
+            guard lastAppliedScrollRequestID != scrollRequest.id else { return }
+            lastAppliedScrollRequestID = scrollRequest.id
+
+            DispatchQueue.main.async {
+                scrollView.scroll(toFraction: scrollRequest.target)
+                self.updateScrollBinding()
+            }
+        }
     }
 }
 
@@ -1194,6 +1389,28 @@ final class NonBubblingNSScrollView: NSScrollView {
             super.scrollWheel(with: event)
             nextResponder = originalNextResponder
         }
+    }
+
+    func scrollFraction() -> CGFloat {
+        guard let documentView = documentView else { return 0 }
+        let documentHeight = documentView.bounds.height
+        let visibleHeight = contentView.bounds.height
+        let maxOffset = max(documentHeight - visibleHeight, 0)
+        guard maxOffset > 0 else { return 0 }
+        let offset = max(contentView.bounds.origin.y, 0)
+        return max(0, min(1, offset / maxOffset))
+    }
+
+    func scroll(toFraction fraction: CGFloat) {
+        let clamped = max(0, min(1, fraction))
+        guard let documentView = documentView else { return }
+        let documentHeight = documentView.bounds.height
+        let visibleHeight = contentView.bounds.height
+        let maxOffset = max(documentHeight - visibleHeight, 0)
+        let y = maxOffset * clamped
+        let newOrigin = NSPoint(x: contentView.bounds.origin.x, y: y)
+        contentView.animator().setBoundsOrigin(newOrigin)
+        reflectScrolledClipView(contentView)
     }
 }
 
@@ -1406,9 +1623,13 @@ struct ContentView: View {
     @State private var guideNotesInPaneSearchQuery: String = ""
     @State private var guideNotesSearchMatches: [Range<String.Index>] = []
     @State private var guideNotesCurrentMatchIndex: Int = 0
+    @State private var guideNotesPreviewScrollPosition: CGFloat = 0.0
+    @State private var guideNotesPreviewScrollRequest: PreviewScrollRequest? = nil
     @State private var sessionNotesInPaneSearchQuery: String = ""
     @State private var sessionNotesSearchMatches: [Range<String.Index>] = []
     @State private var sessionNotesCurrentMatchIndex: Int = 0
+    @State private var sessionNotesPreviewScrollPosition: CGFloat = 0.0
+    @State private var sessionNotesPreviewScrollRequest: PreviewScrollRequest? = nil
     @State private var activePopoutPane: PopoutPaneContext? = nil
     @State private var isSidebarVisible: Bool = false
     struct TagExplorerContext: Identifiable {
@@ -3764,31 +3985,6 @@ struct ContentView: View {
 
         // MARK: - Guide Notes Search
 
-        private func stripMarkdownForSearch(_ text: String) -> String {
-            var result = text
-
-            // Strip image links: ![alt](url)
-            result = result.replacingOccurrences(of: "!\\[([^\\]]*)\\]\\([^\\)]+\\)", with: "$1", options: .regularExpression)
-            // Strip links: [text](url)
-            result = result.replacingOccurrences(of: "\\[([^\\]]*)\\]\\([^\\)]+\\)", with: "$1", options: .regularExpression)
-            // Strip bold: **text** or __text__
-            result = result.replacingOccurrences(of: "\\*\\*([^\\*]+)\\*\\*", with: "$1", options: .regularExpression)
-            result = result.replacingOccurrences(of: "__([^_]+)__", with: "$1", options: .regularExpression)
-            // Strip italic: *text* or _text_
-            result = result.replacingOccurrences(of: "\\*([^\\*]+)\\*", with: "$1", options: .regularExpression)
-            result = result.replacingOccurrences(of: "_([^_]+)_", with: "$1", options: .regularExpression)
-            // Strip inline code: `code`
-            result = result.replacingOccurrences(of: "`([^`]+)`", with: "$1", options: .regularExpression)
-            // Strip headings: # text
-            result = result.replacingOccurrences(of: "^#{1,6}\\s+", with: "", options: .regularExpression)
-            // Strip bullet lists: - text or * text or + text
-            result = result.replacingOccurrences(of: "^\\s*[-*+]\\s+", with: "", options: .regularExpression)
-            // Strip numbered lists: 1. text
-            result = result.replacingOccurrences(of: "^\\s*\\d+\\.\\s+", with: "", options: .regularExpression)
-
-            return result
-        }
-
         private func updateGuideNotesSearchMatches() {
             let query = guideNotesInPaneSearchQuery.trimmingCharacters(in: .whitespacesAndNewlines)
 
@@ -3799,13 +3995,15 @@ struct ContentView: View {
             }
 
             // Search in the raw markdown text (case-insensitive)
-            let text = guideNotesDraft.lowercased()
-            let searchText = query.lowercased()
+            let text = guideNotesDraft
+            let searchText = query
             var matches: [Range<String.Index>] = []
             var searchStartIndex = text.startIndex
 
             while searchStartIndex < text.endIndex,
-                  let range = text.range(of: searchText, range: searchStartIndex..<text.endIndex) {
+                  let range = text.range(of: searchText,
+                                         options: [.caseInsensitive],
+                                         range: searchStartIndex..<text.endIndex) {
                 matches.append(range)
                 searchStartIndex = range.upperBound
             }
@@ -3875,29 +4073,32 @@ struct ContentView: View {
             // Convert String.Index to Int offset for NSRange
             let offset = guideNotesDraft.distance(from: guideNotesDraft.startIndex, to: matchRange.lowerBound)
             let length = guideNotesDraft.distance(from: matchRange.lowerBound, to: matchRange.upperBound)
+            let fraction = scrollFraction(in: guideNotesDraft, for: matchRange)
 
             LOG("Guide notes search: scrolling to match", ctx: [
                 "index": "\(index + 1)",
                 "total": "\(guideNotesSearchMatches.count)",
                 "offset": "\(offset)",
                 "length": "\(length)",
-                "query": guideNotesInPaneSearchQuery
+                "query": guideNotesInPaneSearchQuery,
+                "fraction": String(format: "%.3f", fraction)
             ])
 
-            // Manually select and scroll to the specific range in the editor
-            DispatchQueue.main.async { [self] in
-                guideNotesEditor.selectAndScrollToRange(offset: offset, length: length)
+            savedScrollPosition = fraction
+
+            if isPreviewMode {
+                guideNotesPreviewScrollPosition = fraction
+                guideNotesPreviewScrollRequest = PreviewScrollRequest(target: fraction)
+            } else {
+                // Manually select and scroll to the specific range in the editor
+                DispatchQueue.main.async { [self] in
+                    guideNotesEditor.selectAndScrollToRange(offset: offset, length: length)
+                }
             }
         }
 
         private func handleGuideNotesSearchEnter() {
             guard !guideNotesInPaneSearchQuery.isEmpty else { return }
-
-            // If in preview mode, switch to edit mode first
-            if isPreviewMode {
-                setPreviewMode(false)
-                LOG("Guide notes search: switched to edit mode on Enter")
-            }
 
             // Navigate to next match (or first match if just switched modes)
             if !guideNotesSearchMatches.isEmpty {
@@ -3917,13 +4118,15 @@ struct ContentView: View {
             }
 
             // Get the current session notes text
-            let text = (sessionNotesDrafts[sessions.current] ?? "").lowercased()
-            let searchText = query.lowercased()
+            let text = sessionNotesDrafts[sessions.current] ?? ""
+            let searchText = query
             var matches: [Range<String.Index>] = []
             var searchStartIndex = text.startIndex
 
             while searchStartIndex < text.endIndex,
-                  let range = text.range(of: searchText, range: searchStartIndex..<text.endIndex) {
+                  let range = text.range(of: searchText,
+                                         options: [.caseInsensitive],
+                                         range: searchStartIndex..<text.endIndex) {
                 matches.append(range)
                 searchStartIndex = range.upperBound
             }
@@ -3995,28 +4198,44 @@ struct ContentView: View {
             // Convert String.Index to Int offset for NSRange
             let offset = sessionNotesDraft.distance(from: sessionNotesDraft.startIndex, to: matchRange.lowerBound)
             let length = sessionNotesDraft.distance(from: matchRange.lowerBound, to: matchRange.upperBound)
+            let fraction = scrollFraction(in: sessionNotesDraft, for: matchRange)
 
             LOG("Session notes search: scrolling to match", ctx: [
                 "index": "\(index + 1)",
                 "total": "\(sessionNotesSearchMatches.count)",
                 "offset": "\(offset)",
                 "length": "\(length)",
-                "query": sessionNotesInPaneSearchQuery
+                "query": sessionNotesInPaneSearchQuery,
+                "fraction": String(format: "%.3f", fraction)
             ])
 
-            // Manually select and scroll to the specific range in the editor
-            DispatchQueue.main.async { [self] in
-                sessionNotesEditor.selectAndScrollToRange(offset: offset, length: length)
+            savedScrollPosition = fraction
+
+            if isPreviewMode {
+                sessionNotesPreviewScrollPosition = fraction
+                sessionNotesPreviewScrollRequest = PreviewScrollRequest(target: fraction)
+            } else {
+                // Manually select and scroll to the specific range in the editor
+                DispatchQueue.main.async { [self] in
+                    sessionNotesEditor.selectAndScrollToRange(offset: offset, length: length)
+                }
             }
+        }
+
+        private func scrollFraction(in text: String, for range: Range<String.Index>) -> CGFloat {
+            guard !text.isEmpty else { return 0 }
+
+            let lower = text.distance(from: text.startIndex, to: range.lowerBound)
+            let upper = text.distance(from: text.startIndex, to: range.upperBound)
+            let center = Double(lower + upper) / 2.0
+            let total = max(Double(text.count), 1.0)
+            let fraction = center / total
+
+            return CGFloat(min(max(fraction, 0), 1))
         }
 
         private func handleSessionNotesSearchEnter() {
             guard !sessionNotesInPaneSearchQuery.isEmpty else { return }
-
-            // If in preview mode, switch to edit mode first
-            if isPreviewMode {
-                setPreviewMode(false)
-            }
 
             // Navigate to next match (or first match if just switched modes)
             if !sessionNotesSearchMatches.isEmpty {
@@ -7288,6 +7507,8 @@ struct ContentView: View {
                     guideNotesInPaneSearchQuery = ""
                     guideNotesSearchMatches = []
                     guideNotesCurrentMatchIndex = 0
+                    guideNotesPreviewScrollPosition = 0
+                    guideNotesPreviewScrollRequest = PreviewScrollRequest(target: 0)
                 }
         }
 
@@ -7302,10 +7523,28 @@ struct ContentView: View {
 
         private var guideNotesEditorContent: some View {
             Group {
+                let highlightEntries = guideNotesInPaneSearchQuery.isEmpty
+                    ? []
+                    : PreviewHighlighting.entries(in: guideNotesDraft, matches: guideNotesSearchMatches)
+                let highlightRanges = highlightEntries.map(\.range)
+                let highlightActiveIndex = highlightEntries.firstIndex { $0.sourceIndex == guideNotesCurrentMatchIndex }
+
                 if isPreviewMode {
                     MarkdownPreviewView(
                         text: guideNotesDraft,
                         fontSize: fontSize * 1.5,
+                        highlightRanges: highlightRanges,
+                        activeHighlightIndex: highlightActiveIndex,
+                        scrollPosition: Binding(
+                            get: { guideNotesPreviewScrollPosition },
+                            set: { newValue in
+                                guideNotesPreviewScrollPosition = newValue
+                                if isPreviewMode && activeBottomPane == .guideNotes {
+                                    savedScrollPosition = newValue
+                                }
+                            }
+                        ),
+                        scrollRequest: guideNotesPreviewScrollRequest,
                         onLinkOpen: { url, modifiers in
                             openLink(url, modifiers: modifiers)
                         }
@@ -7368,7 +7607,14 @@ struct ContentView: View {
         }
 
         private func sessionNotesPane(for activeSession: TicketSession) -> some View {
-            SessionNotesInline(
+            let sessionDraft = sessionNotesDrafts[activeSession] ?? ""
+            let highlightEntries = sessionNotesInPaneSearchQuery.isEmpty
+                ? []
+                : PreviewHighlighting.entries(in: sessionDraft, matches: sessionNotesSearchMatches)
+            let highlightRanges = highlightEntries.map(\.range)
+            let highlightActiveIndex = highlightEntries.firstIndex { $0.sourceIndex == sessionNotesCurrentMatchIndex }
+
+            return SessionNotesInline(
                 fontSize: fontSize,
                 editorMinHeight: bottomPaneEditorMinHeight,
                 session: activeSession,
@@ -7443,7 +7689,19 @@ struct ContentView: View {
                 showsModePicker: false,
                 showsModeToolbar: false,
                 showsOuterBackground: false,
-                showsContentBackground: true
+                showsContentBackground: true,
+                highlightMatches: highlightRanges,
+                highlightActiveIndex: highlightActiveIndex,
+                previewScrollPosition: Binding(
+                    get: { sessionNotesPreviewScrollPosition },
+                    set: { newValue in
+                        sessionNotesPreviewScrollPosition = newValue
+                        if isPreviewMode && activeBottomPane == .sessionNotes {
+                            savedScrollPosition = newValue
+                        }
+                    }
+                ),
+                previewScrollRequest: sessionNotesPreviewScrollRequest
             )
             .onChange(of: sessionNotesInPaneSearchQuery) { _, _ in
                 updateSessionNotesSearchMatches()
@@ -7458,11 +7716,13 @@ struct ContentView: View {
                 sessionNotesInPaneSearchQuery = ""
                 sessionNotesSearchMatches = []
                 sessionNotesCurrentMatchIndex = 0
+                sessionNotesPreviewScrollPosition = 0
+                sessionNotesPreviewScrollRequest = PreviewScrollRequest(target: 0)
             }
         }
 
         private func savedFilesPane(for activeSession: TicketSession) -> some View {
-            SessionNotesInline(
+            return SessionNotesInline(
                 fontSize: fontSize,
                 editorMinHeight: bottomPaneEditorMinHeight,
                 session: activeSession,
@@ -8452,12 +8712,21 @@ struct ContentView: View {
         }
 
         private func setPreviewMode(_ preview: Bool) {
-            // Save scroll position when leaving edit mode
-            if isPreviewMode != preview && isPreviewMode == false {
-                if activeBottomPane == .guideNotes {
-                    savedScrollPosition = guideNotesEditor.getScrollPosition()
+            if isPreviewMode != preview {
+                if isPreviewMode == false {
+                    // Leaving edit mode — capture editor scroll position
+                    if activeBottomPane == .guideNotes {
+                        savedScrollPosition = guideNotesEditor.getScrollPosition()
+                    } else if activeBottomPane == .sessionNotes {
+                        savedScrollPosition = sessionNotesEditor.getScrollPosition()
+                    }
                 } else {
-                    savedScrollPosition = sessionNotesEditor.getScrollPosition()
+                    // Leaving preview mode — capture preview scroll position
+                    if activeBottomPane == .guideNotes {
+                        savedScrollPosition = guideNotesPreviewScrollPosition
+                    } else if activeBottomPane == .sessionNotes {
+                        savedScrollPosition = sessionNotesPreviewScrollPosition
+                    }
                 }
             }
 
@@ -8470,11 +8739,19 @@ struct ContentView: View {
                         guideNotesEditor.focus()
                         guideNotesEditor.setScrollPosition(savedScrollPosition)
                     }
-                } else {
+                } else if activeBottomPane == .sessionNotes {
                     DispatchQueue.main.async {
                         sessionNotesEditor.focus()
                         sessionNotesEditor.setScrollPosition(savedScrollPosition)
                     }
+                }
+            } else {
+                if activeBottomPane == .guideNotes {
+                    guideNotesPreviewScrollPosition = savedScrollPosition
+                    guideNotesPreviewScrollRequest = PreviewScrollRequest(target: savedScrollPosition)
+                } else if activeBottomPane == .sessionNotes {
+                    sessionNotesPreviewScrollPosition = savedScrollPosition
+                    sessionNotesPreviewScrollRequest = PreviewScrollRequest(target: savedScrollPosition)
                 }
             }
         }
@@ -13836,6 +14113,10 @@ struct ContentView: View {
         var showsModeToolbar: Bool = true
         var showsOuterBackground: Bool = true
         var showsContentBackground: Bool = true
+        var highlightMatches: [Range<String.Index>] = []
+        var highlightActiveIndex: Int? = nil
+        var previewScrollPosition: Binding<CGFloat> = .constant(0)
+        var previewScrollRequest: PreviewScrollRequest? = nil
 
         private var isDirty: Bool { draft != savedValue }
 
@@ -14019,6 +14300,10 @@ struct ContentView: View {
                     MarkdownPreviewView(
                         text: draft,
                         fontSize: fontSize * 1.5,
+                        highlightRanges: highlightMatches,
+                        activeHighlightIndex: highlightActiveIndex,
+                        scrollPosition: previewScrollPosition,
+                        scrollRequest: previewScrollRequest,
                         onLinkOpen: onLinkOpen
                     )
                     .frame(maxWidth: .infinity, alignment: .topLeading)
@@ -14896,6 +15181,12 @@ struct ContentView: View {
         @State private var popoutSessionNotesSearchQuery: String = ""
         @State private var popoutSessionNotesSearchMatches: [Range<String.Index>] = []
         @State private var popoutSessionNotesCurrentMatchIndex: Int = 0
+        @State private var popoutGuidePreviewScrollPosition: CGFloat = 0.0
+        @State private var popoutGuidePreviewScrollRequest: PreviewScrollRequest? = nil
+        @State private var popoutGuideSavedScrollPosition: CGFloat = 0.0
+        @State private var popoutSessionPreviewScrollPosition: CGFloat = 0.0
+        @State private var popoutSessionPreviewScrollRequest: PreviewScrollRequest? = nil
+        @State private var popoutSessionSavedScrollPosition: CGFloat = 0.0
 
         var body: some View {
             VStack(alignment: .leading, spacing: 18) {
@@ -14922,6 +15213,9 @@ struct ContentView: View {
             .onReceive(NotificationCenter.default.publisher(for: .focusSearchRequested)) { _ in
                 handlePopoutFocusSearch()
             }
+            .onChange(of: isPreview) { _, newValue in
+                handlePopoutPreviewToggle(newValue)
+            }
         }
 
         private func handlePopoutFocusSearch() {
@@ -14929,16 +15223,8 @@ struct ContentView: View {
             // It should NOT toggle to query template search
             switch pane {
             case .guide:
-                // If in preview mode, switch to edit mode first
-                if isPreview {
-                    onTogglePreview()
-                }
                 popoutGuideNotesSearchFocused = true
             case .session:
-                // If in preview mode, switch to edit mode first
-                if isPreview {
-                    onTogglePreview()
-                }
                 popoutSessionNotesSearchFocused = true
             case .saved:
                 // Saved files workspace handles its own search
@@ -15109,10 +15395,28 @@ struct ContentView: View {
                         }
 
                         Group {
+                            let highlightEntries = popoutGuideNotesSearchQuery.isEmpty
+                                ? []
+                                : PreviewHighlighting.entries(in: guideText, matches: popoutGuideNotesSearchMatches)
+                            let highlightRanges = highlightEntries.map(\.range)
+                            let highlightActiveIndex = highlightEntries.firstIndex { $0.sourceIndex == popoutGuideNotesCurrentMatchIndex }
+
                             if isPreview {
                                 MarkdownPreviewView(
                                     text: guideText,
                                     fontSize: fontSize * 1.5,
+                                    highlightRanges: highlightRanges,
+                                    activeHighlightIndex: highlightActiveIndex,
+                                    scrollPosition: Binding(
+                                        get: { popoutGuidePreviewScrollPosition },
+                                        set: { newValue in
+                                            popoutGuidePreviewScrollPosition = newValue
+                                            if isPreview {
+                                                popoutGuideSavedScrollPosition = newValue
+                                            }
+                                        }
+                                    ),
+                                    scrollRequest: popoutGuidePreviewScrollRequest,
                                     onLinkOpen: wrappedGuideLinkOpen
                                 )
                             } else {
@@ -15210,10 +15514,28 @@ struct ContentView: View {
                 }
 
                 Group {
+                    let highlightEntries = popoutSessionNotesSearchQuery.isEmpty
+                        ? []
+                        : PreviewHighlighting.entries(in: sessionDraft, matches: popoutSessionNotesSearchMatches)
+                    let highlightRanges = highlightEntries.map(\.range)
+                    let highlightActiveIndex = highlightEntries.firstIndex { $0.sourceIndex == popoutSessionNotesCurrentMatchIndex }
+
                     if isPreview {
                         MarkdownPreviewView(
                             text: sessionDraft,
                             fontSize: fontSize * 1.5,
+                            highlightRanges: highlightRanges,
+                            activeHighlightIndex: highlightActiveIndex,
+                            scrollPosition: Binding(
+                                get: { popoutSessionPreviewScrollPosition },
+                                set: { newValue in
+                                    popoutSessionPreviewScrollPosition = newValue
+                                    if isPreview {
+                                        popoutSessionSavedScrollPosition = newValue
+                                    }
+                                }
+                            ),
+                            scrollRequest: popoutSessionPreviewScrollRequest,
                             onLinkOpen: wrappedSessionLinkOpen
                         )
                     } else {
@@ -15298,15 +15620,19 @@ struct ContentView: View {
             let offset = text.distance(from: text.startIndex, to: range.lowerBound)
             let length = text.distance(from: range.lowerBound, to: range.upperBound)
 
-            guideController.selectAndScrollToRange(offset: offset, length: length)
+            let fraction = scrollFraction(in: text, for: range)
+            popoutGuideSavedScrollPosition = fraction
+
+            if isPreview {
+                popoutGuidePreviewScrollPosition = fraction
+                popoutGuidePreviewScrollRequest = PreviewScrollRequest(target: fraction)
+            } else {
+                guideController.selectAndScrollToRange(offset: offset, length: length)
+            }
         }
 
         private func handlePopoutGuideNotesSearchEnter() {
             guard !popoutGuideNotesSearchQuery.isEmpty else { return }
-
-            if isPreview {
-                onTogglePreview()
-            }
 
             if !popoutGuideNotesSearchMatches.isEmpty {
                 navigateToPopoutGuideNotesNextMatch()
@@ -15360,18 +15686,53 @@ struct ContentView: View {
             let offset = text.distance(from: text.startIndex, to: range.lowerBound)
             let length = text.distance(from: range.lowerBound, to: range.upperBound)
 
-            sessionController.selectAndScrollToRange(offset: offset, length: length)
+            let fraction = scrollFraction(in: text, for: range)
+            popoutSessionSavedScrollPosition = fraction
+
+            if isPreview {
+                popoutSessionPreviewScrollPosition = fraction
+                popoutSessionPreviewScrollRequest = PreviewScrollRequest(target: fraction)
+            } else {
+                sessionController.selectAndScrollToRange(offset: offset, length: length)
+            }
         }
 
         private func handlePopoutSessionNotesSearchEnter() {
             guard !popoutSessionNotesSearchQuery.isEmpty else { return }
 
-            if isPreview {
-                onTogglePreview()
-            }
-
             if !popoutSessionNotesSearchMatches.isEmpty {
                 navigateToPopoutSessionNotesNextMatch()
+            }
+        }
+
+        private func scrollFraction(in text: String, for range: Range<String.Index>) -> CGFloat {
+            guard !text.isEmpty else { return 0 }
+            let lower = text.distance(from: text.startIndex, to: range.lowerBound)
+            let upper = text.distance(from: text.startIndex, to: range.upperBound)
+            let center = Double(lower + upper) / 2.0
+            let total = max(Double(text.count), 1.0)
+            let fraction = center / total
+            return CGFloat(min(max(fraction, 0), 1))
+        }
+
+        private func handlePopoutPreviewToggle(_ preview: Bool) {
+            switch pane {
+            case .guide:
+                if preview {
+                    popoutGuidePreviewScrollPosition = popoutGuideSavedScrollPosition
+                    popoutGuidePreviewScrollRequest = PreviewScrollRequest(target: popoutGuideSavedScrollPosition)
+                } else {
+                    popoutGuideSavedScrollPosition = popoutGuidePreviewScrollPosition
+                }
+            case .session:
+                if preview {
+                    popoutSessionPreviewScrollPosition = popoutSessionSavedScrollPosition
+                    popoutSessionPreviewScrollRequest = PreviewScrollRequest(target: popoutSessionSavedScrollPosition)
+                } else {
+                    popoutSessionSavedScrollPosition = popoutSessionPreviewScrollPosition
+                }
+            default:
+                break
             }
         }
 

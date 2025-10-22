@@ -27,8 +27,9 @@ private struct TextInlineRenderer {
   private let textStyles: InlineTextStyles
   private let images: [String: Image]
   private let softBreakMode: SoftBreak.Mode
-  private let attributes: AttributeContainer
+  private var attributes: AttributeContainer
   private var shouldSkipNextWhitespace = false
+  private var highlightAttributeStack: [AttributeContainer] = []
 
   init(
     baseURL: URL?,
@@ -92,12 +93,37 @@ private struct TextInlineRenderer {
   }
 
   private mutating func renderHTML(_ html: String) {
-    let tag = HTMLTag(html)
+    guard let tag = HTMLTag(html) else {
+      self.defaultRender(.html(html))
+      return
+    }
 
-    switch tag?.name.lowercased() {
+    switch tag.name.lowercased() {
     case "br":
       self.defaultRender(.lineBreak)
       self.shouldSkipNextWhitespace = true
+    case "mark":
+      if tag.isClosing, !self.highlightAttributeStack.isEmpty {
+        self.handleHighlightTag(
+          tag: tag,
+          background: .clear,
+          foreground: .clear
+        )
+      } else if tag.raw.lowercased().contains("data-sqlmaestro=\"active\"") {
+        self.handleHighlightTag(
+          tag: tag,
+          background: Color(red: 0.95, green: 0.78, blue: 0.96),
+          foreground: Color.black
+        )
+      } else if tag.raw.lowercased().contains("data-sqlmaestro=\"match\"") {
+        self.handleHighlightTag(
+          tag: tag,
+          background: Color(red: 1.0, green: 0.92, blue: 0.68),
+          foreground: Color.black
+        )
+      } else {
+        self.defaultRender(.html(tag.raw))
+      }
     default:
       self.defaultRender(.html(html))
     }
@@ -120,5 +146,23 @@ private struct TextInlineRenderer {
           attributes: self.attributes
         )
       )
+  }
+
+  private mutating func handleHighlightTag(
+    tag: HTMLTag,
+    background: Color,
+    foreground: Color
+  ) {
+    if tag.isClosing {
+      if let previous = self.highlightAttributeStack.popLast() {
+        self.attributes = previous
+      }
+    } else {
+      self.highlightAttributeStack.append(self.attributes)
+      var updated = self.attributes
+      updated.backgroundColor = background
+      updated.foregroundColor = foreground
+      self.attributes = updated
+    }
   }
 }

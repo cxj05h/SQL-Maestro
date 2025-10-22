@@ -27,6 +27,7 @@ private struct AttributedStringInlineRenderer {
   private let softBreakMode: SoftBreak.Mode
   private var attributes: AttributeContainer
   private var shouldSkipNextWhitespace = false
+  private var highlightAttributeStack: [AttributeContainer] = []
 
   init(
     baseURL: URL?,
@@ -98,12 +99,37 @@ private struct AttributedStringInlineRenderer {
   }
 
   private mutating func renderHTML(_ html: String) {
-    let tag = HTMLTag(html)
+    guard let tag = HTMLTag(html) else {
+      self.renderText(html)
+      return
+    }
 
-    switch tag?.name.lowercased() {
+    switch tag.name.lowercased() {
     case "br":
       self.renderLineBreak()
       self.shouldSkipNextWhitespace = true
+    case "mark":
+      if tag.isClosing, !self.highlightAttributeStack.isEmpty {
+        self.handleHighlightTag(
+          tag: tag,
+          background: .clear,
+          foreground: .clear
+        )
+      } else if tag.raw.lowercased().contains("data-sqlmaestro=\"active\"") {
+        self.handleHighlightTag(
+          tag: tag,
+          background: Color(red: 0.95, green: 0.78, blue: 0.96),
+          foreground: Color.black
+        )
+      } else if tag.raw.lowercased().contains("data-sqlmaestro=\"match\"") {
+        self.handleHighlightTag(
+          tag: tag,
+          background: Color(red: 1.0, green: 0.92, blue: 0.68),
+          foreground: Color.black
+        )
+      } else {
+        self.renderText(html)
+      }
     default:
       self.renderText(html)
     }
@@ -166,6 +192,24 @@ private struct AttributedStringInlineRenderer {
 
   private mutating func renderImage(source: String, children: [InlineNode]) {
     // AttributedString does not support images
+  }
+
+  private mutating func handleHighlightTag(
+    tag: HTMLTag,
+    background: Color,
+    foreground: Color
+  ) {
+    if tag.isClosing {
+      if let previous = self.highlightAttributeStack.popLast() {
+        self.attributes = previous
+      }
+    } else {
+      self.highlightAttributeStack.append(self.attributes)
+      var updated = self.attributes
+      updated.backgroundColor = background
+      updated.foregroundColor = foreground
+      self.attributes = updated
+    }
   }
 }
 

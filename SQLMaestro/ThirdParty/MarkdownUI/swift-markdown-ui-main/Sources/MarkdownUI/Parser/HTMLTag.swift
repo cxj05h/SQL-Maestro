@@ -2,6 +2,8 @@ import Foundation
 
 struct HTMLTag {
   let name: String
+  let isClosing: Bool
+  let raw: String
 }
 
 extension HTMLTag {
@@ -21,5 +23,9 @@ extension HTMLTag {
     }
 
     self.name = String(description[nameRange])
+    self.isClosing = description
+      .trimmingCharacters(in: .whitespacesAndNewlines)
+      .hasPrefix("</")
+    self.raw = description
   }
 }
