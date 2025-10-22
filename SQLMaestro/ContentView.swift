@@ -7094,6 +7094,7 @@ struct ContentView: View {
             }
             guard selectedTemplate != nil else {
                 LOG("Guide notes shortcut ignored without selected template", ctx: ["tabId": tabID])
+                showTemplateToast("Please Select Query Template")
                 return
             }
             // Clear all search focus states AND editor focus states when switching panes
