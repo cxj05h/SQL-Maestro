@@ -2005,6 +2005,12 @@ struct ContentView: View {
             onSavedFileOpenTree: { fileId in
                 presentTreeView(for: fileId, session: targetSession)
             },
+            onSavedFileFormatTree: { fileId in
+                formatSavedFileAsTree(for: fileId, session: targetSession)
+            },
+            onSavedFileFormatLine: { fileId in
+                formatSavedFileAsLine(for: fileId, session: targetSession)
+            },
             onSavedFilesModeExit: { commitSavedFileDrafts(for: targetSession) },
             onSessionSave: {
                 saveSessionNotes(for: targetSession, reason: "popout-manual")
@@ -4129,6 +4135,174 @@ struct ContentView: View {
             let content = savedFileDraft(for: session, fileId: fileId)
             savedFileTreePreview = SavedFileTreePreviewContext(fileName: file.displayName, content: content, format: file.format)
             LOG("Saved file tree preview", ctx: ["session": "\(session.rawValue)", "file": file.displayName, "format": file.format.rawValue])
+        }
+
+        private func formatJSONPreservingOrder(_ jsonString: String, indent: String = "  ") -> String? {
+            var result = ""
+            var indentLevel = 0
+            var inString = false
+            var escaped = false
+            var i = jsonString.startIndex
+
+            while i < jsonString.endIndex {
+                let char = jsonString[i]
+
+                if escaped {
+                    result.append(char)
+                    escaped = false
+                    i = jsonString.index(after: i)
+                    continue
+                }
+
+                if char == "\\" && inString {
+                    result.append(char)
+                    escaped = true
+                    i = jsonString.index(after: i)
+                    continue
+                }
+
+                if char == "\"" {
+                    inString.toggle()
+                    result.append(char)
+                    i = jsonString.index(after: i)
+                    continue
+                }
+
+                if inString {
+                    result.append(char)
+                    i = jsonString.index(after: i)
+                    continue
+                }
+
+                switch char {
+                case "{", "[":
+                    result.append(char)
+                    // Check if next char (after whitespace) is closing bracket
+                    var nextIndex = jsonString.index(after: i)
+                    while nextIndex < jsonString.endIndex && jsonString[nextIndex].isWhitespace {
+                        nextIndex = jsonString.index(after: nextIndex)
+                    }
+                    if nextIndex < jsonString.endIndex && (jsonString[nextIndex] == "}" || jsonString[nextIndex] == "]") {
+                        // Empty object/array, don't add newline
+                        i = jsonString.index(after: i)
+                        continue
+                    }
+                    indentLevel += 1
+                    result.append("\n")
+                    result.append(String(repeating: indent, count: indentLevel))
+
+                case "}", "]":
+                    indentLevel -= 1
+                    result.append("\n")
+                    result.append(String(repeating: indent, count: indentLevel))
+                    result.append(char)
+
+                case ",":
+                    result.append(char)
+                    result.append("\n")
+                    result.append(String(repeating: indent, count: indentLevel))
+
+                case ":":
+                    result.append(": ")
+
+                default:
+                    if !char.isWhitespace {
+                        result.append(char)
+                    }
+                }
+
+                i = jsonString.index(after: i)
+            }
+
+            return result
+        }
+
+        private func formatSavedFileAsTree(for fileId: UUID, session: TicketSession) {
+            guard let file = savedFiles(for: session).first(where: { $0.id == fileId }),
+                  file.format == .json else { return }
+
+            let content = savedFileDraft(for: session, fileId: fileId)
+
+            // Validate JSON first
+            guard let jsonData = content.data(using: .utf8),
+                  (try? JSONSerialization.jsonObject(with: jsonData)) != nil else {
+                NSSound.beep()
+                LOG("Failed to format JSON as tree - invalid JSON", ctx: ["session": "\(session.rawValue)", "file": file.displayName])
+                return
+            }
+
+            // Format while preserving key order
+            guard let prettyString = formatJSONPreservingOrder(content) else {
+                NSSound.beep()
+                LOG("Failed to format JSON as tree", ctx: ["session": "\(session.rawValue)", "file": file.displayName])
+                return
+            }
+
+            setSavedFileDraft(prettyString, for: fileId, session: session, source: "format.tree")
+            LOG("Formatted JSON as tree", ctx: ["session": "\(session.rawValue)", "file": file.displayName])
+        }
+
+        private func minifyJSONPreservingOrder(_ jsonString: String) -> String? {
+            var result = ""
+            var inString = false
+            var escaped = false
+
+            for char in jsonString {
+                if escaped {
+                    result.append(char)
+                    escaped = false
+                    continue
+                }
+
+                if char == "\\" && inString {
+                    result.append(char)
+                    escaped = true
+                    continue
+                }
+
+                if char == "\"" {
+                    inString.toggle()
+                    result.append(char)
+                    continue
+                }
+
+                if inString {
+                    result.append(char)
+                    continue
+                }
+
+                // Outside strings: remove all whitespace
+                if !char.isWhitespace {
+                    result.append(char)
+                }
+            }
+
+            return result
+        }
+
+        private func formatSavedFileAsLine(for fileId: UUID, session: TicketSession) {
+            guard let file = savedFiles(for: session).first(where: { $0.id == fileId }),
+                  file.format == .json else { return }
+
+            let content = savedFileDraft(for: session, fileId: fileId)
+
+            // Validate JSON first
+            guard let jsonData = content.data(using: .utf8),
+                  (try? JSONSerialization.jsonObject(with: jsonData)) != nil else {
+                NSSound.beep()
+                LOG("Failed to minify JSON as line - invalid JSON", ctx: ["session": "\(session.rawValue)", "file": file.displayName])
+                return
+            }
+
+            // Minify while preserving key order
+            guard let minifiedString = minifyJSONPreservingOrder(content) else {
+                NSSound.beep()
+                LOG("Failed to minify JSON as line", ctx: ["session": "\(session.rawValue)", "file": file.displayName])
+                return
+            }
+
+            setSavedFileDraft(minifiedString, for: fileId, session: session, source: "format.line")
+            LOG("Formatted JSON as line", ctx: ["session": "\(session.rawValue)", "file": file.displayName])
         }
 
         private func setSavedFileDraft(_ value: String,
@@ -6526,7 +6700,9 @@ struct ContentView: View {
                         onOpenTree: { presentTreeView(for: $0, session: activeSession) },
                         onRename: { renameSavedFile($0, in: activeSession) },
                         onDelete: { removeSavedFile($0, in: activeSession) },
-                        onPopOut: nil
+                        onPopOut: nil,
+                        onFormatTree: { formatSavedFileAsTree(for: $0, session: activeSession) },
+                        onFormatLine: { formatSavedFileAsLine(for: $0, session: activeSession) }
                     )
                 }
             }
@@ -7033,6 +7209,8 @@ struct ContentView: View {
                     isSavedFileEditorFocused = focused
                 },
                 onSavedFileOpenTree: { presentTreeView(for: $0, session: activeSession) },
+                onSavedFileFormatTree: { formatSavedFileAsTree(for: $0, session: activeSession) },
+                onSavedFileFormatLine: { formatSavedFileAsLine(for: $0, session: activeSession) },
                 onSavedFileSearchCancel: {
                     isSearchFocused = true
                 },
@@ -7116,6 +7294,8 @@ struct ContentView: View {
                     isSavedFileEditorFocused = focused
                 },
                 onSavedFileOpenTree: { presentTreeView(for: $0, session: activeSession) },
+                onSavedFileFormatTree: { formatSavedFileAsTree(for: $0, session: activeSession) },
+                onSavedFileFormatLine: { formatSavedFileAsLine(for: $0, session: activeSession) },
                 onSavedFileSearchCancel: {
                     isSearchFocused = true
                 },
@@ -13404,6 +13584,8 @@ struct ContentView: View {
         var onSavedFileContentChange: (UUID, String) -> Void
         var onSavedFileFocusChanged: (Bool) -> Void
         var onSavedFileOpenTree: (UUID) -> Void
+        var onSavedFileFormatTree: ((UUID) -> Void)? = nil
+        var onSavedFileFormatLine: ((UUID) -> Void)? = nil
         var onSavedFileSearchCancel: () -> Void
         var savedFileSearchFocused: FocusState<Bool>.Binding
         var onSavedFilesModeExit: () -> Void
@@ -13491,6 +13673,8 @@ struct ContentView: View {
                     onContentChange: onSavedFileContentChange,
                     onFocusChange: onSavedFileFocusChanged,
                     onOpenTree: onSavedFileOpenTree,
+                    onFormatTree: onSavedFileFormatTree,
+                    onFormatLine: onSavedFileFormatLine,
                     onSearchCancel: onSavedFileSearchCancel,
                     isSearchFieldFocused: savedFileSearchFocused,
                     editorMinHeight: editorMinHeight
@@ -13541,7 +13725,9 @@ struct ContentView: View {
                 onOpenTree: onSavedFileOpenTree,
                 onRename: onSavedFileRename,
                 onDelete: onSavedFileDelete,
-                onPopOut: onSavedFilesPopout
+                onPopOut: onSavedFilesPopout,
+                onFormatTree: onSavedFileFormatTree,
+                onFormatLine: onSavedFileFormatLine
             )
         }
 
@@ -13623,6 +13809,8 @@ struct ContentView: View {
                 var onRename: (UUID) -> Void
                 var onDelete: (UUID) -> Void
                 var onPopOut: (() -> Void)?
+                var onFormatTree: ((UUID) -> Void)?
+                var onFormatLine: ((UUID) -> Void)?
 
                 var body: some View {
                     VStack(alignment: .leading, spacing: 8) {
@@ -13653,6 +13841,38 @@ struct ContentView: View {
                                             .font(.system(size: fontSize - 1, weight: .semibold))
                                     }
                                     .buttonStyle(.borderedProminent)
+                                    .tint(Theme.accent)
+                                }
+
+                                // JSON formatting buttons - only show for JSON files
+                                if let selectedID = selectedID,
+                                   let selectedFile = files.first(where: { $0.id == selectedID }),
+                                   selectedFile.format == .json {
+
+                                    Button {
+                                        if let onFormatTree {
+                                            onFormatTree(selectedID)
+                                        }
+                                    } label: {
+                                        Image(systemName: "list.bullet.indent")
+                                            .font(.system(size: fontSize - 1, weight: .semibold))
+                                    }
+                                    .help("Format JSON (Tree)")
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
+                                    .tint(Theme.accent)
+
+                                    Button {
+                                        if let onFormatLine {
+                                            onFormatLine(selectedID)
+                                        }
+                                    } label: {
+                                        Image(systemName: "minus.rectangle")
+                                            .font(.system(size: fontSize - 1, weight: .semibold))
+                                    }
+                                    .help("Minify JSON (Line)")
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
                                     .tint(Theme.accent)
                                 }
                             }
@@ -13717,6 +13937,8 @@ struct ContentView: View {
             var onContentChange: (UUID, String) -> Void
             var onFocusChange: (Bool) -> Void
             var onOpenTree: (UUID) -> Void
+            var onFormatTree: ((UUID) -> Void)? = nil
+            var onFormatLine: ((UUID) -> Void)? = nil
             var onSearchCancel: () -> Void
             var isSearchFieldFocused: FocusState<Bool>.Binding
             var editorMinHeight: CGFloat
@@ -13775,7 +13997,7 @@ struct ContentView: View {
                     searchQuery = ""
                     if newValue != nil {
                         DispatchQueue.main.async {
-                            editorController.focusAndSelectAll()
+                            editorController.focus()
                         }
                     }
                     isSearchFieldFocused.wrappedValue = false
@@ -14226,6 +14448,8 @@ struct ContentView: View {
         let onSavedFileContentChange: (UUID, String) -> Void
         let onSavedFileFocusChange: (Bool) -> Void
         let onSavedFileOpenTree: (UUID) -> Void
+        let onSavedFileFormatTree: ((UUID) -> Void)?
+        let onSavedFileFormatLine: ((UUID) -> Void)?
         let onSavedFilesModeExit: () -> Void
         let onSessionSave: () -> Void
         let onSessionRevert: () -> Void
@@ -14361,6 +14585,8 @@ struct ContentView: View {
                     onSavedFileContentChange: onSavedFileContentChange,
                     onSavedFileFocusChanged: onSavedFileFocusChange,
                     onSavedFileOpenTree: onSavedFileOpenTree,
+                    onSavedFileFormatTree: onSavedFileFormatTree,
+                    onSavedFileFormatLine: onSavedFileFormatLine,
                     onSavedFileSearchCancel: {
                         // No-op for popout windows
                     },
@@ -14401,6 +14627,8 @@ struct ContentView: View {
                     onSavedFileContentChange: onSavedFileContentChange,
                     onSavedFileFocusChanged: onSavedFileFocusChange,
                     onSavedFileOpenTree: onSavedFileOpenTree,
+                    onSavedFileFormatTree: onSavedFileFormatTree,
+                    onSavedFileFormatLine: onSavedFileFormatLine,
                     onSavedFileSearchCancel: {
                         // No-op for popout windows
                     },
