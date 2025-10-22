@@ -3,6 +3,12 @@ import MarkdownUI
 import AppKit
 import UniformTypeIdentifiers
 
+extension Collection {
+    subscript(safe index: Index) -> Element? {
+        return indices.contains(index) ? self[index] : nil
+    }
+}
+
 // Workaround for macOS 26 (Tahoe) NSAlert button rendering bug
 // where default buttons don't show blue highlight until window loses/regains focus
 fileprivate func runAlertWithFix(_ alert: NSAlert) -> NSApplication.ModalResponse {
@@ -285,6 +291,14 @@ struct SavedFileTreePreviewContext: Identifiable {
     let fileName: String
     let content: String
     let format: SavedFileFormat
+}
+
+struct GhostOverlayContext: Identifiable {
+    let id = UUID()
+    let session: TicketSession
+    let availableFiles: [SessionSavedFile]
+    var originalFile: SessionSavedFile?
+    var ghostFile: SessionSavedFile?
 }
 
 // MARK: - Temporary Shims (compile-time stand-ins)
@@ -1439,6 +1453,7 @@ struct ContentView: View {
     ]
     @State private var savedFileValidation: [TicketSession: [UUID: JSONValidationState]] = [:]
     @State private var savedFileTreePreview: SavedFileTreePreviewContext?
+    @State private var ghostOverlayContext: GhostOverlayContext?
     @State private var isSavedFileEditorFocused: Bool = false
     @State private var isGuideNotesEditorFocused: Bool = false
     @State private var isSessionNotesEditorFocused: Bool = false
@@ -1722,6 +1737,9 @@ struct ContentView: View {
         .sheet(item: $savedFileTreePreview) { preview in
             savedFileTreePreviewSheet(preview)
         }
+        .sheet(item: $ghostOverlayContext) { context in
+            ghostOverlaySheet(context)
+        }
         .sheet(item: $previewingSessionImage) { sessionImage in
             SessionImagePreviewSheet(sessionImage: sessionImage)
         }
@@ -1862,6 +1880,48 @@ struct ContentView: View {
             )
     }
 
+    private func ghostOverlaySheet(_ context: GhostOverlayContext) -> some View {
+        GhostOverlayView(
+            availableFiles: context.availableFiles,
+            originalFile: Binding(
+                get: { context.originalFile },
+                set: { newValue in
+                    if let index = ghostOverlayContext != nil ? 0 : nil {
+                        _ = index // suppress warning
+                        ghostOverlayContext?.originalFile = newValue
+                    }
+                }
+            ),
+            ghostFile: Binding(
+                get: { context.ghostFile },
+                set: { newValue in
+                    if let index = ghostOverlayContext != nil ? 0 : nil {
+                        _ = index // suppress warning
+                        ghostOverlayContext?.ghostFile = newValue
+                    }
+                }
+            ),
+            onClose: {
+                ghostOverlayContext = nil
+            },
+            onJumpToLine: { file, lineNumber in
+                // Select the ghost file in the editor
+                setSavedFileSelection(file.id, for: context.session)
+                // Close the overlay
+                ghostOverlayContext = nil
+                // TODO: Implement line jumping in JSONEditor
+            }
+        )
+        .frame(minWidth: 800, minHeight: 600)
+        .background(
+            SheetWindowConfigurator(
+                minSize: CGSize(width: 700, height: 500),
+                preferredSize: CGSize(width: 1000, height: 700),
+                sizeStorageKey: "GhostOverlaySize"
+            )
+        )
+    }
+
     private func popoutSheet(for pane: PopoutPaneContext) -> some View {
         // Handle sessionTemplate separately with its own sheet
         if case .sessionTemplate(let session) = pane {
@@ -1993,6 +2053,9 @@ struct ContentView: View {
             onSavedFileAdd: { addSavedFile(for: targetSession) },
             onSavedFileDelete: { removeSavedFile($0, in: targetSession) },
             onSavedFileRename: { renameSavedFile($0, in: targetSession) },
+            onSavedFileReorder: { sourceIndex, destinationIndex in
+                sessions.reorderSavedFiles(from: sourceIndex, to: destinationIndex, in: targetSession)
+            },
             onSavedFileContentChange: { fileId, newValue in
                 setSavedFileDraft(newValue,
                                   for: fileId,
@@ -4135,6 +4198,23 @@ struct ContentView: View {
             let content = savedFileDraft(for: session, fileId: fileId)
             savedFileTreePreview = SavedFileTreePreviewContext(fileName: file.displayName, content: content, format: file.format)
             LOG("Saved file tree preview", ctx: ["session": "\(session.rawValue)", "file": file.displayName, "format": file.format.rawValue])
+        }
+
+        private func presentGhostOverlay(for session: TicketSession, ghostFileId: UUID? = nil) {
+            let files = savedFiles(for: session)
+            let currentFile = currentSavedFileSelection(for: session).flatMap { id in
+                files.first(where: { $0.id == id })
+            }
+            let ghostFile = ghostFileId.flatMap { id in
+                files.first(where: { $0.id == id })
+            }
+            ghostOverlayContext = GhostOverlayContext(
+                session: session,
+                availableFiles: files,
+                originalFile: currentFile,
+                ghostFile: ghostFile
+            )
+            LOG("Ghost overlay presented", ctx: ["session": "\(session.rawValue)", "filesCount": "\(files.count)", "ghostPreselected": "\(ghostFile != nil)"])
         }
 
         private func formatJSONPreservingOrder(_ jsonString: String, indent: String = "  ") -> String? {
@@ -6700,9 +6780,16 @@ struct ContentView: View {
                         onOpenTree: { presentTreeView(for: $0, session: activeSession) },
                         onRename: { renameSavedFile($0, in: activeSession) },
                         onDelete: { removeSavedFile($0, in: activeSession) },
+                        onReorder: { sourceIndex, destinationIndex in
+                            sessions.reorderSavedFiles(from: sourceIndex, to: destinationIndex, in: activeSession)
+                        },
                         onPopOut: nil,
                         onFormatTree: { formatSavedFileAsTree(for: $0, session: activeSession) },
-                        onFormatLine: { formatSavedFileAsLine(for: $0, session: activeSession) }
+                        onFormatLine: { formatSavedFileAsLine(for: $0, session: activeSession) },
+                        onCompare: { presentGhostOverlay(for: activeSession) },
+                        onCompareWith: { ghostFileId in
+                            presentGhostOverlay(for: activeSession, ghostFileId: ghostFileId)
+                        }
                     )
                 }
             }
@@ -7199,6 +7286,9 @@ struct ContentView: View {
                 onSavedFileAdd: { addSavedFile(for: activeSession) },
                 onSavedFileDelete: { removeSavedFile($0, in: activeSession) },
                 onSavedFileRename: { renameSavedFile($0, in: activeSession) },
+                onSavedFileReorder: { sourceIndex, destinationIndex in
+                    sessions.reorderSavedFiles(from: sourceIndex, to: destinationIndex, in: activeSession)
+                },
                 onSavedFileContentChange: { fileId, newValue in
                     setSavedFileDraft(newValue,
                                      for: fileId,
@@ -7284,6 +7374,9 @@ struct ContentView: View {
                 onSavedFileAdd: { addSavedFile(for: activeSession) },
                 onSavedFileDelete: { removeSavedFile($0, in: activeSession) },
                 onSavedFileRename: { renameSavedFile($0, in: activeSession) },
+                onSavedFileReorder: { sourceIndex, destinationIndex in
+                    sessions.reorderSavedFiles(from: sourceIndex, to: destinationIndex, in: activeSession)
+                },
                 onSavedFileContentChange: { fileId, newValue in
                     setSavedFileDraft(newValue,
                                      for: fileId,
@@ -13581,6 +13674,7 @@ struct ContentView: View {
         var onSavedFileAdd: () -> Void
         var onSavedFileDelete: (UUID) -> Void
         var onSavedFileRename: (UUID) -> Void
+        var onSavedFileReorder: (Int, Int) -> Void
         var onSavedFileContentChange: (UUID, String) -> Void
         var onSavedFileFocusChanged: (Bool) -> Void
         var onSavedFileOpenTree: (UUID) -> Void
@@ -13603,6 +13697,10 @@ struct ContentView: View {
 
         private var isDirty: Bool { draft != savedValue }
 
+        @State private var showingGhostOverlay = false
+        @State private var ghostOverlayOriginal: SessionSavedFile?
+        @State private var ghostOverlayGhost: SessionSavedFile?
+
         var body: some View {
             Group {
                 if showsOuterBackground {
@@ -13621,6 +13719,20 @@ struct ContentView: View {
                     contentStack
                         .padding(.vertical, 0)
                 }
+            }
+            .sheet(isPresented: $showingGhostOverlay) {
+                GhostOverlayView(
+                    availableFiles: savedFiles,
+                    originalFile: $ghostOverlayOriginal,
+                    ghostFile: $ghostOverlayGhost,
+                    onClose: { showingGhostOverlay = false },
+                    onJumpToLine: { file, lineNumber in
+                        // Select the ghost file in the editor
+                        onSavedFileSelect(file.id)
+                        // TODO: Jump to specific line number in JSONEditor
+                        // This will require extending JSONEditor with a jump-to-line capability
+                    }
+                )
             }
         }
 
@@ -13725,9 +13837,36 @@ struct ContentView: View {
                 onOpenTree: onSavedFileOpenTree,
                 onRename: onSavedFileRename,
                 onDelete: onSavedFileDelete,
+                onReorder: onSavedFileReorder,
                 onPopOut: onSavedFilesPopout,
                 onFormatTree: onSavedFileFormatTree,
-                onFormatLine: onSavedFileFormatLine
+                onFormatLine: onSavedFileFormatLine,
+                onCompare: {
+                    // Pre-select currently active file as original
+                    if let currentFile = savedFiles.first(where: { $0.id == selectedSavedFileID }) {
+                        ghostOverlayOriginal = currentFile
+                    }
+                    ghostOverlayGhost = nil
+                    showingGhostOverlay = true
+                },
+                onCompareWith: { ghostFileId in
+                    // The currently selected file is the original
+                    // The file from context menu is the ghost
+                    if let currentFile = savedFiles.first(where: { $0.id == selectedSavedFileID }) {
+                        ghostOverlayOriginal = currentFile
+                        LOG("Ghost overlay - context menu - Original set", ctx: ["file": currentFile.displayName])
+                    } else {
+                        LOG("Ghost overlay - context menu - No current file selected", ctx: [:])
+                    }
+                    if let ghostFile = savedFiles.first(where: { $0.id == ghostFileId }) {
+                        ghostOverlayGhost = ghostFile
+                        LOG("Ghost overlay - context menu - Ghost set", ctx: ["file": ghostFile.displayName])
+                    } else {
+                        LOG("Ghost overlay - context menu - Ghost file not found", ctx: ["id": "\(ghostFileId)"])
+                    }
+                    showingGhostOverlay = true
+                    LOG("Ghost overlay - context menu - Sheet shown", ctx: ["original": ghostOverlayOriginal?.displayName ?? "nil", "ghost": ghostOverlayGhost?.displayName ?? "nil"])
+                }
             )
         }
 
@@ -13799,6 +13938,20 @@ struct ContentView: View {
                 }
             }
 
+            struct ButtonPreference: Equatable {
+                let id: UUID
+                let width: CGFloat
+                let midX: CGFloat
+            }
+
+            struct ButtonPreferenceKey: PreferenceKey {
+                static var defaultValue: [ButtonPreference] = []
+
+                static func reduce(value: inout [ButtonPreference], nextValue: () -> [ButtonPreference]) {
+                    value.append(contentsOf: nextValue())
+                }
+            }
+
             struct Toolbar: View {
                 var fontSize: CGFloat
                 var files: [SessionSavedFile]
@@ -13808,9 +13961,19 @@ struct ContentView: View {
                 var onOpenTree: (UUID) -> Void
                 var onRename: (UUID) -> Void
                 var onDelete: (UUID) -> Void
+                var onReorder: ((Int, Int) -> Void)?
                 var onPopOut: (() -> Void)?
                 var onFormatTree: ((UUID) -> Void)?
                 var onFormatLine: ((UUID) -> Void)?
+                var onCompare: (() -> Void)?
+                var onCompareWith: ((UUID) -> Void)?
+
+                @State private var draggedFileID: UUID? = nil
+                @State private var dragStartIndex: Int? = nil
+                @State private var currentDragIndex: Int? = nil
+                @State private var buttonWidths: [UUID: CGFloat] = [:]
+                @State private var buttonPositions: [UUID: CGFloat] = [:]
+                @State private var accumulatedDragDistance: CGFloat = 0
 
                 var body: some View {
                     VStack(alignment: .leading, spacing: 8) {
@@ -13877,6 +14040,18 @@ struct ContentView: View {
                                 }
                             }
 
+                            // Compare Files button - show if there are at least 2 files
+                            if files.count >= 2, let onCompare {
+                                Button {
+                                    onCompare()
+                                } label: {
+                                    Label("Compare", systemImage: "doc.on.doc")
+                                        .font(.system(size: fontSize - 1, weight: .semibold))
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .tint(Theme.purple)
+                            }
+
                             Button {
                                 onAdd()
                             } label: {
@@ -13889,10 +14064,14 @@ struct ContentView: View {
                             ScrollViewReader { proxy in
                                 ScrollView(.horizontal, showsIndicators: false) {
                                     HStack(spacing: 8) {
-                                        ForEach(files) { file in
+                                        ForEach(Array(files.enumerated()), id: \.element.id) { index, file in
                                             let isSelected = file.id == selectedID
+                                            let isDraggingThis = draggedFileID == file.id
+
                                             Button {
-                                                onSelect(file.id)
+                                                if draggedFileID == nil {
+                                                    onSelect(file.id)
+                                                }
                                             } label: {
                                                 Text(file.displayName)
                                                     .font(.system(size: fontSize - 1, weight: isSelected ? .semibold : .regular))
@@ -13901,13 +14080,116 @@ struct ContentView: View {
                                             }
                                             .buttonStyle(.borderedProminent)
                                             .tint(isSelected ? Theme.purple : Theme.purple.opacity(0.3))
+                                            .opacity(isDraggingThis ? 0.6 : 1.0)
+                                            .background(
+                                                GeometryReader { geo in
+                                                    Color.clear.preference(
+                                                        key: ButtonPreferenceKey.self,
+                                                        value: [ButtonPreference(
+                                                            id: file.id,
+                                                            width: geo.size.width,
+                                                            midX: geo.frame(in: .named("fileButtonsScrollView")).midX
+                                                        )]
+                                                    )
+                                                }
+                                            )
                                             .contextMenu {
                                                 Button("Structure View") { onOpenTree(file.id) }
+                                                if files.count >= 2, let onCompareWith {
+                                                    Button("Compare with this file...") { onCompareWith(file.id) }
+                                                }
                                                 Button("Rename…") { onRename(file.id) }
+                                                Divider()
+                                                if index > 0, let onReorder = onReorder {
+                                                    Button("Move Left") { onReorder(index, index - 1) }
+                                                }
+                                                if index < files.count - 1, let onReorder = onReorder {
+                                                    Button("Move Right") { onReorder(index, index + 1) }
+                                                }
                                                 Divider()
                                                 Button("Delete", role: .destructive) { onDelete(file.id) }
                                             }
+                                            .simultaneousGesture(
+                                                DragGesture(minimumDistance: 5, coordinateSpace: .named("fileButtonsScrollView"))
+                                                    .onChanged { value in
+                                                        if draggedFileID == nil {
+                                                            draggedFileID = file.id
+                                                            dragStartIndex = index
+                                                            currentDragIndex = index
+                                                            accumulatedDragDistance = 0
+                                                            LOG("Drag started", ctx: ["file": file.displayName, "index": "\(index)"])
+                                                        }
+
+                                                        guard draggedFileID == file.id,
+                                                              let currentIdx = currentDragIndex,
+                                                              let onReorder = onReorder else { return }
+
+                                                        // Calculate which button we're over based on drag position
+                                                        let dragX = value.location.x
+                                                        var targetIndex: Int? = nil
+
+                                                        // Find which button we're currently over
+                                                        for (idx, f) in files.enumerated() {
+                                                            if let midX = buttonPositions[f.id], let width = buttonWidths[f.id] {
+                                                                let leftEdge = midX - width / 2
+                                                                let rightEdge = midX + width / 2
+
+                                                                if dragX >= leftEdge && dragX <= rightEdge {
+                                                                    targetIndex = idx
+                                                                    break
+                                                                }
+                                                            }
+                                                        }
+
+                                                        guard let targetIdx = targetIndex, targetIdx != currentIdx else { return }
+
+                                                        // Calculate how far we need to drag to trigger a swap
+                                                        // Use 70% of button width as threshold to prevent jitter
+                                                        guard let currentFileID = files[safe: currentIdx]?.id,
+                                                              let targetFileID = files[safe: targetIdx]?.id,
+                                                              let currentWidth = buttonWidths[currentFileID],
+                                                              let targetWidth = buttonWidths[targetFileID] else { return }
+
+                                                        let avgWidth = (currentWidth + targetWidth) / 2
+                                                        let threshold = avgWidth * 0.7  // Must cross 70% of button width
+
+                                                        let direction = targetIdx > currentIdx ? 1 : -1
+                                                        let dragDistance = abs(value.translation.width)
+
+                                                        // Only swap if we've dragged far enough
+                                                        if dragDistance >= threshold {
+                                                            LOG("Reordering during drag", ctx: [
+                                                                "file": file.displayName,
+                                                                "from": "\(currentIdx)",
+                                                                "to": "\(targetIdx)",
+                                                                "dragDistance": "\(Int(dragDistance))",
+                                                                "threshold": "\(Int(threshold))"
+                                                            ])
+                                                            onReorder(currentIdx, targetIdx)
+                                                            currentDragIndex = targetIdx
+                                                            accumulatedDragDistance = 0
+                                                        }
+                                                    }
+                                                    .onEnded { _ in
+                                                        LOG("Drag ended", ctx: [
+                                                            "file": file.displayName,
+                                                            "startIndex": "\(dragStartIndex ?? -1)",
+                                                            "endIndex": "\(currentDragIndex ?? -1)"
+                                                        ])
+                                                        draggedFileID = nil
+                                                        dragStartIndex = nil
+                                                        currentDragIndex = nil
+                                                        accumulatedDragDistance = 0
+                                                    }
+                                            )
                                             .id(file.id)
+                                        }
+                                    }
+                                    .coordinateSpace(name: "fileButtonsScrollView")
+                                    .onPreferenceChange(ButtonPreferenceKey.self) { prefs in
+                                        for pref in prefs {
+                                            buttonWidths[pref.id] = pref.width
+                                            buttonPositions[pref.id] = pref.midX
                                         }
                                     }
                                     .padding(.vertical, 4)
@@ -14445,6 +14727,7 @@ struct ContentView: View {
         let onSavedFileAdd: () -> Void
         let onSavedFileDelete: (UUID) -> Void
         let onSavedFileRename: (UUID) -> Void
+        let onSavedFileReorder: (Int, Int) -> Void
         let onSavedFileContentChange: (UUID, String) -> Void
         let onSavedFileFocusChange: (Bool) -> Void
         let onSavedFileOpenTree: (UUID) -> Void
@@ -14582,6 +14865,7 @@ struct ContentView: View {
                     onSavedFileAdd: onSavedFileAdd,
                     onSavedFileDelete: onSavedFileDelete,
                     onSavedFileRename: onSavedFileRename,
+                    onSavedFileReorder: onSavedFileReorder,
                     onSavedFileContentChange: onSavedFileContentChange,
                     onSavedFileFocusChanged: onSavedFileFocusChange,
                     onSavedFileOpenTree: onSavedFileOpenTree,
@@ -14624,6 +14908,7 @@ struct ContentView: View {
                     onSavedFileAdd: onSavedFileAdd,
                     onSavedFileDelete: onSavedFileDelete,
                     onSavedFileRename: onSavedFileRename,
+                    onSavedFileReorder: onSavedFileReorder,
                     onSavedFileContentChange: onSavedFileContentChange,
                     onSavedFileFocusChanged: onSavedFileFocusChange,
                     onSavedFileOpenTree: onSavedFileOpenTree,

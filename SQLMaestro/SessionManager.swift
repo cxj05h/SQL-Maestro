@@ -29,7 +29,7 @@ enum SavedFileFormat: String, Codable, Equatable {
     }
 }
 
-struct SessionSavedFile: Identifiable, Codable, Equatable {
+struct SessionSavedFile: Identifiable, Codable, Equatable, Hashable {
     let id: UUID
     var name: String
     var content: String
@@ -329,6 +329,22 @@ final class SessionManager: ObservableObject {
         LOG("Saved file removed", ctx: [
             "session": "\(session.rawValue)",
             "file": removed.displayName
+        ])
+    }
+
+    func reorderSavedFiles(from sourceIndex: Int, to destinationIndex: Int, in session: TicketSession) {
+        guard var files = sessionSavedFiles[session] else { return }
+        guard sourceIndex >= 0, sourceIndex < files.count, destinationIndex >= 0, destinationIndex < files.count else { return }
+        guard sourceIndex != destinationIndex else { return }
+
+        let movedFile = files.remove(at: sourceIndex)
+        files.insert(movedFile, at: destinationIndex)
+        sessionSavedFiles[session] = files
+        LOG("Saved files reordered", ctx: [
+            "session": "\(session.rawValue)",
+            "file": movedFile.displayName,
+            "from": "\(sourceIndex)",
+            "to": "\(destinationIndex)"
         ])
     }
 
