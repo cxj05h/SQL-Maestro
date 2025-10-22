@@ -7096,11 +7096,14 @@ struct ContentView: View {
                 LOG("Guide notes shortcut ignored without selected template", ctx: ["tabId": tabID])
                 return
             }
-            // Clear all search focus states when switching panes
+            // Clear all search focus states AND editor focus states when switching panes
             isGuideNotesSearchFocused = false
             isSessionNotesSearchFocused = false
             isSavedFileSearchFocused = false
             isSearchFocused = false
+            isGuideNotesEditorFocused = false
+            isSessionNotesEditorFocused = false
+            isSavedFileEditorFocused = false
             setActivePane(.guideNotes)
             LOG("Guide notes shortcut handled", ctx: ["tabId": tabID])
         }
@@ -7113,18 +7116,25 @@ struct ContentView: View {
             LOG("=== Cmd+2 pressed (before) ===", ctx: [
                 "activeBottomPane": "\(String(describing: activeBottomPane))",
                 "isGuideNotesSearchFocused": "\(isGuideNotesSearchFocused)",
-                "isSessionNotesSearchFocused": "\(isSessionNotesSearchFocused)"
+                "isSessionNotesSearchFocused": "\(isSessionNotesSearchFocused)",
+                "isGuideNotesEditorFocused": "\(isGuideNotesEditorFocused)",
+                "isSessionNotesEditorFocused": "\(isSessionNotesEditorFocused)"
             ])
-            // Clear all search focus states when switching panes
+            // Clear all search focus states AND editor focus states when switching panes
             isGuideNotesSearchFocused = false
             isSessionNotesSearchFocused = false
             isSavedFileSearchFocused = false
             isSearchFocused = false
+            isGuideNotesEditorFocused = false
+            isSessionNotesEditorFocused = false
+            isSavedFileEditorFocused = false
             setActivePane(.sessionNotes)
             LOG("=== Cmd+2 pressed (after) ===", ctx: [
                 "activeBottomPane": "\(String(describing: activeBottomPane))",
                 "isGuideNotesSearchFocused": "\(isGuideNotesSearchFocused)",
-                "isSessionNotesSearchFocused": "\(isSessionNotesSearchFocused)"
+                "isSessionNotesSearchFocused": "\(isSessionNotesSearchFocused)",
+                "isGuideNotesEditorFocused": "\(isGuideNotesEditorFocused)",
+                "isSessionNotesEditorFocused": "\(isSessionNotesEditorFocused)"
             ])
         }
 
@@ -7133,11 +7143,14 @@ struct ContentView: View {
                 LOG("Saved files shortcut ignored for inactive tab", ctx: ["tabId": tabID])
                 return
             }
-            // Clear all search focus states when switching panes
+            // Clear all search focus states AND editor focus states when switching panes
             isGuideNotesSearchFocused = false
             isSessionNotesSearchFocused = false
             isSavedFileSearchFocused = false
             isSearchFocused = false
+            isGuideNotesEditorFocused = false
+            isSessionNotesEditorFocused = false
+            isSavedFileEditorFocused = false
             setActivePane(.savedFiles)
             LOG("Saved files shortcut handled", ctx: ["tabId": tabID])
         }
