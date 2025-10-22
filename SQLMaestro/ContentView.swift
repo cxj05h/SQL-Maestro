@@ -1616,15 +1616,25 @@ struct ContentView: View {
         .onReceive(NotificationCenter.default.publisher(for: .searchGuideNotesRequested)) { _ in
             handleSearchGuideNotesShortcut()
         }
-        .onChange(of: isGuideNotesEditorFocused) { _, _ in
+        .onChange(of: isGuideNotesEditorFocused) { _, newValue in
             #if os(macOS)
             updateScrollEventMonitor()
             #endif
+            // When the guide notes editor gains focus, unfocus the search field
+            // This prevents auto-advancing through search results when the user has clicked in the editor
+            if newValue {
+                isGuideNotesSearchFocused = false
+            }
         }
-        .onChange(of: isSessionNotesEditorFocused) { _, _ in
+        .onChange(of: isSessionNotesEditorFocused) { _, newValue in
             #if os(macOS)
             updateScrollEventMonitor()
             #endif
+            // When the session notes editor gains focus, unfocus the search field
+            // This prevents auto-advancing through search results when the user has clicked in the editor
+            if newValue {
+                isSessionNotesSearchFocused = false
+            }
         }
     }
 
@@ -2828,6 +2838,11 @@ struct ContentView: View {
     }
     .onKeyPress(.upArrow) {
         _ = focusTemplates(direction: -1)
+        return .handled
+    }
+    .onKeyPress(.escape) {
+        isSearchFocused = false
+        searchText = ""
         return .handled
     }
     if !searchText.isEmpty {
@@ -6704,7 +6719,7 @@ struct ContentView: View {
                         onEnter: { handleGuideNotesSearchEnter() },
                         onCancel: {
                             isGuideNotesSearchFocused = false
-                            isSearchFocused = true
+                            guideNotesInPaneSearchQuery = ""
                         },
                         fontSize: fontSize,
                         isSearchFocused: $isGuideNotesSearchFocused
@@ -6748,7 +6763,7 @@ struct ContentView: View {
                         onEnter: { handleSessionNotesSearchEnter() },
                         onCancel: {
                             isSessionNotesSearchFocused = false
-                            isSearchFocused = true
+                            sessionNotesInPaneSearchQuery = ""
                         },
                         fontSize: fontSize,
                         isSearchFocused: $isSessionNotesSearchFocused
@@ -6975,6 +6990,34 @@ struct ContentView: View {
         private func handleFocusSearchShortcut() {
             guard isActiveTab else {
                 LOG("Search shortcut ignored for inactive tab", ctx: ["tabId": tabID])
+                return
+            }
+
+            // Toggle between pane search and query template search
+            // Priority: if a pane search is focused, switch to query template search
+            // If query template search is focused (or nothing is focused), switch to appropriate pane search
+
+            if isGuideNotesSearchFocused {
+                // Switch from guide notes search to query template search
+                isGuideNotesSearchFocused = false
+                isSearchFocused = true
+                LOG("Toggled from guide notes search to query template search", ctx: ["tabId": tabID])
+                return
+            }
+
+            if isSessionNotesSearchFocused {
+                // Switch from session notes search to query template search
+                isSessionNotesSearchFocused = false
+                isSearchFocused = true
+                LOG("Toggled from session notes search to query template search", ctx: ["tabId": tabID])
+                return
+            }
+
+            if isSavedFileSearchFocused {
+                // Switch from saved file search to query template search
+                isSavedFileSearchFocused = false
+                isSearchFocused = true
+                LOG("Toggled from saved file search to query template search", ctx: ["tabId": tabID])
                 return
             }
 
@@ -7302,7 +7345,7 @@ struct ContentView: View {
                 onSavedFileFormatTree: { formatSavedFileAsTree(for: $0, session: activeSession) },
                 onSavedFileFormatLine: { formatSavedFileAsLine(for: $0, session: activeSession) },
                 onSavedFileSearchCancel: {
-                    isSearchFocused = true
+                    isSavedFileSearchFocused = false
                 },
                 savedFileSearchFocused: $isSavedFileSearchFocused,
                 onSavedFilesModeExit: { commitSavedFileDrafts(for: activeSession) },
@@ -7390,7 +7433,7 @@ struct ContentView: View {
                 onSavedFileFormatTree: { formatSavedFileAsTree(for: $0, session: activeSession) },
                 onSavedFileFormatLine: { formatSavedFileAsLine(for: $0, session: activeSession) },
                 onSavedFileSearchCancel: {
-                    isSearchFocused = true
+                    isSavedFileSearchFocused = false
                 },
                 savedFileSearchFocused: $isSavedFileSearchFocused,
                 onSavedFilesModeExit: { commitSavedFileDrafts(for: activeSession) },
@@ -14745,7 +14788,15 @@ struct ContentView: View {
         let onImagePreviewClose: () -> Void
 
         @FocusState private var popoutSavedFileSearchFocused: Bool
+        @FocusState private var popoutGuideNotesSearchFocused: Bool
+        @FocusState private var popoutSessionNotesSearchFocused: Bool
         @State private var shouldReopenAfterPreview = false
+        @State private var popoutGuideNotesSearchQuery: String = ""
+        @State private var popoutGuideNotesSearchMatches: [Range<String.Index>] = []
+        @State private var popoutGuideNotesCurrentMatchIndex: Int = 0
+        @State private var popoutSessionNotesSearchQuery: String = ""
+        @State private var popoutSessionNotesSearchMatches: [Range<String.Index>] = []
+        @State private var popoutSessionNotesCurrentMatchIndex: Int = 0
 
         var body: some View {
             VStack(alignment: .leading, spacing: 18) {
@@ -14848,48 +14899,7 @@ struct ContentView: View {
             case .guide:
                 guideBody
             case .session:
-                SessionNotesInline(
-                    fontSize: fontSize,
-                    editorMinHeight: editorMinHeight,
-                    session: session,
-                    draft: $sessionDraft,
-                    savedValue: sessionSavedValue,
-                    controller: sessionController,
-                    isPreview: $isPreview,
-                    mode: .constant(.notes),
-                    savedFiles: savedFiles,
-                    selectedSavedFileID: selectedSavedFileID,
-                    savedFileDraft: savedFileDraftProvider,
-                    savedFileValidation: savedFileValidationProvider,
-                    onSavedFileSelect: onSavedFileSelect,
-                    onSavedFileAdd: onSavedFileAdd,
-                    onSavedFileDelete: onSavedFileDelete,
-                    onSavedFileRename: onSavedFileRename,
-                    onSavedFileReorder: onSavedFileReorder,
-                    onSavedFileContentChange: onSavedFileContentChange,
-                    onSavedFileFocusChanged: onSavedFileFocusChange,
-                    onSavedFileOpenTree: onSavedFileOpenTree,
-                    onSavedFileFormatTree: onSavedFileFormatTree,
-                    onSavedFileFormatLine: onSavedFileFormatLine,
-                    onSavedFileSearchCancel: {
-                        // No-op for popout windows
-                    },
-                    savedFileSearchFocused: $popoutSavedFileSearchFocused,
-                    onSavedFilesModeExit: onSavedFilesModeExit,
-                    onSavedFilesPopout: nil,
-                    onSave: onSessionSave,
-                    onRevert: onSessionRevert,
-                    onLinkRequested: onSessionLinkRequested,
-                    onLinkOpen: wrappedSessionLinkOpen,
-                    onImageAttachment: onSessionImageAttachment,
-                    showsModePicker: false,
-                    showsModeToolbar: true,
-                    showsOuterBackground: true
-                )
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                .overlay(
-                    KeyboardShortcutOverlay(onTrigger: onTogglePreview)
-                )
+                sessionBody
             case .saved:
                 SessionNotesInline(
                     fontSize: fontSize,
@@ -14945,7 +14955,31 @@ struct ContentView: View {
                         HStack(spacing: 12) {
                             MarkdownToolbar(iconSize: fontSize + 2, isEnabled: !isPreview, controller: guideController)
                             PreviewModeToggle(isPreview: $isPreview)
+
+                            InPaneSearchBar(
+                                searchQuery: $popoutGuideNotesSearchQuery,
+                                matchCount: popoutGuideNotesSearchMatches.count,
+                                currentMatchIndex: popoutGuideNotesCurrentMatchIndex,
+                                onPrevious: { navigateToPopoutGuideNotesPreviousMatch() },
+                                onNext: { navigateToPopoutGuideNotesNextMatch() },
+                                onEnter: { handlePopoutGuideNotesSearchEnter() },
+                                onCancel: {
+                                    popoutGuideNotesSearchFocused = false
+                                    popoutGuideNotesSearchQuery = ""
+                                },
+                                fontSize: fontSize,
+                                isSearchFocused: $popoutGuideNotesSearchFocused
+                            )
+
                             Spacer(minLength: 0)
+                        }
+                        .onChange(of: popoutGuideNotesSearchQuery) { _, _ in
+                            updatePopoutGuideNotesSearchMatches()
+                        }
+                        .onChange(of: guideText) { _, _ in
+                            if !popoutGuideNotesSearchQuery.isEmpty {
+                                updatePopoutGuideNotesSearchMatches()
+                            }
                         }
 
                         Group {
@@ -14997,6 +15031,208 @@ struct ContentView: View {
             .overlay(
                 KeyboardShortcutOverlay(onTrigger: onTogglePreview)
             )
+        }
+
+        private var sessionBody: some View {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    MarkdownToolbar(iconSize: fontSize + 2, isEnabled: !isPreview, controller: sessionController)
+                    PreviewModeToggle(isPreview: $isPreview)
+
+                    InPaneSearchBar(
+                        searchQuery: $popoutSessionNotesSearchQuery,
+                        matchCount: popoutSessionNotesSearchMatches.count,
+                        currentMatchIndex: popoutSessionNotesCurrentMatchIndex,
+                        onPrevious: { navigateToPopoutSessionNotesPreviousMatch() },
+                        onNext: { navigateToPopoutSessionNotesNextMatch() },
+                        onEnter: { handlePopoutSessionNotesSearchEnter() },
+                        onCancel: {
+                            popoutSessionNotesSearchFocused = false
+                            popoutSessionNotesSearchQuery = ""
+                        },
+                        fontSize: fontSize,
+                        isSearchFocused: $popoutSessionNotesSearchFocused
+                    )
+
+                    Spacer(minLength: 0)
+
+                    if sessionDraft != sessionSavedValue {
+                        Button("Save") { onSessionSave() }
+                            .buttonStyle(.borderedProminent)
+                            .tint(Theme.purple)
+                            .font(.system(size: fontSize - 1))
+                        Button("Revert") { onSessionRevert() }
+                            .buttonStyle(.bordered)
+                            .tint(Theme.pink)
+                            .font(.system(size: fontSize - 1))
+                    }
+                }
+                .onChange(of: popoutSessionNotesSearchQuery) { _, _ in
+                    updatePopoutSessionNotesSearchMatches()
+                }
+                .onChange(of: sessionDraft) { _, _ in
+                    if !popoutSessionNotesSearchQuery.isEmpty {
+                        updatePopoutSessionNotesSearchMatches()
+                    }
+                }
+
+                Group {
+                    if isPreview {
+                        MarkdownPreviewView(
+                            text: sessionDraft,
+                            fontSize: fontSize * 1.5,
+                            onLinkOpen: wrappedSessionLinkOpen
+                        )
+                    } else {
+                        MarkdownEditor(
+                            text: $sessionDraft,
+                            fontSize: fontSize * 1.5,
+                            controller: sessionController,
+                            onLinkRequested: onSessionLinkRequested,
+                            onImageAttachment: { info in
+                                onSessionImageAttachment(info)
+                            }
+                        )
+                    }
+                }
+                .frame(minHeight: editorMinHeight)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(Color(hex: "#2A2A35"))
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(Theme.purple.opacity(0.25), lineWidth: 1)
+                        )
+                )
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+            .overlay(
+                KeyboardShortcutOverlay(onTrigger: onTogglePreview)
+            )
+        }
+
+        private func updatePopoutGuideNotesSearchMatches() {
+            guard !popoutGuideNotesSearchQuery.isEmpty else {
+                popoutGuideNotesSearchMatches = []
+                popoutGuideNotesCurrentMatchIndex = 0
+                return
+            }
+
+            let text = guideText
+            var matches: [Range<String.Index>] = []
+            var searchStartIndex = text.startIndex
+
+            while searchStartIndex < text.endIndex,
+                  let range = text.range(of: popoutGuideNotesSearchQuery,
+                                        options: .caseInsensitive,
+                                        range: searchStartIndex..<text.endIndex) {
+                matches.append(range)
+                searchStartIndex = range.upperBound
+            }
+
+            popoutGuideNotesSearchMatches = matches
+            popoutGuideNotesCurrentMatchIndex = matches.isEmpty ? 0 : 0
+
+            if !matches.isEmpty {
+                scrollToPopoutGuideNotesMatch()
+            }
+        }
+
+        private func navigateToPopoutGuideNotesPreviousMatch() {
+            guard !popoutGuideNotesSearchMatches.isEmpty else { return }
+            popoutGuideNotesCurrentMatchIndex = (popoutGuideNotesCurrentMatchIndex - 1 + popoutGuideNotesSearchMatches.count) % popoutGuideNotesSearchMatches.count
+            scrollToPopoutGuideNotesMatch()
+        }
+
+        private func navigateToPopoutGuideNotesNextMatch() {
+            guard !popoutGuideNotesSearchMatches.isEmpty else { return }
+            popoutGuideNotesCurrentMatchIndex = (popoutGuideNotesCurrentMatchIndex + 1) % popoutGuideNotesSearchMatches.count
+            scrollToPopoutGuideNotesMatch()
+        }
+
+        private func scrollToPopoutGuideNotesMatch() {
+            guard popoutGuideNotesCurrentMatchIndex < popoutGuideNotesSearchMatches.count else { return }
+            let range = popoutGuideNotesSearchMatches[popoutGuideNotesCurrentMatchIndex]
+
+            let text = guideText
+            let offset = text.distance(from: text.startIndex, to: range.lowerBound)
+            let length = text.distance(from: range.lowerBound, to: range.upperBound)
+
+            guideController.selectAndScrollToRange(offset: offset, length: length)
+        }
+
+        private func handlePopoutGuideNotesSearchEnter() {
+            guard !popoutGuideNotesSearchQuery.isEmpty else { return }
+
+            if isPreview {
+                onTogglePreview()
+            }
+
+            if !popoutGuideNotesSearchMatches.isEmpty {
+                navigateToPopoutGuideNotesNextMatch()
+            }
+        }
+
+        private func updatePopoutSessionNotesSearchMatches() {
+            guard !popoutSessionNotesSearchQuery.isEmpty else {
+                popoutSessionNotesSearchMatches = []
+                popoutSessionNotesCurrentMatchIndex = 0
+                return
+            }
+
+            let text = sessionDraft
+            var matches: [Range<String.Index>] = []
+            var searchStartIndex = text.startIndex
+
+            while searchStartIndex < text.endIndex,
+                  let range = text.range(of: popoutSessionNotesSearchQuery,
+                                        options: .caseInsensitive,
+                                        range: searchStartIndex..<text.endIndex) {
+                matches.append(range)
+                searchStartIndex = range.upperBound
+            }
+
+            popoutSessionNotesSearchMatches = matches
+            popoutSessionNotesCurrentMatchIndex = matches.isEmpty ? 0 : 0
+
+            if !matches.isEmpty {
+                scrollToPopoutSessionNotesMatch()
+            }
+        }
+
+        private func navigateToPopoutSessionNotesPreviousMatch() {
+            guard !popoutSessionNotesSearchMatches.isEmpty else { return }
+            popoutSessionNotesCurrentMatchIndex = (popoutSessionNotesCurrentMatchIndex - 1 + popoutSessionNotesSearchMatches.count) % popoutSessionNotesSearchMatches.count
+            scrollToPopoutSessionNotesMatch()
+        }
+
+        private func navigateToPopoutSessionNotesNextMatch() {
+            guard !popoutSessionNotesSearchMatches.isEmpty else { return }
+            popoutSessionNotesCurrentMatchIndex = (popoutSessionNotesCurrentMatchIndex + 1) % popoutSessionNotesSearchMatches.count
+            scrollToPopoutSessionNotesMatch()
+        }
+
+        private func scrollToPopoutSessionNotesMatch() {
+            guard popoutSessionNotesCurrentMatchIndex < popoutSessionNotesSearchMatches.count else { return }
+            let range = popoutSessionNotesSearchMatches[popoutSessionNotesCurrentMatchIndex]
+
+            let text = sessionDraft
+            let offset = text.distance(from: text.startIndex, to: range.lowerBound)
+            let length = text.distance(from: range.lowerBound, to: range.upperBound)
+
+            sessionController.selectAndScrollToRange(offset: offset, length: length)
+        }
+
+        private func handlePopoutSessionNotesSearchEnter() {
+            guard !popoutSessionNotesSearchQuery.isEmpty else { return }
+
+            if isPreview {
+                onTogglePreview()
+            }
+
+            if !popoutSessionNotesSearchMatches.isEmpty {
+                navigateToPopoutSessionNotesNextMatch()
+            }
         }
 
         private func wrappedGuideLinkOpen(_ url: URL, _ modifiers: NSEvent.ModifierFlags) {
