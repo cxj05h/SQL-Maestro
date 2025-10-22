@@ -1620,20 +1620,22 @@ struct ContentView: View {
             #if os(macOS)
             updateScrollEventMonitor()
             #endif
-            // When the guide notes editor gains focus, unfocus the search field
-            // This prevents auto-advancing through search results when the user has clicked in the editor
+            // When the guide notes editor gains focus, clear the search
+            // This is the same as clicking the 'x' button in the search field
             if newValue {
                 isGuideNotesSearchFocused = false
+                guideNotesInPaneSearchQuery = ""
             }
         }
         .onChange(of: isSessionNotesEditorFocused) { _, newValue in
             #if os(macOS)
             updateScrollEventMonitor()
             #endif
-            // When the session notes editor gains focus, unfocus the search field
-            // This prevents auto-advancing through search results when the user has clicked in the editor
+            // When the session notes editor gains focus, clear the search
+            // This is the same as clicking the 'x' button in the search field
             if newValue {
                 isSessionNotesSearchFocused = false
+                sessionNotesInPaneSearchQuery = ""
             }
         }
     }
@@ -6995,7 +6997,32 @@ struct ContentView: View {
 
             // Toggle between pane search and query template search
             // Priority: if a pane search is focused, switch to query template search
-            // If query template search is focused (or nothing is focused), switch to appropriate pane search
+            // If query template search is focused, switch to the active pane's search
+            // Otherwise, focus the appropriate search based on what's focused
+
+            // If query template search is focused, switch to active pane's search
+            if isSearchFocused {
+                isSearchFocused = false
+                // Switch to the search of the currently active pane
+                if let pane = activeBottomPane {
+                    switch pane {
+                    case .guideNotes:
+                        isGuideNotesSearchFocused = true
+                        LOG("Toggled from query template search to guide notes search", ctx: ["tabId": tabID])
+                    case .sessionNotes:
+                        isSessionNotesSearchFocused = true
+                        LOG("Toggled from query template search to session notes search", ctx: ["tabId": tabID])
+                    case .savedFiles:
+                        isSavedFileSearchFocused = true
+                        LOG("Toggled from query template search to saved files search", ctx: ["tabId": tabID])
+                    }
+                } else {
+                    // No pane is active, just refocus query template search
+                    isSearchFocused = true
+                    LOG("Query template search refocused (no active pane)", ctx: ["tabId": tabID])
+                }
+                return
+            }
 
             if isGuideNotesSearchFocused {
                 // Switch from guide notes search to query template search
@@ -14820,6 +14847,33 @@ struct ContentView: View {
                     onClose()
                 }
             }
+            .onReceive(NotificationCenter.default.publisher(for: .focusSearchRequested)) { _ in
+                handlePopoutFocusSearch()
+            }
+        }
+
+        private func handlePopoutFocusSearch() {
+            // In popouts, Cmd+F should only focus the search field for that pane
+            // It should NOT toggle to query template search
+            switch pane {
+            case .guide:
+                // If in preview mode, switch to edit mode first
+                if isPreview {
+                    onTogglePreview()
+                }
+                popoutGuideNotesSearchFocused = true
+            case .session:
+                // If in preview mode, switch to edit mode first
+                if isPreview {
+                    onTogglePreview()
+                }
+                popoutSessionNotesSearchFocused = true
+            case .saved:
+                // Saved files workspace handles its own search
+                popoutSavedFileSearchFocused = true
+            case .sessionTemplate:
+                break // Not handled here
+            }
         }
 
         @ViewBuilder
@@ -14997,6 +15051,13 @@ struct ContentView: View {
                                     onLinkRequested: onGuideLinkRequested,
                                     onImageAttachment: { info in
                                         onGuideImageAttachment(info)
+                                    },
+                                    onFocusChange: { focused in
+                                        // When editor gains focus, clear search (same as clicking 'x')
+                                        if focused {
+                                            popoutGuideNotesSearchFocused = false
+                                            popoutGuideNotesSearchQuery = ""
+                                        }
                                     }
                                 )
                                 .onChange(of: guideText) { _, newValue in
@@ -15091,6 +15152,13 @@ struct ContentView: View {
                             onLinkRequested: onSessionLinkRequested,
                             onImageAttachment: { info in
                                 onSessionImageAttachment(info)
+                            },
+                            onFocusChange: { focused in
+                                // When editor gains focus, clear search (same as clicking 'x')
+                                if focused {
+                                    popoutSessionNotesSearchFocused = false
+                                    popoutSessionNotesSearchQuery = ""
+                                }
                             }
                         )
                     }
