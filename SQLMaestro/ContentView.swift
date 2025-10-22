@@ -7083,6 +7083,11 @@ struct ContentView: View {
                 LOG("Guide notes shortcut ignored without selected template", ctx: ["tabId": tabID])
                 return
             }
+            // Clear all search focus states when switching panes
+            isGuideNotesSearchFocused = false
+            isSessionNotesSearchFocused = false
+            isSavedFileSearchFocused = false
+            isSearchFocused = false
             setActivePane(.guideNotes)
             LOG("Guide notes shortcut handled", ctx: ["tabId": tabID])
         }
@@ -7092,6 +7097,11 @@ struct ContentView: View {
                 LOG("Session notes shortcut ignored for inactive tab", ctx: ["tabId": tabID])
                 return
             }
+            // Clear all search focus states when switching panes
+            isGuideNotesSearchFocused = false
+            isSessionNotesSearchFocused = false
+            isSavedFileSearchFocused = false
+            isSearchFocused = false
             setActivePane(.sessionNotes)
             LOG("Session notes shortcut handled", ctx: ["tabId": tabID])
         }
@@ -7101,6 +7111,11 @@ struct ContentView: View {
                 LOG("Saved files shortcut ignored for inactive tab", ctx: ["tabId": tabID])
                 return
             }
+            // Clear all search focus states when switching panes
+            isGuideNotesSearchFocused = false
+            isSessionNotesSearchFocused = false
+            isSavedFileSearchFocused = false
+            isSearchFocused = false
             setActivePane(.savedFiles)
             LOG("Saved files shortcut handled", ctx: ["tabId": tabID])
         }
