@@ -6533,17 +6533,17 @@ struct ContentView: View {
                     
                     Spacer()
                     
-                    Button("Paste Screenshot") {
+                    Button("Paste Image") {
                         handleImagePaste()
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(Theme.pink)
                     .font(.system(size: fontSize - 2))
                 }
-                
+
                 // Images list
                 let sessionImages = sessions.sessionImages[sessions.current] ?? []
-                
+
                 if sessionImages.isEmpty {
                     VStack {
                         Image(systemName: "photo.badge.plus")
@@ -6552,7 +6552,7 @@ struct ContentView: View {
                         Text("No images yet")
                             .font(.system(size: fontSize - 1))
                             .foregroundStyle(.secondary)
-                        Text("Click 'Paste Screenshot' to add images")
+                        Text("Click 'Paste Image' to add images")
                             .font(.system(size: fontSize - 3))
                             .foregroundStyle(.secondary)
                     }
@@ -6580,9 +6580,11 @@ struct ContentView: View {
                         .padding(4)
                     }
                 }
-                
+
                 Spacer()
             }
+            .padding([.leading, .trailing], 10)
+            .padding(.top, 10)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(
                 RoundedRectangle(cornerRadius: 8)
@@ -6605,13 +6607,11 @@ struct ContentView: View {
                         Text("No Template Selected")
                             .font(.system(size: fontSize, weight: .medium))
                             .foregroundStyle(.secondary)
-                            .padding(.top, 4)
-                            .padding(.leading, 4)
                     }
 
                     Spacer()
 
-                    Button("Paste Guide Image") {
+                    Button("Paste Image") {
                         handleGuideImagePaste()
                     }
                     .buttonStyle(.borderedProminent)
@@ -6669,6 +6669,8 @@ struct ContentView: View {
 
                 Spacer()
             }
+            .padding([.leading, .trailing], 10)
+            .padding(.top, 10)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(
                 RoundedRectangle(cornerRadius: 8)
@@ -6679,7 +6681,7 @@ struct ContentView: View {
                     )
             )
         }
-        
+
         private func buildTemplateLinksView() -> some View {
             VStack(alignment: .leading, spacing: 8) {
                 // Header
@@ -6695,7 +6697,7 @@ struct ContentView: View {
                     }
 
                     Spacer()
-                    
+
                     if selectedTemplate != nil {
                         Button("Add Link") {
                             addNewLink()
@@ -6705,8 +6707,6 @@ struct ContentView: View {
                         .font(.system(size: fontSize - 2))
                     }
                 }
-                .padding(.top, selectedTemplate == nil ? 4 : 0)
-                .padding(.leading, selectedTemplate == nil ? 4 : 0)
                 
                 // Links list
                 if let template = selectedTemplate {
@@ -6741,26 +6741,21 @@ struct ContentView: View {
                             }
                             .padding(4)
                         }
-
-                        Text("Changes are saved automatically")
-                            .font(.system(size: fontSize - 3))
-                            .foregroundStyle(.secondary)
-                            .padding(.top, 4)
                     }
                 } else {
                     VStack {
                         Text("Select a template to manage its links")
                             .font(.system(size: fontSize - 1))
                             .foregroundStyle(.secondary)
-                            .padding(.top, 4)
-                            .padding(.leading, 4)
                         Spacer()
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
-                
+
                 Spacer()
             }
+            .padding([.leading, .trailing], 10)
+            .padding(.top, 10)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(
                 RoundedRectangle(cornerRadius: 8)
@@ -16252,7 +16247,7 @@ struct ContentView: View {
 
                     Spacer()
 
-                    Button("Paste Screenshot") {
+                    Button("Paste Image") {
                         onSessionImagePaste()
                     }
                     .buttonStyle(.borderedProminent)
@@ -16270,7 +16265,7 @@ struct ContentView: View {
                         Text("No images yet")
                             .font(.system(size: fontSize - 1))
                             .foregroundStyle(.secondary)
-                        Text("Click 'Paste Screenshot' to add images")
+                        Text("Click 'Paste Image' to add images")
                             .font(.system(size: fontSize - 3))
                             .foregroundStyle(.secondary)
                     }
@@ -16297,6 +16292,8 @@ struct ContentView: View {
 
                 Spacer()
             }
+            .padding([.leading, .trailing], 10)
+            .padding(.top, 10)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(
                 RoundedRectangle(cornerRadius: 8)
@@ -16320,13 +16317,11 @@ struct ContentView: View {
                         Text("No Template Selected")
                             .font(.system(size: fontSize, weight: .medium))
                             .foregroundStyle(.secondary)
-                            .padding(.top, 4)
-                            .padding(.leading, 4)
                     }
 
                     Spacer()
 
-                    Button("Paste Guide Image") {
+                    Button("Paste Image") {
                         onGuideImagePaste()
                     }
                     .buttonStyle(.borderedProminent)
@@ -16385,6 +16380,8 @@ struct ContentView: View {
 
                 Spacer()
             }
+            .padding([.leading, .trailing], 10)
+            .padding(.top, 10)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(
                 RoundedRectangle(cornerRadius: 8)
@@ -16408,8 +16405,6 @@ struct ContentView: View {
                         Text("No Template Selected")
                             .font(.system(size: fontSize, weight: .medium))
                             .foregroundStyle(.secondary)
-                            .padding(.top, 4)
-                            .padding(.leading, 4)
                     }
 
                     Spacer()
@@ -16457,8 +16452,6 @@ struct ContentView: View {
                         Text("Select a template to manage its links")
                             .font(.system(size: fontSize - 1))
                             .foregroundStyle(.secondary)
-                            .padding(.top, 4)
-                            .padding(.leading, 4)
                         Spacer()
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -16466,6 +16459,8 @@ struct ContentView: View {
 
                 Spacer()
             }
+            .padding([.leading, .trailing], 10)
+            .padding(.top, 10)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(
                 RoundedRectangle(cornerRadius: 8)
