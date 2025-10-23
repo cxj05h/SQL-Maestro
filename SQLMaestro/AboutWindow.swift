@@ -211,94 +211,58 @@ final class AboutViewModel: ObservableObject {
         fi
         """
 
-        // Escape the commands for shell execution
-        let escapedCommands = updateCommands
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "\"", with: "\\\"")
-            .replacingOccurrences(of: "$", with: "\\$")
-            .replacingOccurrences(of: "`", with: "\\`")
+        // Write script to temporary file and use 'open' to launch it
+        // This approach doesn't require Terminal automation permission
+        let tempDir = FileManager.default.temporaryDirectory
+        let scriptPath = tempDir.appendingPathComponent("sqlmaestro_update_\(UUID().uuidString).command")
 
-        // Use osascript command-line tool which often has better permissions
-        let appleScript = """
-        tell application "Terminal"
-            activate
-            do script "\(escapedCommands)"
-        end tell
-        """
+        do {
+            // Write the script with .command extension (opens in Terminal automatically)
+            try updateCommands.write(to: scriptPath, atomically: true, encoding: .utf8)
 
-        DispatchQueue.global(qos: .userInitiated).async {
+            // Make it executable
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptPath.path)
+
+            // Use 'open' to launch the .command file in Terminal
+            // This doesn't require automation permission
             let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-            process.arguments = ["-e", appleScript]
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
+            process.arguments = [scriptPath.path]
 
-            let pipe = Pipe()
-            process.standardError = pipe
+            try process.run()
 
-            do {
-                try process.run()
-                process.waitUntilExit()
+            // Clean up the script file after a delay
+            DispatchQueue.main.asyncAfter(deadline: .now() + 10.0) {
+                try? FileManager.default.removeItem(at: scriptPath)
+            }
 
-                if process.terminationStatus != 0 {
-                    let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                    let errorOutput = String(data: data, encoding: .utf8) ?? "Unknown error"
-                    print("osascript error: \(errorOutput)")
+        } catch {
+            print("Failed to create or run update script: \(error)")
 
-                    // Show error to user on main thread
-                    DispatchQueue.main.async {
-                        let alert = NSAlert()
-                        alert.messageText = "Terminal Permission Required"
-                        alert.informativeText = """
-                        SQLMaestro needs permission to control Terminal to run the update script.
+            // Show error to user
+            DispatchQueue.main.async {
+                let alert = NSAlert()
+                alert.messageText = "Update Failed"
+                alert.informativeText = """
+                Could not create update script. Error: \(error.localizedDescription)
 
-                        To fix this:
-                        1. Open System Settings > Privacy & Security > Automation
-                        2. Find SQLMaestro in the list
-                        3. Enable "Terminal"
+                You can run this command manually in Terminal:
+                brew update && brew upgrade --cask sql-maestro
+                """
+                alert.alertStyle = .warning
+                alert.addButton(withTitle: "Copy Command")
+                alert.addButton(withTitle: "OK")
 
-                        Then try updating again.
+                let response = alert.runModal()
 
-                        Alternatively, you can run this command manually in Terminal:
-                        brew update && brew upgrade --cask sql-maestro
-                        """
-                        alert.alertStyle = .informational
-                        alert.addButton(withTitle: "Copy Command")
-                        alert.addButton(withTitle: "Open System Settings")
-                        alert.addButton(withTitle: "Cancel")
+                if response == .alertFirstButtonReturn {
+                    let pasteboard = NSPasteboard.general
+                    pasteboard.clearContents()
+                    pasteboard.setString("brew update && brew upgrade --cask sql-maestro", forType: .string)
 
-                        let response = alert.runModal()
-
-                        switch response {
-                        case .alertFirstButtonReturn: // Copy Command
-                            let pasteboard = NSPasteboard.general
-                            pasteboard.clearContents()
-                            pasteboard.setString("brew update && brew upgrade --cask sql-maestro", forType: .string)
-
-                            // Show toast confirmation
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                                ToastPresenter.show("Command copied to clipboard", duration: 2.0)
-                            }
-
-                        case .alertSecondButtonReturn: // Open System Settings
-                            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation") {
-                                NSWorkspace.shared.open(url)
-                            }
-
-                        default:
-                            break
-                        }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                        ToastPresenter.show("Command copied to clipboard", duration: 2.0)
                     }
-                }
-            } catch {
-                print("Failed to run osascript: \(error)")
-
-                // Show error to user
-                DispatchQueue.main.async {
-                    let alert = NSAlert()
-                    alert.messageText = "Update Failed"
-                    alert.informativeText = "Could not launch Terminal. Error: \(error.localizedDescription)"
-                    alert.alertStyle = .warning
-                    alert.addButton(withTitle: "OK")
-                    alert.runModal()
                 }
             }
         }
