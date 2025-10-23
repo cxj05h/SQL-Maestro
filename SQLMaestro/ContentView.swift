@@ -10872,6 +10872,23 @@ struct ContentView: View {
         }
 
         private func attemptClearCurrentSession() {
+            // Auto-save links and tables BEFORE checking for unsaved data
+            // These should never block clearing - only session data should prompt the user
+            if let template = selectedTemplate {
+                // Flush any pending DB tables auto-save
+                flushDBTablesAutosave(for: sessions.current, template: template)
+
+                // Force-save DB tables if dirty
+                if dbTablesStore.isDirty(for: sessions.current, template: template) {
+                    _ = dbTablesStore.saveSidecar(for: sessions.current, template: template)
+                }
+
+                // Force-save template links if dirty
+                if templateLinksStore.isDirty(for: template) {
+                    _ = templateLinksStore.saveSidecar(for: template)
+                }
+            }
+
             let flags = currentUnsavedFlags()
             let snapshot = captureSnapshot(for: sessions.current)
 
@@ -11004,26 +11021,36 @@ struct ContentView: View {
 
         private func exitWorkflowPreflight() {
 #if canImport(AppKit)
-            if let template = selectedTemplate {
-                flushDBTablesAutosave(for: sessions.current, template: template)
-                templates.backupTemplateIfNeeded(template, reason: "app_quit")
+            // Auto-save links and tables for ALL sessions before checking for unsaved data
+            // These should never block exit - only actual session data should prompt the user
+            for session in TicketSession.allCases {
+                if let template = templateForSession(session) {
+                    // Flush any pending DB tables auto-save
+                    flushDBTablesAutosave(for: session, template: template)
+
+                    // Force-save DB tables if dirty
+                    if dbTablesStore.isDirty(for: session, template: template) {
+                        _ = dbTablesStore.saveSidecar(for: session, template: template)
+                    }
+
+                    // Force-save template links if dirty
+                    if templateLinksStore.isDirty(for: template) {
+                        _ = templateLinksStore.saveSidecar(for: template)
+                    }
+
+                    templates.backupTemplateIfNeeded(template, reason: "app_quit")
+                }
             }
 #endif
         }
 
         private func exitUnsavedComponents(for session: TicketSession) -> AppExitCoordinator.Components {
             var components: AppExitCoordinator.Components = []
+
+            // Only check for unsaved session data (notes, field values, session name, session link)
+            // Links and tables are auto-saved in preflight, so they should never block exit
             if hasSessionFieldData(for: session) {
                 components.insert(.session)
-            }
-
-            if let template = templateForSession(session) {
-                if templateLinksStore.isDirty(for: template) {
-                    components.insert(.links)
-                }
-                if dbTablesStore.isDirty(for: session, template: template) {
-                    components.insert(.tables)
-                }
             }
 
             return components
@@ -11127,9 +11154,22 @@ struct ContentView: View {
         private func clearCurrentSessionState() {
             commitDraftsForCurrentSession()
 
-            // Backup template before clearing session
+            // Auto-save links and tables before clearing session
+            // These should save silently in the background without prompting
             if let template = selectedTemplate {
+                // Flush any pending DB tables auto-save
                 flushDBTablesAutosave(for: sessions.current, template: template)
+
+                // Force-save DB tables if dirty
+                if dbTablesStore.isDirty(for: sessions.current, template: template) {
+                    _ = dbTablesStore.saveSidecar(for: sessions.current, template: template)
+                }
+
+                // Force-save template links if dirty
+                if templateLinksStore.isDirty(for: template) {
+                    _ = templateLinksStore.saveSidecar(for: template)
+                }
+
                 templates.backupTemplateIfNeeded(template, reason: "clear_session")
             }
 

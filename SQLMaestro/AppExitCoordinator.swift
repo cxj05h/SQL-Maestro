@@ -14,7 +14,7 @@ final class AppExitCoordinator: ObservableObject {
         var descriptions: [String] {
             var lines: [String] = []
             if contains(.session) {
-                lines.append("• Ticket session export")
+                lines.append("• Unsaved session data")
             }
             if contains(.links) {
                 lines.append("• Template links sidecar")
