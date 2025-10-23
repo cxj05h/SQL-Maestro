@@ -6605,6 +6605,8 @@ struct ContentView: View {
                         Text("No Template Selected")
                             .font(.system(size: fontSize, weight: .medium))
                             .foregroundStyle(.secondary)
+                            .padding(.top, 4)
+                            .padding(.leading, 4)
                     }
 
                     Spacer()
@@ -6691,7 +6693,7 @@ struct ContentView: View {
                             .font(.system(size: fontSize, weight: .medium))
                             .foregroundStyle(.secondary)
                     }
-                    
+
                     Spacer()
                     
                     if selectedTemplate != nil {
@@ -6703,6 +6705,8 @@ struct ContentView: View {
                         .font(.system(size: fontSize - 2))
                     }
                 }
+                .padding(.top, selectedTemplate == nil ? 4 : 0)
+                .padding(.leading, selectedTemplate == nil ? 4 : 0)
                 
                 // Links list
                 if let template = selectedTemplate {
@@ -6748,6 +6752,8 @@ struct ContentView: View {
                         Text("Select a template to manage its links")
                             .font(.system(size: fontSize - 1))
                             .foregroundStyle(.secondary)
+                            .padding(.top, 4)
+                            .padding(.leading, 4)
                         Spacer()
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -16314,6 +16320,8 @@ struct ContentView: View {
                         Text("No Template Selected")
                             .font(.system(size: fontSize, weight: .medium))
                             .foregroundStyle(.secondary)
+                            .padding(.top, 4)
+                            .padding(.leading, 4)
                     }
 
                     Spacer()
@@ -16400,6 +16408,8 @@ struct ContentView: View {
                         Text("No Template Selected")
                             .font(.system(size: fontSize, weight: .medium))
                             .foregroundStyle(.secondary)
+                            .padding(.top, 4)
+                            .padding(.leading, 4)
                     }
 
                     Spacer()
@@ -16447,6 +16457,8 @@ struct ContentView: View {
                         Text("Select a template to manage its links")
                             .font(.system(size: fontSize - 1))
                             .foregroundStyle(.secondary)
+                            .padding(.top, 4)
+                            .padding(.leading, 4)
                         Spacer()
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
