@@ -1065,7 +1065,16 @@ struct MarkdownPreviewView: View {
         guard !highlightRanges.isEmpty else { return text }
 
         var result = text
-        let entries = highlightRanges.enumerated().map { element -> (index: Int, lower: Int, upper: Int) in
+        let entries = highlightRanges.enumerated().compactMap { element -> (index: Int, lower: Int, upper: Int)? in
+            // Validate that the range bounds are valid for this text
+            guard element.element.lowerBound >= text.startIndex,
+                  element.element.lowerBound <= text.endIndex,
+                  element.element.upperBound >= text.startIndex,
+                  element.element.upperBound <= text.endIndex,
+                  element.element.lowerBound <= element.element.upperBound else {
+                return nil
+            }
+
             let lower = text.distance(from: text.startIndex, to: element.element.lowerBound)
             let upper = text.distance(from: text.startIndex, to: element.element.upperBound)
             return (element.offset, lower, upper)
