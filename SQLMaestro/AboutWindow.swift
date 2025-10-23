@@ -108,6 +108,66 @@ final class AboutViewModel: ObservableObject {
         }
     }
 
+    func runUpdateInTerminal() {
+        // Create a temporary shell script that will run the update commands
+        let script = """
+        #!/bin/bash
+        echo "========================================="
+        echo "SQLMaestro Update Script"
+        echo "========================================="
+        echo ""
+        echo "Step 1: Updating Homebrew..."
+        brew update
+        echo ""
+        echo "Step 2: Upgrading SQLMaestro..."
+        brew upgrade --cask sql-maestro
+        echo ""
+        echo "Step 3: Removing quarantine attribute (requires sudo)..."
+        echo "You may be prompted for your password:"
+        sudo xattr -rd com.apple.quarantine "/Applications/SQLMaestro.app"
+        echo ""
+        echo "========================================="
+        echo "Update complete!"
+        echo "========================================="
+        echo ""
+        echo "Please quit and relaunch SQLMaestro."
+        echo ""
+        echo "Press any key to close this window..."
+        read -n 1 -s
+        """
+
+        let tempDir = FileManager.default.temporaryDirectory
+        let scriptPath = tempDir.appendingPathComponent("sqlmaestro_update_\(UUID().uuidString).sh")
+
+        do {
+            // Write script to temp file
+            try script.write(to: scriptPath, atomically: true, encoding: .utf8)
+
+            // Make script executable
+            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptPath.path)
+
+            // Open Terminal with the script
+            // Using AppleScript to ensure Terminal stays visible and user can see output
+            let appleScript = """
+            tell application "Terminal"
+                activate
+                do script "\(scriptPath.path); rm '\(scriptPath.path)'"
+            end tell
+            """
+
+            if let scriptObject = NSAppleScript(source: appleScript) {
+                var error: NSDictionary?
+                scriptObject.executeAndReturnError(&error)
+
+                if let error = error {
+                    print("AppleScript error: \(error)")
+                }
+            }
+        } catch {
+            print("Failed to create update script: \(error)")
+        }
+    }
+
     private func updateStatus() {
         guard let latest = latestVersion else {
             isUpdateAvailable = false
@@ -212,6 +272,13 @@ private struct AboutView: View {
 
                 Button("Open Releases Page") {
                     viewModel.openReleasesPage()
+                }
+
+                if viewModel.isUpdateAvailable {
+                    Button("Update to Newest Version") {
+                        viewModel.runUpdateInTerminal()
+                    }
+                    .foregroundColor(Theme.purple)
                 }
 
                 Spacer()
