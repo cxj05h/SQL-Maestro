@@ -3880,20 +3880,182 @@ struct ContentView: View {
                 !referencedFileNames.contains(image.fileName)
             }
 
-            // Remove orphaned images
-            for orphanedImage in orphanedImages {
-                let imageURL = AppPaths.sessionImages.appendingPathComponent(orphanedImage.fileName)
-                try? FileManager.default.removeItem(at: imageURL)
+            guard !orphanedImages.isEmpty else { return }
 
-                var images = sessions.sessionImages[session] ?? []
-                images.removeAll { $0.id == orphanedImage.id }
-                sessions.sessionImages[session] = images
+            // Check for broken links (image mentioned in text but not properly formatted)
+            let brokenLinks = detectBrokenSessionImageLinks(in: notes, orphanedImages: orphanedImages, for: session)
 
-                LOG("Session image removed (orphaned from notes)", ctx: [
+            if !brokenLinks.isEmpty {
+                // Show toast warning about broken links
+                notifyUserAboutBrokenSessionImageLinks(brokenLinks, in: session)
+                return // Don't delete if links are just broken
+            }
+
+            // Links were completely removed - ask user what to do
+            confirmOrphanedSessionImageDeletion(orphanedImages, for: session)
+        }
+
+        private func detectBrokenSessionImageLinks(in notes: String, orphanedImages: [SessionImage], for session: TicketSession) -> [SessionImage] {
+            // Check if the file name appears anywhere in the text (even if not properly linked)
+            var brokenLinks: [SessionImage] = []
+
+            for image in orphanedImages {
+                // Check if filename appears in text (might be broken markdown)
+                if notes.contains(image.fileName) {
+                    brokenLinks.append(image)
+                    continue
+                }
+
+                // Check if custom name appears (user might have broken the link while editing)
+                if notes.contains(image.displayName) {
+                    brokenLinks.append(image)
+                    continue
+                }
+
+                // Check for common broken patterns
+                let fileNameWithoutExt = (image.fileName as NSString).deletingPathExtension
+                if notes.contains(fileNameWithoutExt) {
+                    brokenLinks.append(image)
+                }
+            }
+
+            return brokenLinks
+        }
+
+        private func notifyUserAboutBrokenSessionImageLinks(_ brokenImages: [SessionImage], in session: TicketSession) {
+            let count = brokenImages.count
+            let imageWord = count == 1 ? "image link" : "image links"
+            let message = "⚠️ \(count) broken \(imageWord) detected in session notes"
+
+            ToastPresenter.show(message, duration: 3.0)
+
+            LOG("Broken session image links detected", ctx: [
+                "session": "\(session.rawValue)",
+                "count": "\(count)",
+                "images": brokenImages.map { $0.fileName }.joined(separator: ", ")
+            ])
+
+            // Show a more detailed dialog
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                self.showBrokenSessionImageLinksDialog(brokenImages, for: session)
+            }
+        }
+
+        private func showBrokenSessionImageLinksDialog(_ brokenImages: [SessionImage], for session: TicketSession) {
+            let alert = NSAlert()
+            alert.messageText = "Broken Image Links Detected"
+
+            let imageList = brokenImages.map { "• \($0.displayName)" }.joined(separator: "\n")
+            alert.informativeText = """
+            The following session images exist but their markdown links appear to be broken or incorrectly formatted:
+
+            \(imageList)
+
+            What would you like to do?
+            """
+
+            alert.addButton(withTitle: "Keep Images (Do Nothing)")
+            alert.addButton(withTitle: "Delete Images")
+            alert.addButton(withTitle: "Show Link Format Help")
+            alert.alertStyle = .warning
+
+            let response = runAlertWithFix(alert)
+
+            switch response {
+            case .alertFirstButtonReturn: // Keep
+                LOG("User chose to keep broken session image links", ctx: ["session": "\(session.rawValue)"])
+                // Do nothing - keep images even with broken links
+
+            case .alertSecondButtonReturn: // Delete
+                LOG("User chose to delete session images with broken links", ctx: ["session": "\(session.rawValue)"])
+                for image in brokenImages {
+                    let imageURL = AppPaths.sessionImages.appendingPathComponent(image.fileName)
+                    try? FileManager.default.removeItem(at: imageURL)
+                    var images = sessions.sessionImages[session] ?? []
+                    images.removeAll { $0.id == image.id }
+                    sessions.sessionImages[session] = images
+                    removeSessionNoteLinks(referencing: imageURL)
+                }
+                ToastPresenter.show("Images deleted", duration: 1.5)
+
+            case .alertThirdButtonReturn: // Help
+                self.showSessionImageLinkFormatHelp(for: session)
+
+            default:
+                break
+            }
+        }
+
+        private func showSessionImageLinkFormatHelp(for session: TicketSession) {
+            let alert = NSAlert()
+            alert.messageText = "Image Link Format Guide"
+            alert.informativeText = """
+            To properly link images in your session notes, use this markdown format:
+
+            ✅ Correct format:
+            [Image Description](file:///full/path/to/image.png)
+
+            ❌ Common mistakes that break links:
+            • Extra space: [Image] (file://...)
+            • Missing slash: [Image](file://path/...)
+            • Missing closing: [Image](file:///path/to/image.png
+            • Wrong quotes: [Image]("file://...")
+
+            Tip: Use the "Insert Image" button to automatically create properly formatted links.
+            """
+            alert.addButton(withTitle: "Got It")
+            alert.alertStyle = .informational
+            _ = runAlertWithFix(alert)
+        }
+
+        private func confirmOrphanedSessionImageDeletion(_ orphanedImages: [SessionImage], for session: TicketSession) {
+            let count = orphanedImages.count
+            let imageWord = count == 1 ? "image" : "images"
+
+            let alert = NSAlert()
+            alert.messageText = "Orphaned Session Image\(count == 1 ? "" : "s") Detected"
+
+            let imageList = orphanedImages.map { "• \($0.displayName)" }.joined(separator: "\n")
+            alert.informativeText = """
+            The following \(imageWord) \(count == 1 ? "is" : "are") no longer referenced in your session notes:
+
+            \(imageList)
+
+            This usually happens when you delete or replace text containing image links.
+
+            What would you like to do?
+            """
+
+            alert.addButton(withTitle: "Delete Image\(count == 1 ? "" : "s")")
+            alert.addButton(withTitle: "Keep Image\(count == 1 ? "" : "s")")
+            alert.alertStyle = .warning
+
+            let response = runAlertWithFix(alert)
+
+            if response == .alertFirstButtonReturn {
+                // User confirmed deletion
+                for orphanedImage in orphanedImages {
+                    let imageURL = AppPaths.sessionImages.appendingPathComponent(orphanedImage.fileName)
+                    try? FileManager.default.removeItem(at: imageURL)
+
+                    var images = sessions.sessionImages[session] ?? []
+                    images.removeAll { $0.id == orphanedImage.id }
+                    sessions.sessionImages[session] = images
+
+                    LOG("Session image removed (user confirmed orphan deletion)", ctx: [
+                        "session": "\(session.rawValue)",
+                        "fileName": orphanedImage.fileName,
+                        "displayName": orphanedImage.displayName
+                    ])
+                }
+                ToastPresenter.show("\(count) \(imageWord) deleted", duration: 1.5)
+            } else {
+                // User wants to keep images
+                LOG("User chose to keep orphaned session images", ctx: [
                     "session": "\(session.rawValue)",
-                    "fileName": orphanedImage.fileName,
-                    "displayName": orphanedImage.displayName
+                    "count": "\(count)"
                 ])
+                ToastPresenter.show("Images preserved", duration: 1.5)
             }
         }
 
@@ -3918,15 +4080,174 @@ struct ContentView: View {
                 !referencedFileNames.contains(image.fileName)
             }
 
-            // Remove orphaned images
-            for orphanedImage in orphanedImages {
-                if templateGuideStore.deleteImage(orphanedImage, for: template) {
-                    LOG("Guide image removed (orphaned from notes)", ctx: [
-                        "template": template.name,
-                        "fileName": orphanedImage.fileName,
-                        "displayName": orphanedImage.displayName
-                    ])
+            guard !orphanedImages.isEmpty else { return }
+
+            // Check for broken links (image mentioned in text but not properly formatted)
+            let brokenLinks = detectBrokenImageLinks(in: notes, orphanedImages: orphanedImages, for: template)
+
+            if !brokenLinks.isEmpty {
+                // Show toast warning about broken links
+                notifyUserAboutBrokenImageLinks(brokenLinks, in: template)
+                return // Don't delete if links are just broken
+            }
+
+            // Links were completely removed - ask user what to do
+            confirmOrphanedImageDeletion(orphanedImages, for: template)
+        }
+
+        private func detectBrokenImageLinks(in notes: String, orphanedImages: [TemplateGuideImage], for template: TemplateItem) -> [TemplateGuideImage] {
+            // Check if the file name appears anywhere in the text (even if not properly linked)
+            var brokenLinks: [TemplateGuideImage] = []
+
+            for image in orphanedImages {
+                // Check if filename appears in text (might be broken markdown)
+                if notes.contains(image.fileName) {
+                    brokenLinks.append(image)
+                    continue
                 }
+
+                // Check if custom name appears (user might have broken the link while editing)
+                if notes.contains(image.displayName) {
+                    brokenLinks.append(image)
+                    continue
+                }
+
+                // Check for common broken patterns
+                let fileNameWithoutExt = (image.fileName as NSString).deletingPathExtension
+                if notes.contains(fileNameWithoutExt) {
+                    brokenLinks.append(image)
+                }
+            }
+
+            return brokenLinks
+        }
+
+        private func notifyUserAboutBrokenImageLinks(_ brokenImages: [TemplateGuideImage], in template: TemplateItem) {
+            let count = brokenImages.count
+            let imageWord = count == 1 ? "image link" : "image links"
+            let message = "⚠️ \(count) broken \(imageWord) detected in guide notes"
+
+            ToastPresenter.show(message, duration: 3.0)
+
+            LOG("Broken image links detected", ctx: [
+                "template": template.name,
+                "count": "\(count)",
+                "images": brokenImages.map { $0.fileName }.joined(separator: ", ")
+            ])
+
+            // Show a more detailed dialog
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                self.showBrokenImageLinksDialog(brokenImages, for: template)
+            }
+        }
+
+        private func showBrokenImageLinksDialog(_ brokenImages: [TemplateGuideImage], for template: TemplateItem) {
+            let alert = NSAlert()
+            alert.messageText = "Broken Image Links Detected"
+
+            let imageList = brokenImages.map { "• \($0.displayName)" }.joined(separator: "\n")
+            alert.informativeText = """
+            The following images exist but their markdown links appear to be broken or incorrectly formatted:
+
+            \(imageList)
+
+            What would you like to do?
+            """
+
+            alert.addButton(withTitle: "Keep Images (Do Nothing)")
+            alert.addButton(withTitle: "Delete Images")
+            alert.addButton(withTitle: "Show Link Format Help")
+            alert.alertStyle = .warning
+
+            let response = runAlertWithFix(alert)
+
+            switch response {
+            case .alertFirstButtonReturn: // Keep
+                LOG("User chose to keep broken image links", ctx: ["template": template.name])
+                // Do nothing - keep images even with broken links
+
+            case .alertSecondButtonReturn: // Delete
+                LOG("User chose to delete images with broken links", ctx: ["template": template.name])
+                for image in brokenImages {
+                    if templateGuideStore.deleteImage(image, for: template) {
+                        removeGuideNoteLinks(for: template, fileURL: templateGuideStore.imageURL(for: image, template: template))
+                    }
+                }
+                ToastPresenter.show("Images deleted", duration: 1.5)
+
+            case .alertThirdButtonReturn: // Help
+                self.showImageLinkFormatHelp(for: template)
+
+            default:
+                break
+            }
+        }
+
+        private func showImageLinkFormatHelp(for template: TemplateItem) {
+            let alert = NSAlert()
+            alert.messageText = "Image Link Format Guide"
+            alert.informativeText = """
+            To properly link images in your guide notes, use this markdown format:
+
+            ✅ Correct format:
+            [Image Description](file:///full/path/to/image.png)
+
+            ❌ Common mistakes that break links:
+            • Extra space: [Image] (file://...)
+            • Missing slash: [Image](file://path/...)
+            • Missing closing: [Image](file:///path/to/image.png
+            • Wrong quotes: [Image]("file://...")
+
+            Tip: Use the "Insert Image" button to automatically create properly formatted links.
+            """
+            alert.addButton(withTitle: "Got It")
+            alert.alertStyle = .informational
+            _ = runAlertWithFix(alert)
+        }
+
+        private func confirmOrphanedImageDeletion(_ orphanedImages: [TemplateGuideImage], for template: TemplateItem) {
+            let count = orphanedImages.count
+            let imageWord = count == 1 ? "image" : "images"
+
+            let alert = NSAlert()
+            alert.messageText = "Orphaned Image\(count == 1 ? "" : "s") Detected"
+
+            let imageList = orphanedImages.map { "• \($0.displayName)" }.joined(separator: "\n")
+            alert.informativeText = """
+            The following \(imageWord) \(count == 1 ? "is" : "are") no longer referenced in your guide notes:
+
+            \(imageList)
+
+            This usually happens when you delete or replace text containing image links.
+
+            What would you like to do?
+            """
+
+            alert.addButton(withTitle: "Delete Image\(count == 1 ? "" : "s")")
+            alert.addButton(withTitle: "Keep Image\(count == 1 ? "" : "s")")
+            alert.alertStyle = .warning
+
+            let response = runAlertWithFix(alert)
+
+            if response == .alertFirstButtonReturn {
+                // User confirmed deletion
+                for orphanedImage in orphanedImages {
+                    if templateGuideStore.deleteImage(orphanedImage, for: template) {
+                        LOG("Guide image removed (user confirmed orphan deletion)", ctx: [
+                            "template": template.name,
+                            "fileName": orphanedImage.fileName,
+                            "displayName": orphanedImage.displayName
+                        ])
+                    }
+                }
+                ToastPresenter.show("\(count) \(imageWord) deleted", duration: 1.5)
+            } else {
+                // User wants to keep images
+                LOG("User chose to keep orphaned images", ctx: [
+                    "template": template.name,
+                    "count": "\(count)"
+                ])
+                ToastPresenter.show("Images preserved", duration: 1.5)
             }
         }
 
