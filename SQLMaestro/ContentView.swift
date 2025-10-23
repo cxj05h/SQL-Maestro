@@ -8579,6 +8579,15 @@ struct ContentView: View {
             !images.isEmpty ||
             savedFiles.contains { $0.hasContent }
         }
+
+        /// Returns a copy of this snapshot with only user-editable fields (excludes images and savedFiles)
+        /// Used for dirty detection to avoid false positives when just viewing tabs
+        func withoutAutoSavedFields() -> SessionSnapshot {
+            var copy = self
+            copy.images = []
+            copy.savedFiles = []
+            return copy
+        }
     }
 
     private func captureSnapshot(for session: TicketSession) -> SessionSnapshot {
@@ -8655,7 +8664,9 @@ struct ContentView: View {
         let currentSnapshot = captureSnapshot(for: session)
 
         if let baseline = sessionSavedSnapshots[session] {
-            if currentSnapshot != baseline {
+            // Compare only user-editable fields (exclude images and savedFiles which are auto-saved)
+            // This prevents false positives when user just views these tabs without making changes
+            if currentSnapshot.withoutAutoSavedFields() != baseline.withoutAutoSavedFields() {
                 return true
             }
         } else if currentSnapshot.hasAnyContent {
