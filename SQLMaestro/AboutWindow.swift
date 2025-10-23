@@ -163,14 +163,14 @@ final class AboutViewModel: ObservableObject {
         echo ""
         echo "Step 2: Upgrading SQLMaestro..."
         brew upgrade --cask sql-maestro
-        UPDATE_EXIT_CODE=\\$?
+        UPDATE_EXIT_CODE=$?
         echo ""
-        if [ \\$UPDATE_EXIT_CODE -eq 0 ]; then
+        if [ $UPDATE_EXIT_CODE -eq 0 ]; then
             echo "Step 3: Removing quarantine attribute..."
             echo "\(escapedPassword)" | sudo -S xattr -rd com.apple.quarantine "/Applications/SQLMaestro.app" 2>/dev/null
-            XATTR_EXIT_CODE=\\$?
+            XATTR_EXIT_CODE=$?
 
-            if [ \\$XATTR_EXIT_CODE -eq 0 ]; then
+            if [ $XATTR_EXIT_CODE -eq 0 ]; then
                 echo "Quarantine attribute removed successfully."
                 echo ""
                 echo "========================================="
