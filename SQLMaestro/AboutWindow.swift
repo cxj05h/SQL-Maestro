@@ -1,6 +1,7 @@
 import SwiftUI
 import Combine
 import AppKit
+import Security
 
 // MARK: - About Window Controller
 final class AboutWindowController: NSWindowController {
@@ -108,7 +109,48 @@ final class AboutViewModel: ObservableObject {
         }
     }
 
+    func requestAdminPassword() -> String? {
+        // Show custom password dialog
+        let alert = NSAlert()
+        alert.messageText = "Administrator Password Required"
+        alert.informativeText = "SQLMaestro needs your administrator password to remove the quarantine attribute after updating the app."
+        alert.alertStyle = .informational
+        alert.addButton(withTitle: "OK")
+        alert.addButton(withTitle: "Cancel")
+
+        let passwordField = NSSecureTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
+        passwordField.placeholderString = "Enter your password"
+        alert.accessoryView = passwordField
+
+        alert.window.initialFirstResponder = passwordField
+
+        let response = alert.runModal()
+
+        guard response == .alertFirstButtonReturn else {
+            return nil
+        }
+
+        let password = passwordField.stringValue
+        guard !password.isEmpty else {
+            return nil
+        }
+
+        return password
+    }
+
     func runUpdateInTerminal() {
+        // First, request admin password using custom dialog
+        guard let password = requestAdminPassword() else {
+            return // User cancelled
+        }
+
+        // Escape password for shell
+        let escapedPassword = password
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "$", with: "\\$")
+            .replacingOccurrences(of: "`", with: "\\`")
+
         // Create the update commands as a shell script
         let updateCommands = """
         clear
@@ -121,20 +163,52 @@ final class AboutViewModel: ObservableObject {
         echo ""
         echo "Step 2: Upgrading SQLMaestro..."
         brew upgrade --cask sql-maestro
+        UPDATE_EXIT_CODE=\\$?
         echo ""
-        echo "Step 3: Removing quarantine attribute (requires sudo)..."
-        echo "You may be prompted for your password:"
-        sudo xattr -rd com.apple.quarantine "/Applications/SQLMaestro.app"
-        echo ""
-        echo "========================================="
-        echo "Update complete!"
-        echo "========================================="
-        echo ""
-        echo "Please quit and relaunch SQLMaestro."
-        echo ""
-        echo "Press any key to close this window..."
-        read -n 1 -s
-        exit
+        if [ \\$UPDATE_EXIT_CODE -eq 0 ]; then
+            echo "Step 3: Removing quarantine attribute..."
+            echo "\(escapedPassword)" | sudo -S xattr -rd com.apple.quarantine "/Applications/SQLMaestro.app" 2>/dev/null
+            XATTR_EXIT_CODE=\\$?
+
+            if [ \\$XATTR_EXIT_CODE -eq 0 ]; then
+                echo "Quarantine attribute removed successfully."
+                echo ""
+                echo "========================================="
+                echo "Update complete!"
+                echo "========================================="
+                echo ""
+                echo "SQLMaestro will now restart..."
+                echo ""
+                sleep 2
+                open -a "SQLMaestro"
+                exit 0
+            else
+                echo ""
+                echo "========================================="
+                echo "WARNING: Could not remove quarantine!"
+                echo "========================================="
+                echo ""
+                echo "The update was successful, but the quarantine"
+                echo "attribute could not be removed automatically."
+                echo ""
+                echo "Before restarting SQLMaestro, please run:"
+                echo "sudo xattr -rd com.apple.quarantine \\"/Applications/SQLMaestro.app\\""
+                echo ""
+                echo "Press any key to close (DO NOT restart yet)..."
+                read -n 1 -s
+                exit 1
+            fi
+        else
+            echo "========================================="
+            echo "Update failed!"
+            echo "========================================="
+            echo ""
+            echo "Please check the error messages above."
+            echo ""
+            echo "Press any key to close this window..."
+            read -n 1 -s
+            exit 1
+        fi
         """
 
         // Escape the commands for shell execution
@@ -184,7 +258,7 @@ final class AboutViewModel: ObservableObject {
                         Then try updating again.
 
                         Alternatively, you can run this command manually in Terminal:
-                        brew update && brew upgrade --cask sql-maestro && sudo xattr -rd com.apple.quarantine "/Applications/SQLMaestro.app"
+                        brew update && brew upgrade --cask sql-maestro
                         """
                         alert.alertStyle = .informational
                         alert.addButton(withTitle: "Copy Command")
@@ -197,7 +271,7 @@ final class AboutViewModel: ObservableObject {
                         case .alertFirstButtonReturn: // Copy Command
                             let pasteboard = NSPasteboard.general
                             pasteboard.clearContents()
-                            pasteboard.setString("brew update && brew upgrade --cask sql-maestro && sudo xattr -rd com.apple.quarantine \"/Applications/SQLMaestro.app\"", forType: .string)
+                            pasteboard.setString("brew update && brew upgrade --cask sql-maestro", forType: .string)
 
                             // Show toast confirmation
                             DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
@@ -350,6 +424,7 @@ private struct AboutView: View {
                 }
                 .keyboardShortcut(.defaultAction)
             }
+            .padding(.bottom, viewModel.isUpdateAvailable ? 10 : 0)
         }
         .padding(24)
         .frame(minWidth: 540, maxWidth: .infinity, minHeight: 300, maxHeight: .infinity)
