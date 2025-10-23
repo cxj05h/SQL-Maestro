@@ -10,7 +10,7 @@ final class AboutWindowController: NSWindowController {
 
     private init() {
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 340),
+            contentRect: NSRect(x: 0, y: 0, width: 580, height: 340),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
@@ -109,62 +109,63 @@ final class AboutViewModel: ObservableObject {
     }
 
     func runUpdateInTerminal() {
-        // Create a temporary shell script that will run the update commands
-        let script = """
-        #!/bin/bash
-        echo "========================================="
-        echo "SQLMaestro Update Script"
-        echo "========================================="
-        echo ""
-        echo "Step 1: Updating Homebrew..."
-        brew update
-        echo ""
-        echo "Step 2: Upgrading SQLMaestro..."
-        brew upgrade --cask sql-maestro
-        echo ""
-        echo "Step 3: Removing quarantine attribute (requires sudo)..."
-        echo "You may be prompted for your password:"
-        sudo xattr -rd com.apple.quarantine "/Applications/SQLMaestro.app"
-        echo ""
-        echo "========================================="
-        echo "Update complete!"
-        echo "========================================="
-        echo ""
-        echo "Please quit and relaunch SQLMaestro."
-        echo ""
-        echo "Press any key to close this window..."
-        read -n 1 -s
+        // Create the update commands as a shell script
+        let updateCommands = """
+        clear; \
+        echo "========================================="; \
+        echo "SQLMaestro Update Script"; \
+        echo "========================================="; \
+        echo ""; \
+        echo "Step 1: Updating Homebrew..."; \
+        brew update; \
+        echo ""; \
+        echo "Step 2: Upgrading SQLMaestro..."; \
+        brew upgrade --cask sql-maestro; \
+        echo ""; \
+        echo "Step 3: Removing quarantine attribute (requires sudo)..."; \
+        echo "You may be prompted for your password:"; \
+        sudo xattr -rd com.apple.quarantine "/Applications/SQLMaestro.app"; \
+        echo ""; \
+        echo "========================================="; \
+        echo "Update complete!"; \
+        echo "========================================="; \
+        echo ""; \
+        echo "Please quit and relaunch SQLMaestro."; \
+        echo ""; \
+        echo "Press any key to close this window..."; \
+        read -n 1 -s; \
+        exit
         """
 
-        let tempDir = FileManager.default.temporaryDirectory
-        let scriptPath = tempDir.appendingPathComponent("sqlmaestro_update_\(UUID().uuidString).sh")
+        // Use AppleScript to open Terminal with a new window and run commands
+        // This approach ensures Terminal is visible and in the foreground
+        let appleScript = """
+        tell application "Terminal"
+            activate
+            set newWindow to do script "\(updateCommands.replacingOccurrences(of: "\"", with: "\\\""))"
+            set frontmost of newWindow to true
+        end tell
+        """
 
-        do {
-            // Write script to temp file
-            try script.write(to: scriptPath, atomically: true, encoding: .utf8)
-
-            // Make script executable
-            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptPath.path)
-
-            // Open Terminal with the script
-            // Using AppleScript to ensure Terminal stays visible and user can see output
-            let appleScript = """
-            tell application "Terminal"
-                activate
-                do script "\(scriptPath.path); rm '\(scriptPath.path)'"
-            end tell
-            """
-
+        DispatchQueue.global(qos: .userInitiated).async {
             if let scriptObject = NSAppleScript(source: appleScript) {
                 var error: NSDictionary?
                 scriptObject.executeAndReturnError(&error)
 
                 if let error = error {
                     print("AppleScript error: \(error)")
+
+                    // Show error to user on main thread
+                    DispatchQueue.main.async {
+                        let alert = NSAlert()
+                        alert.messageText = "Update Failed"
+                        alert.informativeText = "Could not launch Terminal to run the update. Error: \(error["NSAppleScriptErrorMessage"] as? String ?? "Unknown error")"
+                        alert.alertStyle = .warning
+                        alert.addButton(withTitle: "OK")
+                        alert.runModal()
+                    }
                 }
             }
-        } catch {
-            print("Failed to create update script: \(error)")
         }
     }
 
@@ -290,7 +291,7 @@ private struct AboutView: View {
             }
         }
         .padding(24)
-        .frame(minWidth: 420, maxWidth: .infinity, minHeight: 300, maxHeight: .infinity)
+        .frame(minWidth: 540, maxWidth: .infinity, minHeight: 300, maxHeight: .infinity)
     }
 
     @ViewBuilder
