@@ -23,7 +23,7 @@
 	<key>LSMinimumSystemVersion</key>
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>NSAppleEventsUsageDescription</key>
-	<string>SQLMaestro needs to send commands to Querious to automatically open database tables.</string>
+	<string>SQLMaestro needs to send commands to Querious to automatically open database tables and to Terminal for running update scripts.</string>
 	<key>NSSystemAdministrationUsageDescription</key>
 	<string>SQLMaestro needs system access to automate Querious for opening database tables.</string>
 	<key>NSPrincipalClass</key>

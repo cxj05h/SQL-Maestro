@@ -111,59 +111,120 @@ final class AboutViewModel: ObservableObject {
     func runUpdateInTerminal() {
         // Create the update commands as a shell script
         let updateCommands = """
-        clear; \
-        echo "========================================="; \
-        echo "SQLMaestro Update Script"; \
-        echo "========================================="; \
-        echo ""; \
-        echo "Step 1: Updating Homebrew..."; \
-        brew update; \
-        echo ""; \
-        echo "Step 2: Upgrading SQLMaestro..."; \
-        brew upgrade --cask sql-maestro; \
-        echo ""; \
-        echo "Step 3: Removing quarantine attribute (requires sudo)..."; \
-        echo "You may be prompted for your password:"; \
-        sudo xattr -rd com.apple.quarantine "/Applications/SQLMaestro.app"; \
-        echo ""; \
-        echo "========================================="; \
-        echo "Update complete!"; \
-        echo "========================================="; \
-        echo ""; \
-        echo "Please quit and relaunch SQLMaestro."; \
-        echo ""; \
-        echo "Press any key to close this window..."; \
-        read -n 1 -s; \
+        clear
+        echo "========================================="
+        echo "SQLMaestro Update Script"
+        echo "========================================="
+        echo ""
+        echo "Step 1: Updating Homebrew..."
+        brew update
+        echo ""
+        echo "Step 2: Upgrading SQLMaestro..."
+        brew upgrade --cask sql-maestro
+        echo ""
+        echo "Step 3: Removing quarantine attribute (requires sudo)..."
+        echo "You may be prompted for your password:"
+        sudo xattr -rd com.apple.quarantine "/Applications/SQLMaestro.app"
+        echo ""
+        echo "========================================="
+        echo "Update complete!"
+        echo "========================================="
+        echo ""
+        echo "Please quit and relaunch SQLMaestro."
+        echo ""
+        echo "Press any key to close this window..."
+        read -n 1 -s
         exit
         """
 
-        // Use AppleScript to open Terminal with a new window and run commands
-        // This approach ensures Terminal is visible and in the foreground
+        // Escape the commands for shell execution
+        let escapedCommands = updateCommands
+            .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "\"", with: "\\\"")
+            .replacingOccurrences(of: "$", with: "\\$")
+            .replacingOccurrences(of: "`", with: "\\`")
+
+        // Use osascript command-line tool which often has better permissions
         let appleScript = """
         tell application "Terminal"
             activate
-            set newWindow to do script "\(updateCommands.replacingOccurrences(of: "\"", with: "\\\""))"
-            set frontmost of newWindow to true
+            do script "\(escapedCommands)"
         end tell
         """
 
         DispatchQueue.global(qos: .userInitiated).async {
-            if let scriptObject = NSAppleScript(source: appleScript) {
-                var error: NSDictionary?
-                scriptObject.executeAndReturnError(&error)
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+            process.arguments = ["-e", appleScript]
 
-                if let error = error {
-                    print("AppleScript error: \(error)")
+            let pipe = Pipe()
+            process.standardError = pipe
+
+            do {
+                try process.run()
+                process.waitUntilExit()
+
+                if process.terminationStatus != 0 {
+                    let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                    let errorOutput = String(data: data, encoding: .utf8) ?? "Unknown error"
+                    print("osascript error: \(errorOutput)")
 
                     // Show error to user on main thread
                     DispatchQueue.main.async {
                         let alert = NSAlert()
-                        alert.messageText = "Update Failed"
-                        alert.informativeText = "Could not launch Terminal to run the update. Error: \(error["NSAppleScriptErrorMessage"] as? String ?? "Unknown error")"
-                        alert.alertStyle = .warning
-                        alert.addButton(withTitle: "OK")
-                        alert.runModal()
+                        alert.messageText = "Terminal Permission Required"
+                        alert.informativeText = """
+                        SQLMaestro needs permission to control Terminal to run the update script.
+
+                        To fix this:
+                        1. Open System Settings > Privacy & Security > Automation
+                        2. Find SQLMaestro in the list
+                        3. Enable "Terminal"
+
+                        Then try updating again.
+
+                        Alternatively, you can run this command manually in Terminal:
+                        brew update && brew upgrade --cask sql-maestro && sudo xattr -rd com.apple.quarantine "/Applications/SQLMaestro.app"
+                        """
+                        alert.alertStyle = .informational
+                        alert.addButton(withTitle: "Copy Command")
+                        alert.addButton(withTitle: "Open System Settings")
+                        alert.addButton(withTitle: "Cancel")
+
+                        let response = alert.runModal()
+
+                        switch response {
+                        case .alertFirstButtonReturn: // Copy Command
+                            let pasteboard = NSPasteboard.general
+                            pasteboard.clearContents()
+                            pasteboard.setString("brew update && brew upgrade --cask sql-maestro && sudo xattr -rd com.apple.quarantine \"/Applications/SQLMaestro.app\"", forType: .string)
+
+                            // Show toast confirmation
+                            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                                ToastPresenter.show("Command copied to clipboard", duration: 2.0)
+                            }
+
+                        case .alertSecondButtonReturn: // Open System Settings
+                            if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation") {
+                                NSWorkspace.shared.open(url)
+                            }
+
+                        default:
+                            break
+                        }
                     }
+                }
+            } catch {
+                print("Failed to run osascript: \(error)")
+
+                // Show error to user
+                DispatchQueue.main.async {
+                    let alert = NSAlert()
+                    alert.messageText = "Update Failed"
+                    alert.informativeText = "Could not launch Terminal. Error: \(error.localizedDescription)"
+                    alert.alertStyle = .warning
+                    alert.addButton(withTitle: "OK")
+                    alert.runModal()
                 }
             }
         }
