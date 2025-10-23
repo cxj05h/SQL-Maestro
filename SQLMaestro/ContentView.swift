@@ -1737,9 +1737,9 @@ struct ContentView: View {
     @State private var dpYear: Int = Calendar.current.component(.year, from: Date())
     @State private var dpMonth: Int = Calendar.current.component(.month, from: Date())
     @State private var dpDay: Int = Calendar.current.component(.day, from: Date())
-    @State private var dpHour: Int = Calendar.current.component(.hour, from: Date())
-    @State private var dpMinute: Int = Calendar.current.component(.minute, from: Date())
-    @State private var dpSecond: Int = Calendar.current.component(.second, from: Date())
+    @State private var dpHour: Int = 0
+    @State private var dpMinute: Int = 0
+    @State private var dpSecond: Int = 0
     @State private var workspaceShortcutsRegistered = false
     
     
@@ -6068,9 +6068,9 @@ struct ContentView: View {
                 dpYear = cal.component(.year, from: now)
                 dpMonth = cal.component(.month, from: now)
                 dpDay = cal.component(.day, from: now)
-                dpHour = cal.component(.hour, from: now)
-                dpMinute = cal.component(.minute, from: now)
-                dpSecond = cal.component(.second, from: now)
+                dpHour = 0
+                dpMinute = 0
+                dpSecond = 0
             }
         }
         
