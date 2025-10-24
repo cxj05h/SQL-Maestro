@@ -2566,6 +2566,21 @@ struct ContentView: View {
         }
         .padding(EdgeInsets(top: topPadding, leading: 16, bottom: 16, trailing: 16))
         .frame(maxWidth: .infinity, alignment: .top)
+        .overlay(alignment: .topLeading) {
+            if let template = selectedTemplate,
+               let hoveredID = hoveredTemplateLinkID {
+                let templateLinks = templateLinksStore.links(for: template)
+                if let hoveredLink = templateLinks.first(where: { $0.id == hoveredID }),
+                   let linkIndex = templateLinks.firstIndex(where: { $0.id == hoveredID }) {
+                    let tooltipText = buildTooltipText(for: hoveredLink)
+                    LinkTooltipBubble(text: tooltipText)
+                        .offset(x: 560 + 28, y: 280 + CGFloat(linkIndex) * 36)
+                        .allowsHitTesting(false)
+                        .transition(.opacity)
+                }
+            }
+        }
+        .animation(.easeInOut(duration: 0.12), value: hoveredTemplateLinkID)
     }
 
     private func resolvedMainContentTopPadding(for availableHeight: CGFloat) -> CGFloat {
@@ -6775,6 +6790,18 @@ struct ContentView: View {
                     )
             )
         }
+
+        private func buildTooltipText(for link: TemplateLink) -> String {
+            let name = link.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            let url = link.url.trimmingCharacters(in: .whitespacesAndNewlines)
+
+            var parts: [String] = []
+            if !name.isEmpty { parts.append(name) }
+            if !url.isEmpty { parts.append(url) }
+
+            return parts.joined(separator: "\n")
+        }
+
         // Alternate Fields Row
         private struct AlternateFieldRow: View {
             @EnvironmentObject var sessions: SessionManager
@@ -16549,42 +16576,11 @@ struct ContentView: View {
                 RoundedRectangle(cornerRadius: 6)
                     .fill(Color.secondary.opacity(0.1))
             )
-            .overlay(alignment: .topLeading) {
-                if shouldShowTooltip, let tooltip = linkTooltip {
-                    LinkTooltipBubble(text: tooltip)
-                        .offset(x: 28, y: -6)
-                        .allowsHitTesting(false)
-                        .transition(.opacity)
-                        .zIndex(100)
-                        .compositingGroup()
-                        .drawingGroup()
-                }
-            }
             .onDisappear {
                 if hoveredLinkID == link.id {
                     hoveredLinkID = nil
                 }
             }
-            .animation(.easeInOut(duration: 0.12), value: shouldShowTooltip)
-        }
-
-        private var linkTooltip: String? {
-            let name = link.title.trimmingCharacters(in: .whitespacesAndNewlines)
-            let url = link.url.trimmingCharacters(in: .whitespacesAndNewlines)
-
-            var parts: [String] = []
-            if !name.isEmpty { parts.append(name) }
-            if !url.isEmpty { parts.append(url) }
-
-            if parts.isEmpty {
-                return nil
-            }
-
-            return parts.joined(separator: "\n")
-        }
-
-        private var shouldShowTooltip: Bool {
-            hoveredLinkID == link.id && linkTooltip != nil
         }
     }
 
@@ -16597,7 +16593,7 @@ struct ContentView: View {
                 .foregroundStyle(Color.white)
                 .multilineTextAlignment(.leading)
                 .lineLimit(nil)
-                .fixedSize(horizontal: false, vertical: true)
+                .fixedSize()
                 .padding(.horizontal, 10)
                 .padding(.vertical, 6)
                 .background(
@@ -16609,8 +16605,6 @@ struct ContentView: View {
                     RoundedRectangle(cornerRadius: 8)
                         .stroke(Color.white.opacity(0.08), lineWidth: 0.5)
                 )
-                .compositingGroup()
-                .drawingGroup()
         }
     }
 
