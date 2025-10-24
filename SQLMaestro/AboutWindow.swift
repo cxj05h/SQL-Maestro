@@ -144,9 +144,10 @@ final class AboutViewModel: ObservableObject {
             return // User cancelled
         }
 
-        // Escape password for shell
+        // Escape password for shell - need to escape single quotes too
         let escapedPassword = password
             .replacingOccurrences(of: "\\", with: "\\\\")
+            .replacingOccurrences(of: "'", with: "'\\''")
             .replacingOccurrences(of: "\"", with: "\\\"")
             .replacingOccurrences(of: "$", with: "\\$")
             .replacingOccurrences(of: "`", with: "\\`")
@@ -167,7 +168,8 @@ final class AboutViewModel: ObservableObject {
         echo ""
         if [ $UPDATE_EXIT_CODE -eq 0 ]; then
             echo "Step 3: Removing quarantine attribute..."
-            echo "\(escapedPassword)" | sudo -S xattr -rd com.apple.quarantine "/Applications/SQLMaestro.app" 2>/dev/null
+            echo "Authenticating with sudo..."
+            printf '%s\\n' '\(escapedPassword)' | sudo -S xattr -rd com.apple.quarantine "/Applications/SQLMaestro.app"
             XATTR_EXIT_CODE=$?
 
             if [ $XATTR_EXIT_CODE -eq 0 ]; then
