@@ -3775,11 +3775,32 @@ struct ContentView: View {
                 "sample": String(initialDraft.prefix(80)).replacingOccurrences(of: "\n", with: "⏎")
             ])
             let bucket = draftDynamicValues[cur] ?? [:]
+            var remainingDrafts: [String: String] = [:]
+            var removedDraftCount = 0
             for (ph, val) in bucket {
                 let trimmed = val.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !trimmed.isEmpty else { continue }
-                sessions.setValue(trimmed, for: ph)
-                LOG("Draft committed", ctx: ["session": "\(cur.rawValue)", "ph": ph, "value": trimmed])
+                if !trimmed.isEmpty {
+                    sessions.setValue(trimmed, for: ph)
+                    LOG("Draft committed", ctx: ["session": "\(cur.rawValue)", "ph": ph, "value": trimmed])
+                }
+
+                let stored = sessions.sessionValues[cur]?[ph]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                if trimmed != stored {
+                    remainingDrafts[ph] = val
+                } else {
+                    removedDraftCount += 1
+                }
+            }
+
+            if !bucket.isEmpty {
+                draftDynamicValues[cur] = remainingDrafts
+                if removedDraftCount > 0 {
+                    LOG("Dynamic field drafts cleared", ctx: [
+                        "session": "\(cur.rawValue)",
+                        "removed": "\(removedDraftCount)",
+                        "remaining": "\(remainingDrafts.count)"
+                    ])
+                }
             }
 
             // Only trust the editor if it's showing the current session
@@ -8696,26 +8717,31 @@ struct ContentView: View {
         (sessionNotesDrafts[session] ?? "") != (sessions.sessionNotes[session] ?? "")
     }
 
-    private func hasSessionFieldData(for session: TicketSession) -> Bool {
-        let currentSnapshot = captureSnapshot(for: session)
+        private func hasSessionFieldData(for session: TicketSession) -> Bool {
+            let currentSnapshot = captureSnapshot(for: session)
 
-        if let baseline = sessionSavedSnapshots[session] {
-            // Compare only user-editable fields (exclude images and savedFiles which are auto-saved)
-            // This prevents false positives when user just views these tabs without making changes
-            if currentSnapshot.withoutAutoSavedFields() != baseline.withoutAutoSavedFields() {
+            if let baseline = sessionSavedSnapshots[session] {
+                // Compare only user-editable fields (exclude images and savedFiles which are auto-saved)
+                // This prevents false positives when user just views these tabs without making changes
+                if currentSnapshot.withoutAutoSavedFields() != baseline.withoutAutoSavedFields() {
+                    return true
+                }
+            } else if currentSnapshot.hasAnyContent {
                 return true
             }
-        } else if currentSnapshot.hasAnyContent {
-            return true
-        }
 
-        if let draftValues = draftDynamicValues[session],
-           draftValues.values.contains(where: { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
-            return true
-        }
+            if let draftValues = draftDynamicValues[session] {
+                for (placeholder, value) in draftValues {
+                    let draft = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                    let stored = sessions.sessionValues[session]?[placeholder]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    if draft != stored {
+                        return true
+                    }
+                }
+            }
 
-        return false
-    }
+            return false
+        }
 
         private func saveSessionNotes(reason: String = "manual") {
             saveSessionNotes(for: sessions.current, reason: reason)
