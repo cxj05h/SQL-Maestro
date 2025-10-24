@@ -180,8 +180,10 @@ final class AboutViewModel: ObservableObject {
                 echo "========================================="
                 echo ""
                 echo "SQLMaestro will now restart..."
-                echo ""
+                echo "Closing current instance..."
+                killall SQLMaestro 2>/dev/null
                 sleep 2
+                echo "Launching updated version..."
                 open -a "SQLMaestro"
                 exit 0
             else
