@@ -23,60 +23,109 @@ struct JSONTreePreview: View {
     @State private var panStartOffset: CGSize = .zero
     @State private var minimapNeedsUpdate: Bool = false
     @State private var lastMinimapUpdate: Date = .distantPast
-    private let maximumZoomScale: CGFloat = 3.0
-    private let minimumZoomScale: CGFloat = 0.1  // Changed from 0.0001 to prevent extreme zoom-out
+    // Dynamic zoom limits based on viewport and canvas size
+    private var dynamicMinimumZoomScale: CGFloat {
+        guard viewportSize.width > 0, viewportSize.height > 0,
+              canvasSize.width > 0, canvasSize.height > 0 else {
+            return 0.05 // absolute floor for edge cases
+        }
+
+        // Calculate zoom where entire structure fits in viewport
+        let zoomToFitWidth = viewportSize.width / canvasSize.width
+        let zoomToFitHeight = viewportSize.height / canvasSize.height
+
+        let fitZoom = min(zoomToFitWidth, zoomToFitHeight)
+
+        // Apply 0.95 multiplier to add slight padding around edges
+        return max(fitZoom * 0.95, 0.05)
+    }
+
+    private var dynamicMaximumZoomScale: CGFloat {
+        guard viewportSize.width > 0, canvasSize.width > 0 else {
+            return 6.0 // fallback
+        }
+
+        // Maximum zoom shows only 1.5% of structure width in viewport (deeper zoom for readability)
+        let viewportCoveragePercent: CGFloat = 0.015
+        let maxZoomByViewport = viewportSize.width / (canvasSize.width * viewportCoveragePercent)
+
+        // Cap practical maximum zoom to avoid extreme values on tiny files
+        let practicalCap: CGFloat = 12.0
+        let unclamped = max(maxZoomByViewport, dynamicMinimumZoomScale)
+        return min(unclamped, practicalCap)
+    }
     private let searchFocusZoom: CGFloat = 1.2
-    private let canvasInnerPadding: CGFloat = 60
-    private let canvasOuterPadding: CGFloat = 28
     private let contentSpacing: CGFloat = 12
-    private let maxTextureSize: CGFloat = 16384  // Metal texture size limit
+
+    // Dynamic padding based on layout size to avoid hitting Metal limits on large files
+    private var canvasInnerPadding: CGFloat {
+        let layoutHeight = layout.size.height
+        if layoutHeight > 20000 {
+            return 20  // Minimal padding for very large files
+        } else if layoutHeight > 10000 {
+            return 40  // Reduced padding for large files
+        } else {
+            return 60  // Full padding for normal files
+        }
+    }
+
+    private var canvasOuterPadding: CGFloat {
+        let layoutHeight = layout.size.height
+        if layoutHeight > 20000 {
+            return 10  // Minimal padding for very large files
+        } else if layoutHeight > 10000 {
+            return 20  // Reduced padding for large files
+        } else {
+            return 28  // Full padding for normal files
+        }
+    }
+
     private var canvasContentInset: CGFloat { canvasInnerPadding + canvasOuterPadding }
     private var canvasSize: CGSize {
         CGSize(width: layout.size.width + canvasContentInset * 2,
                height: layout.size.height + canvasContentInset * 2)
     }
-
-    // Compute the effective zoom scale that won't exceed Metal texture limits
-    private var effectiveZoomScale: CGFloat {
-        let baseSize = canvasSize
-        // The actual view size includes the canvas plus padding
-        // Based on the view hierarchy: canvas -> padding(canvasInnerPadding) -> background -> padding(canvasOuterPadding)
-        let totalWidth = baseSize.width + canvasInnerPadding * 2 + canvasOuterPadding * 2
-        let totalHeight = baseSize.height + canvasInnerPadding * 2 + canvasOuterPadding * 2
-
-        // Calculate what the scaled size would be
-        let scaledWidth = totalWidth * zoomScale
-        let scaledHeight = totalHeight * zoomScale
-
-        // ALWAYS log when zoom is between 0.15 and 0.18 to debug
-        if zoomScale >= 0.15 && zoomScale <= 0.18 {
-            print("🔍 ZOOM DEBUG (zoom=\(zoomScale)):")
-            print("   Base canvas size: \(baseSize)")
-            print("   Total size with padding: [\(totalWidth), \(totalHeight)]")
-            print("   Would scale to: [\(scaledWidth), \(scaledHeight)]")
-            print("   Max texture size: \(maxTextureSize)")
-            print("   Exceeds limit? \(scaledWidth > maxTextureSize || scaledHeight > maxTextureSize)")
-        }
-
-        // Debug logging
-        if scaledWidth > maxTextureSize || scaledHeight > maxTextureSize {
-            print("⚠️ ZOOM CLAMPING:")
-            print("   Base canvas size: \(baseSize)")
-            print("   Total size with padding: [\(totalWidth), \(totalHeight)]")
-            print("   Current zoom: \(zoomScale)")
-            print("   Would scale to: [\(scaledWidth), \(scaledHeight)]")
-            print("   Max texture size: \(maxTextureSize)")
-
-            let maxScaleByWidth = maxTextureSize / totalWidth
-            let maxScaleByHeight = maxTextureSize / totalHeight
-            let clampedScale = min(maxScaleByWidth, maxScaleByHeight, zoomScale)
-            print("   Clamping to: \(clampedScale)")
-            print("   Resulting size: [\(totalWidth * clampedScale), \(totalHeight * clampedScale)]")
-            return clampedScale
-        }
-
-        return zoomScale
+    private var canvasBounds: CGRect {
+        CGRect(origin: .zero, size: canvasSize)
     }
+
+    private func visibleCanvasRect(for viewport: CGSize, zoomScale: CGFloat) -> CGRect {
+        guard viewport.width > 0, viewport.height > 0, zoomScale > 0 else {
+            return .zero
+        }
+
+        var rect = CGRect(
+            x: -contentOffset.width / zoomScale,
+            y: -contentOffset.height / zoomScale,
+            width: viewport.width / zoomScale,
+            height: viewport.height / zoomScale
+        )
+
+        rect = rect.intersection(canvasBounds)
+        if rect.isNull {
+            return .zero
+        }
+        return rect
+    }
+
+    private func bufferedVisibleRect(for rect: CGRect,
+                                     multiplier: CGFloat = 1.5,
+                                     minimumHorizontalBuffer: CGFloat = 800,
+                                     minimumVerticalBuffer: CGFloat = 600) -> CGRect {
+        guard !rect.isEmpty else { return rect }
+
+        let horizontalExpansion = max(rect.width * (multiplier - 1), minimumHorizontalBuffer)
+        let verticalExpansion = max(rect.height * (multiplier - 1), minimumVerticalBuffer)
+
+        var buffered = rect.insetBy(dx: -horizontalExpansion / 2, dy: -verticalExpansion / 2)
+        buffered = buffered.intersection(canvasBounds)
+        if buffered.isNull {
+            return rect
+        }
+        return buffered
+    }
+
+    private var effectiveZoomScale: CGFloat { zoomScale }
 
     var body: some View {
         VStack(alignment: .leading, spacing: contentSpacing) {
@@ -189,53 +238,25 @@ struct JSONTreePreview: View {
 
         GeometryReader { proxy in
             let viewport = proxy.size
+            let renderingZoom = max(effectiveZoomScale, dynamicMinimumZoomScale)
+            let visibleRect = visibleCanvasRect(for: viewport, zoomScale: renderingZoom)
+            let bufferedRect = bufferedVisibleRect(for: visibleRect)
 
             ZStack(alignment: .topLeading) {
                 // Main canvas area
                 ZStack(alignment: .topLeading) {
-                    LinearGradient(
-                        colors: [
-                            Color(red: 0.07, green: 0.08, blue: 0.16),
-                            Color(red: 0.03, green: 0.03, blue: 0.09)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
+                    JSONTreeCanvas(
+                        layout: layout,
+                        highlightedNodes: highlighted,
+                        contentInset: canvasContentInset,
+                        zoomScale: renderingZoom,
+                        contentOffset: contentOffset,
+                        viewportSize: viewport,
+                        canvasSize: canvasSize,
+                        bufferedVisibleRect: bufferedRect
                     )
-
-                    Group {
-                        JSONTreeCanvas(
-                            root: root,
-                            layout: layout,
-                            highlightedNodes: highlighted,
-                            contentInset: canvasContentInset,
-                            zoomScale: effectiveZoomScale
-                        )
-                        .padding(canvasInnerPadding)
-                        .background(
-                            RoundedRectangle(cornerRadius: 32)
-                                .fill(
-                                    LinearGradient(
-                                        colors: [
-                                            Color(red: 0.08, green: 0.09, blue: 0.18),
-                                            Color(red: 0.04, green: 0.05, blue: 0.12)
-                                        ],
-                                        startPoint: .topLeading,
-                                        endPoint: .bottomTrailing
-                                    )
-                                )
-                                .overlay(
-                                    RoundedRectangle(cornerRadius: 32)
-                                        .stroke(Theme.purple.opacity(0.18), lineWidth: 1.1)
-                                )
-                                .shadow(color: Theme.purple.opacity(0.25), radius: 22, x: 0, y: 18)
-                        )
-                        .padding(canvasOuterPadding)
-                    }
-                    .drawingGroup(opaque: false, colorMode: .nonLinear)
-                    .scaleEffect(effectiveZoomScale, anchor: .topLeading)
-                    .offset(x: contentOffset.width, y: contentOffset.height)
-                    .animation(nil, value: effectiveZoomScale)
-                    .animation(nil, value: contentOffset)
+                    .frame(width: viewport.width, height: viewport.height)
+                    .clipped()
 
                     ZoomEventCatcher(
                         topHitTestInset: 0,
@@ -307,7 +328,7 @@ struct JSONTreePreview: View {
         if let root = treeRoot,
            layout.size.width > 0,
            layout.size.height > 0,
-           zoomScale >= minimumZoomScale,  // Show minimap at any zoom level (removed * 2 multiplier)
+           zoomScale >= dynamicMinimumZoomScale,  // Show minimap at any zoom level
            (canvasSize.width > viewport.width * 1.2 || canvasSize.height > viewport.height * 1.2),  // Lowered from 1.5 to 1.2
            canvasSize.width > 1,  // Safety check: ensure canvasSize is not too small
            canvasSize.height > 1 {
@@ -369,31 +390,17 @@ struct JSONTreePreview: View {
     }
 
     private func calculateVisibleRect(viewport: CGSize, minimapScale: CGFloat) -> CGRect {
-        // Safety check: prevent division by very small numbers
-        let safeZoomScale = max(zoomScale, minimumZoomScale)
+        let safeZoomScale = max(effectiveZoomScale, dynamicMinimumZoomScale)
+        let rect = visibleCanvasRect(for: viewport, zoomScale: safeZoomScale)
+        guard rect.width > 0, rect.height > 0 else {
+            return CGRect(x: 0, y: 0, width: 2, height: 2)
+        }
 
-        // Calculate what portion of the canvas is visible in the viewport (in canvas coordinates)
-        let visibleX = -contentOffset.width / safeZoomScale
-        let visibleY = -contentOffset.height / safeZoomScale
-        let visibleWidth = viewport.width / safeZoomScale
-        let visibleHeight = viewport.height / safeZoomScale
-
-        // Clamp to canvas bounds (0 to canvasSize)
-        let clampedX = max(0, min(visibleX, canvasSize.width))
-        let clampedY = max(0, min(visibleY, canvasSize.height))
-
-        // Clamp width and height to not exceed canvas bounds
-        let maxWidth = canvasSize.width - clampedX
-        let maxHeight = canvasSize.height - clampedY
-        let clampedWidth = min(visibleWidth, maxWidth)
-        let clampedHeight = min(visibleHeight, maxHeight)
-
-        // Scale these coordinates to minimap space
         return CGRect(
-            x: clampedX * minimapScale,
-            y: clampedY * minimapScale,
-            width: max(clampedWidth * minimapScale, 2),  // Minimum 2px for visibility
-            height: max(clampedHeight * minimapScale, 2)
+            x: rect.minX * minimapScale,
+            y: rect.minY * minimapScale,
+            width: max(rect.width * minimapScale, 2),
+            height: max(rect.height * minimapScale, 2)
         )
     }
 
@@ -423,15 +430,20 @@ struct JSONTreePreview: View {
 
         print("🖱️ Canvas coords (clamped): x=\(clampedCanvasX), y=\(clampedCanvasY)")
 
-        // Center the viewport on this point
-        let newOffsetX = -(clampedCanvasX * zoomScale) + viewport.width / 2
-        let newOffsetY = -(clampedCanvasY * zoomScale) + viewport.height / 2
+        // Center the viewport on this point (use effectiveZoomScale for consistency)
+        let newOffsetX = -(clampedCanvasX * effectiveZoomScale) + viewport.width / 2
+        let newOffsetY = -(clampedCanvasY * effectiveZoomScale) + viewport.height / 2
 
         print("🖱️ New offset: x=\(newOffsetX), y=\(newOffsetY)")
+
+        let proposedOffset = CGSize(width: newOffsetX, height: newOffsetY)
+        let clampedOffset = clampOffset(proposedOffset, forZoom: effectiveZoomScale)
+
+        print("🖱️ Clamped offset: x=\(clampedOffset.width), y=\(clampedOffset.height)")
         print("🖱️ === MINIMAP DRAG END ===")
 
         shouldCenterTree = false
-        contentOffset = CGSize(width: newOffsetX, height: newOffsetY)
+        contentOffset = clampedOffset
     }
 
     private func parseContent() {
@@ -577,10 +589,11 @@ struct JSONTreePreview: View {
     }
 
     private func handlePanChanged(translation: CGSize) {
-        contentOffset = CGSize(
+        let proposedOffset = CGSize(
             width: panStartOffset.width + translation.width,
             height: panStartOffset.height + translation.height
         )
+        contentOffset = clampOffset(proposedOffset, forZoom: effectiveZoomScale)
     }
 
     private func handlePanEnded() {
@@ -612,7 +625,8 @@ struct JSONTreePreview: View {
 
     private func alignContentToCenter(animated: Bool) {
         guard viewportSize.width > 0 else { return }
-        let targetOffset = centeredOffset(for: zoomScale)
+        let proposedOffset = centeredOffset(for: zoomScale)
+        let targetOffset = clampOffset(proposedOffset, forZoom: effectiveZoomScale)
         if animated {
             withAnimation(.easeInOut(duration: 0.24)) {
                 contentOffset = targetOffset
@@ -632,15 +646,18 @@ struct JSONTreePreview: View {
             return
         }
 
-        let targetOffset: CGSize
+        let proposedOffset: CGSize
         if let contentPoint = focusContentPoint, let screenPoint = focusScreenPoint {
-            targetOffset = CGSize(
+            proposedOffset = CGSize(
                 width: screenPoint.x - contentPoint.x * clamped,
                 height: screenPoint.y - contentPoint.y * clamped
             )
         } else {
-            targetOffset = centeredOffset(for: clamped)
+            proposedOffset = centeredOffset(for: clamped)
         }
+
+        // Clamp offset to prevent panning beyond bounds
+        let targetOffset = clampOffset(proposedOffset, forZoom: clamped)
 
         if animated {
             withAnimation(.easeInOut(duration: 0.24)) {
@@ -665,7 +682,8 @@ struct JSONTreePreview: View {
         guard viewportSize.width > 0 else {
             return CGPoint(x: canvasSize.width / 2, y: canvasSize.height / 2)
         }
-        let safeScale = max(zoomScale, minimumZoomScale)
+        // Use effectiveZoomScale for consistency with actual rendering
+        let safeScale = max(effectiveZoomScale, dynamicMinimumZoomScale)
         let rawX = (screenPoint.x - contentOffset.width) / safeScale
         let rawY = (screenPoint.y - contentOffset.height) / safeScale
         let x = min(max(rawX, 0), canvasSize.width)
@@ -679,8 +697,38 @@ struct JSONTreePreview: View {
     }
 
     private func clampZoom(_ value: CGFloat) -> CGFloat {
-        let upperBounded = min(value, maximumZoomScale)
-        return max(upperBounded, minimumZoomScale)
+        let upperBounded = min(value, dynamicMaximumZoomScale)
+        return max(upperBounded, dynamicMinimumZoomScale)
+    }
+
+    private func clampOffset(_ offset: CGSize, forZoom scale: CGFloat) -> CGSize {
+        let scaledWidth = canvasSize.width * scale
+        let scaledHeight = canvasSize.height * scale
+
+        var clampedX = offset.width
+        var clampedY = offset.height
+
+        // If content is smaller than viewport, keep it centered
+        if scaledWidth <= viewportSize.width {
+            clampedX = (viewportSize.width - scaledWidth) / 2
+        } else {
+            // Content is larger - prevent panning beyond edges
+            // Max offset is 0 (content's left edge at viewport's left edge)
+            // Min offset is viewport.width - scaledWidth (content's right edge at viewport's right edge)
+            let minX = viewportSize.width - scaledWidth
+            let maxX: CGFloat = 0
+            clampedX = min(max(offset.width, minX), maxX)
+        }
+
+        if scaledHeight <= viewportSize.height {
+            clampedY = (viewportSize.height - scaledHeight) / 2
+        } else {
+            let minY = viewportSize.height - scaledHeight
+            let maxY: CGFloat = 0
+            clampedY = min(max(offset.height, minY), maxY)
+        }
+
+        return CGSize(width: clampedX, height: clampedY)
     }
 }
 
@@ -995,66 +1043,136 @@ private struct ZoomEventCatcher: NSViewRepresentable {
 }
 
 private struct JSONTreeCanvas: View {
-    let root: JSONTreeGraphNode
     let layout: JSONTreeLayout
     let highlightedNodes: Set<UUID>
     let contentInset: CGFloat
     let zoomScale: CGFloat
+    let contentOffset: CGSize
+    let viewportSize: CGSize
+    let canvasSize: CGSize
+    let bufferedVisibleRect: CGRect
+
+    private var canvasBounds: CGRect {
+        CGRect(origin: .zero, size: canvasSize)
+    }
+
+    private var effectiveBufferedRect: CGRect {
+        let rect = bufferedVisibleRect.isEmpty ? canvasBounds : bufferedVisibleRect
+        return rect.isNull ? canvasBounds : rect
+    }
 
     var body: some View {
-        let size = layout.size
-        // Render canvas at full requested size accounting for zoom
-        let totalWidth = size.width + contentInset * 2
-        let totalHeight = size.height + contentInset * 2
+        Canvas { context, _ in
+            let nodesInBuffer = filteredNodes()
+            let visibleNodeIDs = Set(nodesInBuffer.map { $0.node.id })
 
-        return Canvas { context, _ in
-            drawConnections(context: &context, scale: 1.0)
-            drawNodes(context: &context, scale: 1.0)
+            context.drawLayer { layer in
+                layer.translateBy(x: contentOffset.width, y: contentOffset.height)
+                layer.scaleBy(x: zoomScale, y: zoomScale)
+
+                drawBackground(context: &layer)
+
+                layer.translateBy(x: contentInset, y: contentInset)
+
+                drawConnections(context: &layer, visibleNodeIDs: visibleNodeIDs)
+                drawNodes(context: &layer, nodes: nodesInBuffer)
+            }
         }
-        .frame(width: totalWidth,
-               height: totalHeight)
-        .background(
-            LinearGradient(
-                colors: [
-                    Color(red: 0.10, green: 0.11, blue: 0.23),
-                    Color(red: 0.06, green: 0.07, blue: 0.17)
-                ],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 28))
-        .overlay(
-            RoundedRectangle(cornerRadius: 28)
-                .stroke(Color.white.opacity(0.06), lineWidth: 0.6)
+        .frame(width: viewportSize.width, height: viewportSize.height)
+        .drawingGroup(opaque: false, colorMode: .nonLinear)
+    }
+
+    private func filteredNodes() -> [JSONTreeLayout.PositionedNode] {
+        let rect = effectiveBufferedRect
+        return layout.positionedNodes.filter { positioned in
+            let point = nodeCanvasPoint(for: positioned)
+            return rect.contains(point)
+        }
+    }
+
+    private func nodeCanvasPoint(for positioned: JSONTreeLayout.PositionedNode) -> CGPoint {
+        CGPoint(
+            x: positioned.position.x + contentInset,
+            y: positioned.position.y + contentInset
         )
     }
 
-    private func drawConnections(context: inout GraphicsContext, scale: CGFloat) {
+    private func drawBackground(context: inout GraphicsContext) {
+        let backgroundRect = canvasBounds
+        let backgroundPath = Path(roundedRect: backgroundRect, cornerRadius: 32)
+        let gradient = GraphicsContext.Shading.linearGradient(
+            Gradient(colors: [
+                Color(red: 0.08, green: 0.09, blue: 0.18),
+                Color(red: 0.04, green: 0.05, blue: 0.12)
+            ]),
+            startPoint: CGPoint(x: backgroundRect.minX, y: backgroundRect.minY),
+            endPoint: CGPoint(x: backgroundRect.maxX, y: backgroundRect.maxY)
+        )
+
         context.drawLayer { layer in
-            layer.addFilter(.shadow(color: Theme.aqua.opacity(0.25), radius: 12 * scale, x: 0, y: 6 * scale))
+            layer.addFilter(.shadow(color: Theme.purple.opacity(0.25), radius: 22, x: 0, y: 18))
+            layer.fill(backgroundPath, with: gradient)
+        }
+
+        context.stroke(
+            backgroundPath,
+            with: .color(Theme.purple.opacity(0.18)),
+            style: StrokeStyle(lineWidth: 1.1)
+        )
+
+        if backgroundRect.width > 8, backgroundRect.height > 8 {
+            context.stroke(
+                Path(roundedRect: backgroundRect.insetBy(dx: 4, dy: 4), cornerRadius: 28),
+                with: .color(Color.white.opacity(0.06)),
+                style: StrokeStyle(lineWidth: 0.6)
+            )
+        }
+    }
+
+    private func drawConnections(context: inout GraphicsContext, visibleNodeIDs: Set<UUID>) {
+        let rect = effectiveBufferedRect
+
+        context.drawLayer { layer in
+            layer.addFilter(.shadow(color: Theme.aqua.opacity(0.25), radius: 12, x: 0, y: 6))
             for positioned in layout.positionedNodes {
                 guard !positioned.node.children.isEmpty else { continue }
+
                 let startPoint = positioned.position
+                let startCanvasPoint = nodeCanvasPoint(for: positioned)
+
                 for child in positioned.node.children {
                     guard let childPoint = layout.position(for: child.id) else { continue }
+                    let childCanvasPoint = CGPoint(
+                        x: childPoint.x + contentInset,
+                        y: childPoint.y + contentInset
+                    )
+
+                    guard shouldRenderConnection(
+                        startCanvasPoint: startCanvasPoint,
+                        endCanvasPoint: childCanvasPoint,
+                        startID: positioned.node.id,
+                        childID: child.id,
+                        visibleNodeIDs: visibleNodeIDs,
+                        rect: rect
+                    ) else {
+                        continue
+                    }
+
                     var path = Path()
-                    let start = CGPoint(x: (startPoint.x + contentInset) * scale,
-                                        y: (startPoint.y + contentInset) * scale)
+                    let start = startPoint
                     path.move(to: start)
 
                     let distanceX = max(childPoint.x - startPoint.x, 160)
                     let controlOffset = distanceX * 0.45
                     let verticalDelta = childPoint.y - startPoint.y
-                    let end = CGPoint(x: (childPoint.x + contentInset) * scale,
-                                      y: (childPoint.y + contentInset) * scale)
+                    let end = childPoint
                     let control1 = CGPoint(
-                        x: start.x + controlOffset * scale,
-                        y: start.y + verticalDelta * 0.18 * scale
+                        x: start.x + controlOffset,
+                        y: start.y + verticalDelta * 0.18
                     )
                     let control2 = CGPoint(
-                        x: end.x - controlOffset * scale,
-                        y: end.y - verticalDelta * 0.18 * scale
+                        x: end.x - controlOffset,
+                        y: end.y - verticalDelta * 0.18
                     )
                     path.addCurve(to: end, control1: control1, control2: control2)
 
@@ -1069,44 +1187,67 @@ private struct JSONTreeCanvas: View {
                     layer.stroke(
                         path,
                         with: shading,
-                        style: StrokeStyle(lineWidth: 1.6 * scale, lineCap: .round, lineJoin: .round)
+                        style: StrokeStyle(lineWidth: 1.6, lineCap: .round, lineJoin: .round)
                     )
                 }
             }
         }
     }
 
-    private func drawNodes(context: inout GraphicsContext, scale: CGFloat) {
-        for positioned in layout.positionedNodes {
-            let point = CGPoint(x: (positioned.position.x + contentInset) * scale,
-                                y: (positioned.position.y + contentInset) * scale)
+    private func shouldRenderConnection(startCanvasPoint: CGPoint,
+                                        endCanvasPoint: CGPoint,
+                                        startID: UUID,
+                                        childID: UUID,
+                                        visibleNodeIDs: Set<UUID>,
+                                        rect: CGRect) -> Bool {
+        if visibleNodeIDs.contains(startID) || visibleNodeIDs.contains(childID) {
+            return true
+        }
+
+        let connectionBounds = CGRect(
+            x: min(startCanvasPoint.x, endCanvasPoint.x),
+            y: min(startCanvasPoint.y, endCanvasPoint.y),
+            width: abs(startCanvasPoint.x - endCanvasPoint.x),
+            height: abs(startCanvasPoint.y - endCanvasPoint.y)
+        ).insetBy(dx: -40, dy: -40)
+
+        return rect.intersects(connectionBounds)
+    }
+
+    private func drawNodes(context: inout GraphicsContext, nodes: [JSONTreeLayout.PositionedNode]) {
+        for positioned in nodes {
+            let point = positioned.position
             let node = positioned.node
 
             let isHighlighted = highlightedNodes.contains(node.id)
-            let radius: CGFloat = (isHighlighted ? 8 : 7) * scale
+            let radius: CGFloat = isHighlighted ? 8 : 7
             let circleRect = CGRect(x: point.x - radius, y: point.y - radius, width: radius * 2, height: radius * 2)
 
             context.drawLayer { layer in
                 let gradient = GraphicsContext.Shading.radialGradient(
-                    Gradient(colors: isHighlighted ? [Theme.gold, Theme.gold.opacity(0.25)] : [Theme.aquaLt, Theme.aqua.opacity(0.35)]),
+                    Gradient(
+                        colors: isHighlighted
+                            ? [Theme.gold, Theme.gold.opacity(0.25)]
+                            : [Theme.aquaLt, Theme.aqua.opacity(0.35)]
+                    ),
                     center: CGPoint(x: circleRect.midX, y: circleRect.midY),
                     startRadius: 0,
                     endRadius: radius * 1.8
                 )
-                layer.addFilter(.shadow(color: (isHighlighted ? Theme.gold : Theme.aqua).opacity(0.4), radius: (isHighlighted ? 14 : 10) * scale, x: 0, y: 0))
+                layer.addFilter(.shadow(color: (isHighlighted ? Theme.gold : Theme.aqua).opacity(0.4), radius: isHighlighted ? 14 : 10, x: 0, y: 0))
                 layer.fill(Path(ellipseIn: circleRect), with: gradient)
                 layer.stroke(
                     Path(ellipseIn: circleRect),
                     with: .color(isHighlighted ? Theme.gold : Theme.aqua),
-                    style: StrokeStyle(lineWidth: (isHighlighted ? 2.2 : 1.4) * scale)
+                    style: StrokeStyle(lineWidth: isHighlighted ? 2.2 : 1.4)
                 )
             }
 
             var keyText = AttributedString(node.name)
-            keyText.font = .system(size: 12 * scale, weight: .semibold, design: .rounded)
+            keyText.font = .system(size: 12, weight: .semibold, design: .rounded)
             keyText.foregroundColor = isHighlighted ? Theme.gold : Theme.purple
 
-            let keyPoint = CGPoint(x: point.x + 22 * scale, y: point.y - 8 * scale)
+            let keyPoint = CGPoint(x: point.x + 22, y: point.y - 8)
             context.draw(Text(keyText), at: keyPoint, anchor: .leading)
 
             if let value = node.valueDescription {
@@ -1114,36 +1255,31 @@ private struct JSONTreeCanvas: View {
                 let valueOpacity: Double = isLightMode ? 1.0 : 0.9
                 let baseColor = isHighlighted ? Theme.gold : node.valueColor
 
-                // For strings, render quotes separately in white for light mode
                 if case .string(let stringValue) = node.kind, isLightMode {
-                    let valuePoint = CGPoint(x: point.x + 22 * scale, y: point.y + 14 * scale)
+                    let valuePoint = CGPoint(x: point.x + 22, y: point.y + 14)
 
-                    // Opening quote in white
                     var openQuote = AttributedString("\"")
-                    openQuote.font = .system(size: 12 * scale, weight: .regular, design: .monospaced)
+                    openQuote.font = .system(size: 12, weight: .regular, design: .monospaced)
                     openQuote.foregroundColor = .white
                     context.draw(Text(openQuote), at: valuePoint, anchor: .leading)
 
-                    // String content in color
                     var stringText = AttributedString(stringValue)
-                    stringText.font = .system(size: 12 * scale, weight: .regular, design: .monospaced)
+                    stringText.font = .system(size: 12, weight: .regular, design: .monospaced)
                     stringText.foregroundColor = baseColor.opacity(valueOpacity)
-                    let stringPoint = CGPoint(x: valuePoint.x + 7 * scale, y: valuePoint.y)
+                    let stringPoint = CGPoint(x: valuePoint.x + 7, y: valuePoint.y)
                     context.draw(Text(stringText), at: stringPoint, anchor: .leading)
 
-                    // Closing quote in white
                     var closeQuote = AttributedString("\"")
-                    closeQuote.font = .system(size: 12 * scale, weight: .regular, design: .monospaced)
+                    closeQuote.font = .system(size: 12, weight: .regular, design: .monospaced)
                     closeQuote.foregroundColor = .white
-                    let quoteOffset = CGFloat(stringValue.count * 7 + 7) * scale
+                    let quoteOffset = CGFloat(stringValue.count * 7 + 7)
                     let closePoint = CGPoint(x: valuePoint.x + quoteOffset, y: valuePoint.y)
                     context.draw(Text(closeQuote), at: closePoint, anchor: .leading)
                 } else {
-                    // For non-strings or dark mode, render as before
                     var valueText = AttributedString(value)
-                    valueText.font = .system(size: 12 * scale, weight: .regular, design: .monospaced)
+                    valueText.font = .system(size: 12, weight: .regular, design: .monospaced)
                     valueText.foregroundColor = baseColor.opacity(valueOpacity)
-                    let valuePoint = CGPoint(x: point.x + 22 * scale, y: point.y + 14 * scale)
+                    let valuePoint = CGPoint(x: point.x + 22, y: point.y + 14)
                     context.draw(Text(valueText), at: valuePoint, anchor: .leading)
                 }
             }
