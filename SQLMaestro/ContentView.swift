@@ -9674,12 +9674,18 @@ struct ContentView: View {
                 SavedTicketSession.SavedAlternateField(id: field.id, name: field.name, value: field.value)
             }
 
+            // Only save templateId if the template is actually in the used templates list
+            // This prevents removed templates from being restored on load
+            let usedTemplateIds = Set(usedRecords.map { $0.templateId })
+            let selectedTemplateId = template.flatMap { usedTemplateIds.contains($0.id) ? "\($0.id)" : nil }
+            let selectedTemplateName = selectedTemplateId != nil ? template?.name : nil
+
             return SavedTicketSession(
                 version: 3,
                 sessionName: sessions.sessionNames[session] ?? "#\(session.rawValue)",
                 sessionLink: sessions.sessionLinks[session],
-                templateId: template.map { "\($0.id)" },
-                templateName: template?.name,
+                templateId: selectedTemplateId,
+                templateName: selectedTemplateName,
                 staticFields: sFields,
                 placeholders: placeholders,
                 dbTables: dbTablesSnapshot,

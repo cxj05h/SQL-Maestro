@@ -48,7 +48,14 @@ final class LineNumberRulerView: NSRulerView {
 
     @objc private func textDidChange(_ notification: Notification) {
         calculateLineIndices()
-        needsDisplay = true
+        // Force invalidation of the entire ruler view
+        setNeedsDisplay(bounds)
+        // Also schedule an async redraw to ensure layout is complete
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            self.calculateLineIndices()
+            self.setNeedsDisplay(self.bounds)
+        }
     }
 
     @objc private func frameDidChange(_ notification: Notification) {
@@ -78,6 +85,11 @@ final class LineNumberRulerView: NSRulerView {
         guard let textView = textView,
               let layoutManager = textView.layoutManager,
               let textContainer = textView.textContainer else { return }
+
+        // Ensure layout is complete for the entire text range before drawing
+        let textRange = NSRange(location: 0, length: (textView.string as NSString).length)
+        layoutManager.ensureLayout(for: textContainer)
+        layoutManager.ensureGlyphs(forCharacterRange: textRange)
 
         // Background
         NSColor(calibratedWhite: 0.12, alpha: 1.0).setFill()
