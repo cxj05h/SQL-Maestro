@@ -15087,7 +15087,16 @@ struct ContentView: View {
                             text: binding,
                             fontSize: fontSize * 1.35,
                             fileType: selectedFile.format,
-                            onFocusChanged: onFocusChange,
+                            onFocusChanged: { focused in
+                                // When the editor gains focus (user clicks in the text), clear the search
+                                // This matches the behavior of GNP and SNP
+                                if focused {
+                                    isSearchFieldFocused.wrappedValue = false
+                                    searchQuery = ""
+                                    searchStatus = .idle
+                                }
+                                onFocusChange(focused)
+                            },
                             controller: editorController,
                             onFindCommand: {
                                 guard selectedID != nil else { return }

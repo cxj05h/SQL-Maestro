@@ -30,20 +30,59 @@ extension Array where Element == BlockNode {
     // Replace `code` with `⟪STYLED⟪code⟫STYLED⟫` to keep cmark from splitting on angle brackets
     // Using special Unicode characters that are unlikely to appear in normal text
     // This uses a negative lookbehind/lookahead to avoid matching code blocks (triple backticks)
-    let pattern = "(?<!`)`(?!`)([^`]+)`(?!`)"
-    guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
+
+    // First, find all code block regions (```...```) to exclude them from processing
+    // Pattern matches: ``` followed by optional language, newline, any content (including backticks), then ```
+    let codeBlockPattern = "```[^\\n]*\\n.*?```"
+    guard let codeBlockRegex = try? NSRegularExpression(pattern: codeBlockPattern, options: [.dotMatchesLineSeparators]) else {
       return markdown
     }
-    let range = NSRange(markdown.startIndex..., in: markdown)
+
+    let nsMarkdown = markdown as NSString
+    let fullRange = NSRange(location: 0, length: nsMarkdown.length)
+    let codeBlockMatches = codeBlockRegex.matches(in: markdown, options: [], range: fullRange)
+
+    // Build result by processing segments between code blocks
+    var result = ""
+    var currentIndex = 0
+
+    for match in codeBlockMatches {
+      // Process text before this code block
+      if match.range.location > currentIndex {
+        let beforeRange = NSRange(location: currentIndex, length: match.range.location - currentIndex)
+        let beforeText = nsMarkdown.substring(with: beforeRange)
+        result += processInlineBackticks(beforeText)
+      }
+
+      // Add the code block unchanged
+      result += nsMarkdown.substring(with: match.range)
+      currentIndex = match.range.location + match.range.length
+    }
+
+    // Process any remaining text after the last code block
+    if currentIndex < nsMarkdown.length {
+      let remainingRange = NSRange(location: currentIndex, length: nsMarkdown.length - currentIndex)
+      let remainingText = nsMarkdown.substring(with: remainingRange)
+      result += processInlineBackticks(remainingText)
+    }
+
+    return result
+  }
+
+  private static func processInlineBackticks(_ text: String) -> String {
+    // Apply styled code markers only to inline backticks (not code blocks)
+    let pattern = "(?<!`)`(?!`)([^`]+)`(?!`)"
+    guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else {
+      return text
+    }
+    let range = NSRange(text.startIndex..., in: text)
     let replacement = "`" + StyledCodeMarker.start + "$1" + StyledCodeMarker.end + "`"
-    let result = regex.stringByReplacingMatches(
-      in: markdown,
+    return regex.stringByReplacingMatches(
+      in: text,
       options: [],
       range: range,
       withTemplate: replacement
     )
-
-    return result
   }
 
   func renderMarkdown() -> String {
