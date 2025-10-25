@@ -1410,6 +1410,11 @@ final class ScrollInterceptorView: NSView {
         guard let scrollView = parentScrollView ?? findParentScrollView() else { return event }
         guard pointerInside else { return event }
 
+        guard let hitView = window.contentView?.hitTest(event.locationInWindow) else { return event }
+        if !hitView.isDescendant(of: scrollView) {
+            return event
+        }
+
         // Only redirect primarily vertical scrolls so horizontal gestures remain intact
         let isVerticalScroll = abs(event.scrollingDeltaY) > abs(event.scrollingDeltaX)
         guard isVerticalScroll else { return event }
