@@ -1348,6 +1348,8 @@ private struct NonBubblingScrollView<Content: View>: NSViewRepresentable {
 
 /// Transparent overlay view that intercepts vertical scroll events and forwards them to the parent scroll view
 final class ScrollInterceptorView: NSView {
+    private static var logOnce = true
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         wantsLayer = true
@@ -1365,7 +1367,24 @@ final class ScrollInterceptorView: NSView {
         let isVerticalScroll = abs(event.scrollingDeltaY) > abs(event.scrollingDeltaX)
 
         if isVerticalScroll {
-            NSLog("🟢 ScrollInterceptor forwarding vertical scroll to parent")
+            // Log responder chain to understand the difference
+            if Self.logOnce {
+                Self.logOnce = false
+                NSLog("🔍 RESPONDER CHAIN from ScrollInterceptor:")
+                var currentResponder: NSResponder? = nextResponder
+                var depth = 0
+                while let responder = currentResponder, depth < 15 {
+                    let className = String(describing: type(of: responder))
+                    NSLog("🔍   [\(depth)] \(className)")
+                    if let scrollView = responder as? NonBubblingNSScrollView {
+                        NSLog("🔍   ✅ Found NonBubblingNSScrollView at depth \(depth)")
+                    }
+                    currentResponder = responder.nextResponder
+                    depth += 1
+                }
+                NSLog("🔍 Window: \(window?.title ?? "no window")")
+            }
+
             // Find the parent NonBubblingNSScrollView and forward to it
             var currentResponder: NSResponder? = nextResponder
             while let responder = currentResponder {
@@ -1379,14 +1398,26 @@ final class ScrollInterceptorView: NSView {
             nextResponder?.scrollWheel(with: event)
         } else {
             // Let horizontal scrolls pass through normally
-            NSLog("🟢 ScrollInterceptor passing horizontal scroll through")
             super.scrollWheel(with: event)
         }
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        // Allow click-through for all mouse events except scroll
-        return nil
+        // Return self to receive scroll events, but we'll handle clicks differently
+        return self
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        // Pass clicks through to the next responder
+        nextResponder?.mouseDown(with: event)
+    }
+
+    override func mouseUp(with event: NSEvent) {
+        nextResponder?.mouseUp(with: event)
+    }
+
+    override func mouseDragged(with event: NSEvent) {
+        nextResponder?.mouseDragged(with: event)
     }
 }
 
@@ -1452,13 +1483,7 @@ final class NonBubblingNSScrollView: NSScrollView {
     }
 
     override func scrollWheel(with event: NSEvent) {
-        let decision = scrollDecision(for: event)
-
-        // Detailed logging with current scroll position
-        let visibleRect = contentView.documentVisibleRect
-        NSLog("🔵 scrollWheel - deltaY: \(event.scrollingDeltaY), decision: \(decision), currentY: \(visibleRect.origin.y)")
-
-        switch decision {
+        switch scrollDecision(for: event) {
         case .passToParent:
             nextResponder?.scrollWheel(with: event)
         case .swallow:
@@ -1468,10 +1493,6 @@ final class NonBubblingNSScrollView: NSScrollView {
             nextResponder = nil
             super.scrollWheel(with: event)
             nextResponder = originalNextResponder
-
-            // Log new position after scroll
-            let newRect = contentView.documentVisibleRect
-            NSLog("🔵 After scroll - newY: \(newRect.origin.y), delta applied: \(newRect.origin.y - visibleRect.origin.y)")
         }
     }
 
@@ -1809,7 +1830,6 @@ struct ContentView: View {
     @State private var mysqlDb: String = ""
     @State private var companyLabel: String = ""
     @State private var draftDynamicValues: [TicketSession:[String:String]] = [:]
-    @State private var sessionDraftSnapshots: [TicketSession: [String: String]] = [:]
     @State private var sessionSelectedTemplate: [TicketSession: UUID] = [:]
     @State private var sessionSavedSnapshots: [TicketSession: SessionSnapshot] = [:]
     @State private var openRecentsKey: String? = nil
@@ -3851,35 +3871,20 @@ struct ContentView: View {
                 "sample": String(initialDraft.prefix(80)).replacingOccurrences(of: "\n", with: "⏎")
             ])
             let bucket = draftDynamicValues[cur] ?? [:]
-            var remainingDrafts: [String: String] = [:]
-            var removedDraftCount = 0
             for (ph, val) in bucket {
                 let trimmed = val.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty {
-                    sessions.setValue(trimmed, for: ph)
-                    LOG("Draft committed", ctx: ["session": "\(cur.rawValue)", "ph": ph, "value": trimmed])
-                }
-
-                let stored = sessions.sessionValues[cur]?[ph]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                if trimmed != stored {
-                    remainingDrafts[ph] = val
-                } else {
-                    removedDraftCount += 1
-                }
+                guard !trimmed.isEmpty else { continue }
+                sessions.setValue(trimmed, for: ph)
+                LOG("Draft committed", ctx: ["session": "\(cur.rawValue)", "ph": ph, "value": trimmed])
             }
 
             if !bucket.isEmpty {
-                draftDynamicValues[cur] = remainingDrafts
-                if removedDraftCount > 0 {
-                    LOG("Dynamic field drafts cleared", ctx: [
-                        "session": "\(cur.rawValue)",
-                        "removed": "\(removedDraftCount)",
-                        "remaining": "\(remainingDrafts.count)"
-                    ])
-                }
+                draftDynamicValues[cur] = [:]
+                LOG("Dynamic field drafts cleared", ctx: [
+                    "session": "\(cur.rawValue)",
+                    "removed": "\(bucket.count)"
+                ])
             }
-
-            sessionDraftSnapshots[cur] = normalizedStoredValues(for: cur)
 
             // Only trust the editor if it's showing the current session
             // This prevents empty drafts from being written during session switches
@@ -8721,6 +8726,7 @@ struct ContentView: View {
             var copy = self
             copy.images = []
             copy.savedFiles = []
+            copy.dbTables = []
             return copy
         }
     }
@@ -8789,21 +8795,11 @@ struct ContentView: View {
 
     private func updateSavedSnapshot(for session: TicketSession) {
         sessionSavedSnapshots[session] = captureSnapshot(for: session)
-        sessionDraftSnapshots[session] = normalizedStoredValues(for: session)
     }
 
     private func isSessionNotesDirty(session: TicketSession) -> Bool {
         (sessionNotesDrafts[session] ?? "") != (sessions.sessionNotes[session] ?? "")
     }
-
-        private func normalizedStoredValues(for session: TicketSession) -> [String: String] {
-            (sessions.sessionValues[session] ?? [:]).reduce(into: [String: String]()) { result, entry in
-                let trimmed = entry.value.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty {
-                    result[entry.key] = trimmed
-                }
-            }
-        }
 
         private func hasSessionFieldData(for session: TicketSession) -> Bool {
             let currentSnapshot = captureSnapshot(for: session)
@@ -8811,25 +8807,10 @@ struct ContentView: View {
             if let baseline = sessionSavedSnapshots[session] {
                 // Compare only user-editable fields (exclude images and savedFiles which are auto-saved)
                 // This prevents false positives when user just views these tabs without making changes
-                if currentSnapshot.withoutAutoSavedFields() != baseline.withoutAutoSavedFields() {
-                    return true
-                }
-            } else if currentSnapshot.hasAnyContent {
-                return true
+                return currentSnapshot.withoutAutoSavedFields() != baseline.withoutAutoSavedFields()
+            } else {
+                return currentSnapshot.hasAnyContent
             }
-
-            if let draftValues = draftDynamicValues[session],
-               !draftValues.isEmpty {
-                let stored = sessionDraftSnapshots[session] ?? normalizedStoredValues(for: session)
-                for (placeholder, value) in draftValues {
-                    let draft = value.trimmingCharacters(in: .whitespacesAndNewlines)
-                    if draft != (stored[placeholder] ?? "") {
-                        return true
-                    }
-                }
-            }
-
-            return false
         }
 
         private func saveSessionNotes(reason: String = "manual") {
@@ -9845,7 +9826,6 @@ struct ContentView: View {
                 sessions.setValue(value, for: placeholder)
             }
             draftDynamicValues[sessions.current] = [:]
-            sessionDraftSnapshots[sessions.current] = normalizedStoredValues(for: sessions.current)
 
             UsedTemplatesStore.shared.clearSession(sessions.current)
 
@@ -11016,7 +10996,6 @@ struct ContentView: View {
                 sessions.setValue(v, for: k)
             }
             draftDynamicValues[sessions.current] = [:]
-            sessionDraftSnapshots[sessions.current] = normalizedStoredValues(for: sessions.current)
 
             let matched = templates.templates.first(where: { "\($0.id)" == loaded.templateId ?? "" })
                 ?? templates.templates.first(where: { $0.name == loaded.templateName ?? "" })
@@ -11059,6 +11038,8 @@ struct ContentView: View {
                     _ = templateLinksStore.saveSidecar(for: template)
                 }
             }
+
+            commitDraftsForCurrentSession()
 
             let flags = currentUnsavedFlags()
             let snapshot = captureSnapshot(for: sessions.current)
@@ -11351,7 +11332,6 @@ struct ContentView: View {
             mysqlDb = ""
             companyLabel = ""
             draftDynamicValues[sessions.current] = [:]
-            sessionDraftSnapshots.removeValue(forKey: sessions.current)
             sessionStaticFields[sessions.current] = ("", "", "", "")
             savedFileAutosave.cancelAll(for: sessions.current)
             dbTablesAutosave.cancelAll(for: sessions.current)
