@@ -286,6 +286,7 @@ struct MarkdownCodeSyntaxHighlighter: CodeSyntaxHighlighter {
 
         // Patterns
         let stringPattern = try! NSRegularExpression(pattern: "'(?:\\\\'|[^'])*'")
+        let backtickPattern = try! NSRegularExpression(pattern: "`[^`]+`")
         let numberPattern = try! NSRegularExpression(pattern: "\\b-?(?:0|[1-9]\\d*)(?:\\.\\d+)?(?:[eE][+-]?\\d+)?\\b")
         let commentPattern = try! NSRegularExpression(pattern: "--[^\\n]*|/\\*[\\s\\S]*?\\*/")
         let boolPattern = try! NSRegularExpression(pattern: "\\b(?:TRUE|FALSE|NULL)\\b", options: .caseInsensitive)
@@ -308,6 +309,13 @@ struct MarkdownCodeSyntaxHighlighter: CodeSyntaxHighlighter {
         stringPattern.enumerateMatches(in: code, range: codeRange) { match, _, _ in
             if let match = match {
                 matches.append((match.range, "string"))
+            }
+        }
+
+        // Backtick identifiers (table/column names)
+        backtickPattern.enumerateMatches(in: code, range: codeRange) { match, _, _ in
+            if let match = match {
+                matches.append((match.range, "backtick"))
             }
         }
 
@@ -383,6 +391,8 @@ struct MarkdownCodeSyntaxHighlighter: CodeSyntaxHighlighter {
             case "bool":
                 result = result + Text(matchedText).foregroundColor(Color(hex: "#EF44C0")) // Pink
             case "function":
+                result = result + Text(matchedText).foregroundColor(Color(hex: "#EF44C0")) // Pink
+            case "backtick":
                 result = result + Text(matchedText).foregroundColor(Color(hex: "#EF44C0")) // Pink
             case "comment":
                 result = result + Text(matchedText).foregroundColor(Color(hex: "#808080")) // Gray

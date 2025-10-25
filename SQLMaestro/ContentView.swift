@@ -1155,6 +1155,7 @@ struct MarkdownPreviewView: View {
             RoundedRectangle(cornerRadius: 4, style: .continuous)
                 .stroke(borderColor, lineWidth: 1)
         )
+        .overlay(ScrollInterceptorOverlay())
         .markdownMargin(top: 0, bottom: 16)
     }
 
@@ -1345,6 +1346,61 @@ private struct NonBubblingScrollView<Content: View>: NSViewRepresentable {
     }
 }
 
+/// Transparent overlay view that intercepts vertical scroll events and forwards them to the parent scroll view
+final class ScrollInterceptorView: NSView {
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        wantsLayer = true
+        layer?.backgroundColor = NSColor.clear.cgColor
+    }
+
+    override func scrollWheel(with event: NSEvent) {
+        // Only intercept primarily vertical scrolls
+        let isVerticalScroll = abs(event.scrollingDeltaY) > abs(event.scrollingDeltaX)
+
+        if isVerticalScroll {
+            NSLog("🟢 ScrollInterceptor forwarding vertical scroll to parent")
+            // Find the parent NonBubblingNSScrollView and forward to it
+            var currentResponder: NSResponder? = nextResponder
+            while let responder = currentResponder {
+                if let scrollView = responder as? NonBubblingNSScrollView {
+                    scrollView.scrollWheel(with: event)
+                    return
+                }
+                currentResponder = responder.nextResponder
+            }
+            // If we didn't find it, pass to next responder
+            nextResponder?.scrollWheel(with: event)
+        } else {
+            // Let horizontal scrolls pass through normally
+            NSLog("🟢 ScrollInterceptor passing horizontal scroll through")
+            super.scrollWheel(with: event)
+        }
+    }
+
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        // Allow click-through for all mouse events except scroll
+        return nil
+    }
+}
+
+/// SwiftUI wrapper for the scroll interceptor overlay
+private struct ScrollInterceptorOverlay: NSViewRepresentable {
+    func makeNSView(context: Context) -> ScrollInterceptorView {
+        return ScrollInterceptorView()
+    }
+
+    func updateNSView(_ nsView: ScrollInterceptorView, context: Context) {
+        // No updates needed
+    }
+}
+
 final class NonBubblingNSScrollView: NSScrollView {
     enum ScrollDecision {
         case passToParent
@@ -1396,7 +1452,13 @@ final class NonBubblingNSScrollView: NSScrollView {
     }
 
     override func scrollWheel(with event: NSEvent) {
-        switch scrollDecision(for: event) {
+        let decision = scrollDecision(for: event)
+
+        // Detailed logging with current scroll position
+        let visibleRect = contentView.documentVisibleRect
+        NSLog("🔵 scrollWheel - deltaY: \(event.scrollingDeltaY), decision: \(decision), currentY: \(visibleRect.origin.y)")
+
+        switch decision {
         case .passToParent:
             nextResponder?.scrollWheel(with: event)
         case .swallow:
@@ -1406,6 +1468,10 @@ final class NonBubblingNSScrollView: NSScrollView {
             nextResponder = nil
             super.scrollWheel(with: event)
             nextResponder = originalNextResponder
+
+            // Log new position after scroll
+            let newRect = contentView.documentVisibleRect
+            NSLog("🔵 After scroll - newY: \(newRect.origin.y), delta applied: \(newRect.origin.y - visibleRect.origin.y)")
         }
     }
 
@@ -1743,6 +1809,7 @@ struct ContentView: View {
     @State private var mysqlDb: String = ""
     @State private var companyLabel: String = ""
     @State private var draftDynamicValues: [TicketSession:[String:String]] = [:]
+    @State private var sessionDraftSnapshots: [TicketSession: [String: String]] = [:]
     @State private var sessionSelectedTemplate: [TicketSession: UUID] = [:]
     @State private var sessionSavedSnapshots: [TicketSession: SessionSnapshot] = [:]
     @State private var openRecentsKey: String? = nil
@@ -3811,6 +3878,8 @@ struct ContentView: View {
                     ])
                 }
             }
+
+            sessionDraftSnapshots[cur] = normalizedStoredValues(for: cur)
 
             // Only trust the editor if it's showing the current session
             // This prevents empty drafts from being written during session switches
@@ -8720,11 +8789,21 @@ struct ContentView: View {
 
     private func updateSavedSnapshot(for session: TicketSession) {
         sessionSavedSnapshots[session] = captureSnapshot(for: session)
+        sessionDraftSnapshots[session] = normalizedStoredValues(for: session)
     }
 
     private func isSessionNotesDirty(session: TicketSession) -> Bool {
         (sessionNotesDrafts[session] ?? "") != (sessions.sessionNotes[session] ?? "")
     }
+
+        private func normalizedStoredValues(for session: TicketSession) -> [String: String] {
+            (sessions.sessionValues[session] ?? [:]).reduce(into: [String: String]()) { result, entry in
+                let trimmed = entry.value.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    result[entry.key] = trimmed
+                }
+            }
+        }
 
         private func hasSessionFieldData(for session: TicketSession) -> Bool {
             let currentSnapshot = captureSnapshot(for: session)
@@ -8739,11 +8818,12 @@ struct ContentView: View {
                 return true
             }
 
-            if let draftValues = draftDynamicValues[session] {
+            if let draftValues = draftDynamicValues[session],
+               !draftValues.isEmpty {
+                let stored = sessionDraftSnapshots[session] ?? normalizedStoredValues(for: session)
                 for (placeholder, value) in draftValues {
                     let draft = value.trimmingCharacters(in: .whitespacesAndNewlines)
-                    let stored = sessions.sessionValues[session]?[placeholder]?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                    if draft != stored {
+                    if draft != (stored[placeholder] ?? "") {
                         return true
                     }
                 }
@@ -9765,6 +9845,7 @@ struct ContentView: View {
                 sessions.setValue(value, for: placeholder)
             }
             draftDynamicValues[sessions.current] = [:]
+            sessionDraftSnapshots[sessions.current] = normalizedStoredValues(for: sessions.current)
 
             UsedTemplatesStore.shared.clearSession(sessions.current)
 
@@ -10935,6 +11016,7 @@ struct ContentView: View {
                 sessions.setValue(v, for: k)
             }
             draftDynamicValues[sessions.current] = [:]
+            sessionDraftSnapshots[sessions.current] = normalizedStoredValues(for: sessions.current)
 
             let matched = templates.templates.first(where: { "\($0.id)" == loaded.templateId ?? "" })
                 ?? templates.templates.first(where: { $0.name == loaded.templateName ?? "" })
@@ -11109,6 +11191,7 @@ struct ContentView: View {
         }
 
         private func exitWorkflowPreflight() {
+            commitDraftsForCurrentSession()
 #if canImport(AppKit)
             // Auto-save links and tables for ALL sessions before checking for unsaved data
             // These should never block exit - only actual session data should prompt the user
@@ -11268,6 +11351,7 @@ struct ContentView: View {
             mysqlDb = ""
             companyLabel = ""
             draftDynamicValues[sessions.current] = [:]
+            sessionDraftSnapshots.removeValue(forKey: sessions.current)
             sessionStaticFields[sessions.current] = ("", "", "", "")
             savedFileAutosave.cancelAll(for: sessions.current)
             dbTablesAutosave.cancelAll(for: sessions.current)
