@@ -1051,6 +1051,7 @@ struct MarkdownPreviewView: View {
     private var previewMarkdown: some View {
         Markdown(processedText)
             .markdownTheme(previewTheme)
+            .markdownCodeSyntaxHighlighter(MarkdownCodeSyntaxHighlighter())
             .markdownSoftBreakMode(.lineBreak)
             .markdownMargin(top: 0, bottom: 0)
             .padding(.vertical, 2)
@@ -1129,6 +1130,11 @@ struct MarkdownPreviewView: View {
 
     @ViewBuilder
     private func codeBlock(_ configuration: CodeBlockConfiguration, fill: Color) -> some View {
+        // Use dark background if language is specified, light background otherwise
+        let hasLanguage = configuration.language != nil && !configuration.language!.isEmpty
+        let backgroundColor = hasLanguage ? Color(hex: "#2A2A35") : fill
+        let borderColor = hasLanguage ? Theme.purple.opacity(0.25) : fill.opacity(0.35)
+
         ScrollView(.horizontal) {
             configuration.label
                 .fixedSize(horizontal: false, vertical: true)
@@ -1136,15 +1142,18 @@ struct MarkdownPreviewView: View {
                 .markdownTextStyle {
                     FontFamilyVariant(.monospaced)
                     FontSize(fontSize)
-                    ForegroundColor(.black)
+                    // Only apply black foreground if no language specified
+                    if !hasLanguage {
+                        ForegroundColor(.black)
+                    }
                 }
                 .padding(16)
         }
-        .background(fill)
+        .background(backgroundColor)
         .clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 4, style: .continuous)
-                .stroke(fill.opacity(0.35), lineWidth: 1)
+                .stroke(borderColor, lineWidth: 1)
         )
         .markdownMargin(top: 0, bottom: 16)
     }
