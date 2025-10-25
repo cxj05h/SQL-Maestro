@@ -1346,9 +1346,10 @@ private struct NonBubblingScrollView<Content: View>: NSViewRepresentable {
     }
 }
 
-/// Transparent overlay view that intercepts vertical scroll events and forwards them to the parent scroll view
+/// Transparent overlay that installs a window-level monitor to forward vertical scroll events without blocking other interactions
 final class ScrollInterceptorView: NSView {
-    private static var logOnce = true
+    private weak var parentScrollView: NonBubblingNSScrollView?
+    private var eventMonitor: Any?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -1362,62 +1363,91 @@ final class ScrollInterceptorView: NSView {
         layer?.backgroundColor = NSColor.clear.cgColor
     }
 
-    override func scrollWheel(with event: NSEvent) {
-        // Only intercept primarily vertical scrolls
-        let isVerticalScroll = abs(event.scrollingDeltaY) > abs(event.scrollingDeltaX)
-
-        if isVerticalScroll {
-            // Log responder chain to understand the difference
-            if Self.logOnce {
-                Self.logOnce = false
-                NSLog("🔍 RESPONDER CHAIN from ScrollInterceptor:")
-                var currentResponder: NSResponder? = nextResponder
-                var depth = 0
-                while let responder = currentResponder, depth < 15 {
-                    let className = String(describing: type(of: responder))
-                    NSLog("🔍   [\(depth)] \(className)")
-                    if let scrollView = responder as? NonBubblingNSScrollView {
-                        NSLog("🔍   ✅ Found NonBubblingNSScrollView at depth \(depth)")
-                    }
-                    currentResponder = responder.nextResponder
-                    depth += 1
-                }
-                NSLog("🔍 Window: \(window?.title ?? "no window")")
-            }
-
-            // Find the parent NonBubblingNSScrollView and forward to it
-            var currentResponder: NSResponder? = nextResponder
-            while let responder = currentResponder {
-                if let scrollView = responder as? NonBubblingNSScrollView {
-                    scrollView.scrollWheel(with: event)
-                    return
-                }
-                currentResponder = responder.nextResponder
-            }
-            // If we didn't find it, pass to next responder
-            nextResponder?.scrollWheel(with: event)
-        } else {
-            // Let horizontal scrolls pass through normally
-            super.scrollWheel(with: event)
-        }
+    deinit {
+        removeEventMonitor()
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
-        // Return self to receive scroll events, but we'll handle clicks differently
-        return self
+        // Allow the underlying SwiftUI hierarchy to receive pointer events directly
+        return nil
     }
 
-    override func mouseDown(with event: NSEvent) {
-        // Pass clicks through to the next responder
-        nextResponder?.mouseDown(with: event)
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        if window != nil {
+            updateParentScrollView()
+            installEventMonitor()
+        } else {
+            removeEventMonitor()
+        }
     }
 
-    override func mouseUp(with event: NSEvent) {
-        nextResponder?.mouseUp(with: event)
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        updateParentScrollView()
     }
 
-    override func mouseDragged(with event: NSEvent) {
-        nextResponder?.mouseDragged(with: event)
+    private func installEventMonitor() {
+        guard eventMonitor == nil else { return }
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel]) { [weak self] event in
+            guard let self = self else { return event }
+            return self.handleScrollEvent(event)
+        }
+    }
+
+    private func removeEventMonitor() {
+        if let monitor = eventMonitor {
+            NSEvent.removeMonitor(monitor)
+            eventMonitor = nil
+        }
+    }
+
+    private func handleScrollEvent(_ event: NSEvent) -> NSEvent? {
+        guard let window = window, event.window === window else { return event }
+        guard let scrollView = parentScrollView ?? findParentScrollView() else { return event }
+
+        // Only intercept events occurring within the overlay's bounds
+        let locationInWindow = event.locationInWindow
+        let locationInView = convert(locationInWindow, from: nil)
+        guard bounds.contains(locationInView) else { return event }
+
+        // Only redirect primarily vertical scrolls so horizontal gestures remain intact
+        let isVerticalScroll = abs(event.scrollingDeltaY) > abs(event.scrollingDeltaX)
+        guard isVerticalScroll else { return event }
+
+        scrollView.scrollWheel(with: event)
+        return nil
+    }
+
+    private func findParentScrollView() -> NonBubblingNSScrollView? {
+        if let cached = parentScrollView {
+            return cached
+        }
+
+        var responder: NSResponder? = nextResponder
+        while let current = responder {
+            if let scrollView = current as? NonBubblingNSScrollView {
+                parentScrollView = scrollView
+                return scrollView
+            }
+            responder = current.nextResponder
+        }
+
+        var ancestor = superview
+        while let view = ancestor {
+            if let scrollView = view as? NonBubblingNSScrollView {
+                parentScrollView = scrollView
+                return scrollView
+            }
+            ancestor = view.superview
+        }
+
+        return nil
+    }
+
+    private func updateParentScrollView() {
+        parentScrollView = nil
+        parentScrollView = findParentScrollView()
     }
 }
 
@@ -8797,8 +8827,14 @@ struct ContentView: View {
         sessionSavedSnapshots[session] = captureSnapshot(for: session)
     }
 
+    private func normalizedNotes(_ value: String) -> String {
+        value.replacingOccurrences(of: "\r\n", with: "\n")
+    }
+
     private func isSessionNotesDirty(session: TicketSession) -> Bool {
-        (sessionNotesDrafts[session] ?? "") != (sessions.sessionNotes[session] ?? "")
+        let draft = normalizedNotes(sessionNotesDrafts[session] ?? "")
+        let saved = normalizedNotes(sessions.sessionNotes[session] ?? "")
+        return draft != saved
     }
 
         private func hasSessionFieldData(for session: TicketSession) -> Bool {
@@ -8819,8 +8855,8 @@ struct ContentView: View {
 
         private func saveSessionNotes(for session: TicketSession, reason: String) {
             sessionNotesAutosave.cancel(for: session)
-            let draft = sessionNotesDrafts[session] ?? ""
-            let previous = sessions.sessionNotes[session] ?? ""
+            let draft = normalizedNotes(sessionNotesDrafts[session] ?? "")
+            let previous = normalizedNotes(sessions.sessionNotes[session] ?? "")
             if previous == draft {
                 LOG("Session notes save skipped", ctx: [
                     "session": "\(session.rawValue)",
