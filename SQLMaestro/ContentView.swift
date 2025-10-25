@@ -1350,6 +1350,8 @@ private struct NonBubblingScrollView<Content: View>: NSViewRepresentable {
 final class ScrollInterceptorView: NSView {
     private weak var parentScrollView: NonBubblingNSScrollView?
     private var eventMonitor: Any?
+    private var trackingArea: NSTrackingArea?
+    private var pointerInside = false
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -1377,6 +1379,7 @@ final class ScrollInterceptorView: NSView {
         if window != nil {
             updateParentScrollView()
             installEventMonitor()
+            updatePointerLocation()
         } else {
             removeEventMonitor()
         }
@@ -1405,18 +1408,22 @@ final class ScrollInterceptorView: NSView {
     private func handleScrollEvent(_ event: NSEvent) -> NSEvent? {
         guard let window = window, event.window === window else { return event }
         guard let scrollView = parentScrollView ?? findParentScrollView() else { return event }
-
-        // Only intercept events occurring within the overlay's bounds
-        let locationInWindow = event.locationInWindow
-        let locationInView = convert(locationInWindow, from: nil)
-        guard bounds.contains(locationInView) else { return event }
+        guard pointerInside else { return event }
 
         // Only redirect primarily vertical scrolls so horizontal gestures remain intact
         let isVerticalScroll = abs(event.scrollingDeltaY) > abs(event.scrollingDeltaX)
         guard isVerticalScroll else { return event }
 
+        let decision = scrollView.scrollDecision(for: event)
         scrollView.scrollWheel(with: event)
-        return nil
+
+        // Let event propagate further when the scroll view cannot consume it
+        switch decision {
+        case .handle, .passToParent:
+            return nil
+        case .swallow:
+            return event
+        }
     }
 
     private func findParentScrollView() -> NonBubblingNSScrollView? {
@@ -1448,6 +1455,42 @@ final class ScrollInterceptorView: NSView {
     private func updateParentScrollView() {
         parentScrollView = nil
         parentScrollView = findParentScrollView()
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let trackingArea {
+            removeTrackingArea(trackingArea)
+        }
+        let newArea = NSTrackingArea(rect: bounds,
+                                     options: [.mouseEnteredAndExited, .mouseMoved, .activeInActiveApp, .inVisibleRect],
+                                     owner: self,
+                                     userInfo: nil)
+        addTrackingArea(newArea)
+        trackingArea = newArea
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        super.mouseEntered(with: event)
+        pointerInside = true
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        pointerInside = bounds.contains(convert(event.locationInWindow, from: nil))
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        pointerInside = false
+    }
+
+    private func updatePointerLocation() {
+        guard let window else {
+            pointerInside = false
+            return
+        }
+        pointerInside = bounds.contains(convert(window.mouseLocationOutsideOfEventStream, from: nil))
     }
 }
 
@@ -8791,6 +8834,11 @@ struct ContentView: View {
             }
         } ?? [:]
 
+        let staticPlaceholderKeys: [String] = ["Org-ID", "Acct-ID", "mysqlDb"]
+        let filteredStored = stored.filter { key, _ in
+            !staticPlaceholderKeys.contains(where: { $0.caseInsensitiveCompare(key) == .orderedSame })
+        }
+
         let dbTables: [String]
         if session == sessions.current, let template = selectedTemplate {
             dbTables = dbTablesStore.workingSet(for: session, template: template)
@@ -8816,7 +8864,7 @@ struct ContentView: View {
             sessionName: normalizedName,
             sessionLink: link,
             alternateFields: alternates,
-            storedValues: stored,
+            storedValues: filteredStored,
             dbTables: dbTables,
             images: images,
             savedFiles: savedFiles
@@ -8843,9 +8891,63 @@ struct ContentView: View {
             if let baseline = sessionSavedSnapshots[session] {
                 // Compare only user-editable fields (exclude images and savedFiles which are auto-saved)
                 // This prevents false positives when user just views these tabs without making changes
-                return currentSnapshot.withoutAutoSavedFields() != baseline.withoutAutoSavedFields()
+                let current = currentSnapshot.withoutAutoSavedFields()
+                let saved = baseline.withoutAutoSavedFields()
+                guard current != saved else { return false }
+
+                if current.staticFields != saved.staticFields {
+                    LOG("Session static fields differ", ctx: [
+                        "session": "\(session.rawValue)",
+                        "current": "\(current.staticFields)",
+                        "saved": "\(saved.staticFields)"
+                    ])
+                }
+                if current.sessionName != saved.sessionName || current.sessionLink != saved.sessionLink {
+                    LOG("Session name/link differ", ctx: [
+                        "session": "\(session.rawValue)",
+                        "currentName": current.sessionName,
+                        "savedName": saved.sessionName,
+                        "currentLink": current.sessionLink,
+                        "savedLink": saved.sessionLink
+                    ])
+                }
+                if current.alternateFields != saved.alternateFields {
+                    LOG("Alternate fields differ", ctx: [
+                        "session": "\(session.rawValue)",
+                        "currentCount": "\(current.alternateFields.count)",
+                        "savedCount": "\(saved.alternateFields.count)"
+                    ])
+                }
+                if current.storedValues != saved.storedValues {
+                    LOG("Stored values differ", ctx: [
+                        "session": "\(session.rawValue)",
+                        "current": "\(current.storedValues)",
+                        "saved": "\(saved.storedValues)"
+                    ])
+                }
+                if current.dbTables != saved.dbTables {
+                    LOG("DB tables differ", ctx: [
+                        "session": "\(session.rawValue)",
+                        "current": "\(current.dbTables)",
+                        "saved": "\(saved.dbTables)"
+                    ])
+                }
+                if current.images != saved.images {
+                    LOG("Session images differ", ctx: [
+                        "session": "\(session.rawValue)",
+                        "current": "\(current.images)",
+                        "saved": "\(saved.images)"
+                    ])
+                }
+                return true
             } else {
-                return currentSnapshot.hasAnyContent
+                if currentSnapshot.hasAnyContent {
+                    LOG("Session snapshot has content without baseline", ctx: [
+                        "session": "\(session.rawValue)"
+                    ])
+                    return true
+                }
+                return false
             }
         }
 
