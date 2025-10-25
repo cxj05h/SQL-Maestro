@@ -81,10 +81,13 @@ class GhostOverlayDiffEngine {
         // Perform smart key-based alignment
         let alignedDiff = performSmartAlignment(original: originalLines, ghost: ghostLines)
 
-        // Create collapsed sections for matching blocks
-        let collapsedSections = createCollapsedSections(from: alignedDiff)
+        // Filter out false positives (same content, different line positions)
+        let filteredDiff = filterFalsePositiveDifferences(from: alignedDiff)
 
-        return DiffResult(diffLines: alignedDiff, collapsedSections: collapsedSections)
+        // Create collapsed sections for matching blocks
+        let collapsedSections = createCollapsedSections(from: filteredDiff)
+
+        return DiffResult(diffLines: filteredDiff, collapsedSections: collapsedSections)
     }
 
     // MARK: - Smart Alignment Algorithm
@@ -205,6 +208,60 @@ class GhostOverlayDiffEngine {
                         ghostIndex += 1
                     }
                 }
+            }
+        }
+
+        return result
+    }
+
+    // MARK: - False Positive Filtering
+
+    /// Filters out false positive differences where content is identical but appears on different lines
+    private static func filterFalsePositiveDifferences(from diffLines: [DiffLine]) -> [DiffLine] {
+        var result: [DiffLine] = []
+        var onlyInOriginalLines: [(index: Int, line: DiffLine)] = []
+        var onlyInGhostLines: [(index: Int, line: DiffLine)] = []
+
+        // Collect all "only in" lines
+        for (index, line) in diffLines.enumerated() {
+            switch line.type {
+            case .onlyInOriginal:
+                onlyInOriginalLines.append((index, line))
+            case .onlyInGhost:
+                onlyInGhostLines.append((index, line))
+            default:
+                break
+            }
+        }
+
+        // Track indices to skip (false positives that matched)
+        var indicesToSkip: Set<Int> = []
+
+        // Find matching content between original and ghost "only in" lines
+        for origPair in onlyInOriginalLines {
+            guard !indicesToSkip.contains(origPair.index) else { continue }
+
+            let origContent = origPair.line.originalContent?.trimmingCharacters(in: .whitespaces) ?? ""
+
+            // Look for matching content in ghost lines
+            for ghostPair in onlyInGhostLines {
+                guard !indicesToSkip.contains(ghostPair.index) else { continue }
+
+                let ghostContent = ghostPair.line.ghostContent?.trimmingCharacters(in: .whitespaces) ?? ""
+
+                // If content matches exactly, mark both as false positives
+                if origContent == ghostContent && !origContent.isEmpty {
+                    indicesToSkip.insert(origPair.index)
+                    indicesToSkip.insert(ghostPair.index)
+                    break // Found a match, move to next original line
+                }
+            }
+        }
+
+        // Build result array, excluding false positive matches
+        for (index, line) in diffLines.enumerated() {
+            if !indicesToSkip.contains(index) {
+                result.append(line)
             }
         }
 

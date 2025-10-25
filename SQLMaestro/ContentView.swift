@@ -1794,6 +1794,7 @@ struct ContentView: View {
     @State private var hoverRecentKey: String? = nil
     @State private var previewingSessionImage: SessionImage? = nil
     @State private var previewingGuideImageContext: GuideImagePreviewContext? = nil
+    @State private var popoutToRestoreAfterPreview: PopoutPaneContext? = nil
     @State private var activeBottomPane: BottomPaneContent? = nil
     @State private var isOutputVisible: Bool = false
     @State private var guideNotesDraft: String = ""
@@ -2157,10 +2158,10 @@ struct ContentView: View {
         .sheet(item: $ghostOverlayContext) { context in
             ghostOverlaySheet(context)
         }
-        .sheet(item: $previewingSessionImage) { sessionImage in
+        .sheet(item: $previewingSessionImage, onDismiss: restorePopoutIfNeeded) { sessionImage in
             SessionImagePreviewSheet(sessionImage: sessionImage)
         }
-        .sheet(item: $previewingGuideImageContext) { context in
+        .sheet(item: $previewingGuideImageContext, onDismiss: restorePopoutIfNeeded) { context in
             TemplateGuideImagePreviewSheet(template: context.template, guideImage: context.image)
         }
         .sheet(item: $activePopoutPane) { pane in
@@ -2355,18 +2356,13 @@ struct ContentView: View {
                 },
                 onImagePreview: { image in
                     // Close popout before showing preview
+                    popoutToRestoreAfterPreview = .sessionTemplate(session)
                     activePopoutPane = nil
                     // Show image preview
                     if let sessionImg = image as? SessionImage {
                         previewingSessionImage = sessionImg
                     } else if let context = image as? GuideImagePreviewContext {
                         previewingGuideImageContext = context
-                    }
-                },
-                onImagePreviewClose: {
-                    // Reopen the popout after preview closes
-                    if case .sessionTemplate = pane {
-                        activePopoutPane = .sessionTemplate(session)
                     }
                 },
                 onSessionImageDelete: { image in
@@ -2521,11 +2517,8 @@ struct ContentView: View {
             onTogglePreview: togglePreviewShortcut,
             onImagePreview: {
                 // Close popout before showing preview
+                popoutToRestoreAfterPreview = pane
                 activePopoutPane = nil
-            },
-            onImagePreviewClose: {
-                // Reopen the popout after preview closes
-                activePopoutPane = pane
             }
         ))
     }
@@ -3646,6 +3639,12 @@ struct ContentView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.4) {
                 withAnimation { toastPreviewBehind = false }
             }
+        }
+
+        private func restorePopoutIfNeeded() {
+            guard let pending = popoutToRestoreAfterPreview else { return }
+            popoutToRestoreAfterPreview = nil
+            activePopoutPane = pending
         }
 
         private func handleGuideEditorImageAttachment(_ info: MarkdownEditor.ImageDropInfo) -> MarkdownEditor.ImageInsertion? {
@@ -8397,6 +8396,14 @@ struct ContentView: View {
                 .buttonStyle(.bordered)
                 .tint(Theme.clearSessionTint)
                 .font(.system(size: fontSize))
+
+                Button(action: { copyCurrentSessionNote() }) {
+                    Text("Copy Session")
+                        .foregroundColor(Theme.purple)
+                }
+                .buttonStyle(.bordered)
+                .tint(Theme.purple.opacity(0.8))
+                .font(.system(size: fontSize))
             }
         }
 
@@ -11162,6 +11169,13 @@ struct ContentView: View {
             try? fm.createDirectory(at: AppPaths.sessions, withIntermediateDirectories: true)
             NSWorkspace.shared.open(AppPaths.sessions)
             LOG("Open sessions folder")
+        }
+
+        private func copyCurrentSessionNote() {
+            let currentSessionNote = sessions.sessionNotes[sessions.current] ?? ""
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setString(currentSessionNote, forType: .string)
         }
 
         private func attemptClearCurrentSession() {
@@ -15835,7 +15849,6 @@ struct ContentView: View {
         let onClose: () -> Void
         let onTogglePreview: () -> Void
         let onImagePreview: () -> Void
-        let onImagePreviewClose: () -> Void
 
         @FocusState private var popoutSavedFileSearchFocused: Bool
         @FocusState private var popoutGuideNotesSearchFocused: Bool
@@ -15871,7 +15884,6 @@ struct ContentView: View {
             .onDisappear {
                 if shouldReopenAfterPreview {
                     shouldReopenAfterPreview = false
-                    onImagePreviewClose()
                 } else {
                     onClose()
                 }
@@ -16460,7 +16472,6 @@ struct ContentView: View {
         var selectedTemplate: TemplateItem?
         let onClose: () -> Void
         let onImagePreview: (Any) -> Void
-        let onImagePreviewClose: () -> Void
         let onSessionImageDelete: (SessionImage) -> Void
         let onSessionImageRename: (SessionImage) -> Void
         let onSessionImagePaste: () -> Void
@@ -16490,7 +16501,6 @@ struct ContentView: View {
             .onDisappear {
                 if shouldReopenAfterPreview {
                     shouldReopenAfterPreview = false
-                    onImagePreviewClose()
                 } else {
                     onClose()
                 }
